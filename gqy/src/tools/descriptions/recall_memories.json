@@ -1,31 +1,31 @@
 {
-  "name": "recall_memories",
-  "display_name": "召回记忆",
-  "description": "搜索已记住的事实",
-  "parameters": {
-    "type": "object",
-    "properties": {
-      "query": {
-        "type": "string",
-        "description": "搜索关键词或问题。"
-      },
-      "max_results": {
-        "type": "integer",
-        "description": "可选结果数量限制。"
-      },
-      "include_forgotten": {
-        "type": "boolean",
-        "description": "是否包含已遗忘记忆。"
-      }
-    },
-    "required": [
-      "query"
-    ]
+ "name": "recall_memories",
+ "display_name": "召回记忆",
+ "description": "搜索已记住的事实。query 必须使用与记忆库相同的语言（中文记忆就用中文原词，不要翻译成英文，否则匹配不上）；拿不准时直接用用户原话里的关键词。",
+ "parameters": {
+  "type": "object",
+  "properties": {
+   "query": {
+    "type": "string",
+    "description": "搜索关键词或问题（用记忆库同语言，中文记忆用中文原词，不要翻译）"
+   },
+   "max_results": {
+    "type": "integer",
+    "description": "可选结果数量限制。"
+   },
+   "include_forgotten": {
+    "type": "boolean",
+    "description": "是否包含已遗忘记忆。"
+   }
   },
-  "permission": "readonly",
-  "always_loaded": false,
-  "load_policy": "summary",
-  "groups": [
-    "memory"
+  "required": [
+   "query"
   ]
+ },
+ "permission": "readonly",
+ "always_loaded": false,
+ "load_policy": "summary",
+ "groups": [
+  "memory"
+ ]
 }

@@ -4621,74 +4621,42 @@ textarea.config-input {
 
 /* ── 折叠侧栏（llama.cpp 式图标条，仅桌面，默认展开）──────────── */
 @media (min-width: 981px) {
-  body[data-sidebar-collapsed] .sidebar {
+  body[data-sidebar-collapsed="1"] .sidebar {
     width: 48px;
     transition: width 0.2s ease-out;
   }
-  body[data-sidebar-collapsed] .sidebar .brand-identity > div,
-  body[data-sidebar-collapsed] .sidebar .new-chat-button span:not(.icon-slot),
-  body[data-sidebar-collapsed] .sidebar .settings-label,
-  body[data-sidebar-collapsed] .sidebar .session-item,
-  body[data-sidebar-collapsed] .sidebar .sidebar-close,
-  body[data-sidebar-collapsed] .sidebar .session-time {
+  body[data-sidebar-collapsed="1"] .sidebar .brand-identity > div,
+  body[data-sidebar-collapsed="1"] .sidebar .new-chat-button span:not(.icon-slot),
+  body[data-sidebar-collapsed="1"] .sidebar .settings-label,
+  body[data-sidebar-collapsed="1"] .sidebar .session-item,
+  body[data-sidebar-collapsed="1"] .sidebar .sidebar-close,
+  body[data-sidebar-collapsed="1"] .sidebar .session-time {
     display: none;
   }
-  body[data-sidebar-collapsed] .sidebar .brand-row {
+  body[data-sidebar-collapsed="1"] .sidebar .brand-row {
     justify-content: center;
     padding: 10px 0;
   }
-  body[data-sidebar-collapsed] .sidebar .new-chat-button {
+  body[data-sidebar-collapsed="1"] .sidebar .new-chat-button {
     justify-content: center;
     padding: 8px 0;
     margin: 0 6px;
   }
-  body[data-sidebar-collapsed] .sidebar .new-chat-button .icon-slot {
+  body[data-sidebar-collapsed="1"] .sidebar .new-chat-button .icon-slot {
     margin: 0;
   }
-  body[data-sidebar-collapsed] .sidebar .sidebar-actions {
+  body[data-sidebar-collapsed="1"] .sidebar .sidebar-actions {
     flex-direction: column;
     align-items: center;
     gap: 6px;
   }
-  body[data-sidebar-collapsed] .sidebar .sidebar-actions .sidebar-action {
+  body[data-sidebar-collapsed="1"] .sidebar .sidebar-actions .sidebar-action {
     padding: 8px;
   }
-  /* 悬停/聚焦时自动展开 */
-  body[data-sidebar-collapsed] .sidebar:hover {
-    width: var(--sidebar-width);
-  }
-  body[data-sidebar-collapsed] .sidebar:hover .brand-identity > div,
-  body[data-sidebar-collapsed] .sidebar:hover .new-chat-button span:not(.icon-slot),
-  body[data-sidebar-collapsed] .sidebar:hover .settings-label,
-  body[data-sidebar-collapsed] .sidebar:hover .session-item,
-  body[data-sidebar-collapsed] .sidebar:hover .sidebar-close,
-  body[data-sidebar-collapsed] .sidebar:hover .session-time {
-    display: revert;
-  }
-  body[data-sidebar-collapsed] .sidebar:hover .brand-row {
-    justify-content: space-between;
-    padding: revert;
-  }
-  body[data-sidebar-collapsed] .sidebar:hover .new-chat-button {
-    justify-content: revert;
-    padding: revert;
-    margin: revert;
-  }
-  body[data-sidebar-collapsed] .sidebar:hover .sidebar-actions {
-    flex-direction: row;
-    align-items: revert;
-    gap: revert;
-  }
-  body[data-sidebar-collapsed] .sidebar:hover .sidebar-actions .sidebar-action {
-    padding: revert;
-  }
-  /* 悬停展开时整条网格回流（:has 让会话区同步让位），收起/展开均平滑过渡 */
-  body[data-sidebar-collapsed] .app-shell {
+  /* 展开/收起由点击按钮显式控制（去掉悬停自动展开，避免状态打架） */
+  body[data-sidebar-collapsed="1"] .app-shell {
     grid-template-columns: 48px minmax(0, 1fr);
     transition: grid-template-columns 0.2s ease-out;
-  }
-  body[data-sidebar-collapsed]:has(.sidebar:hover) .app-shell {
-    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   }
 }
 

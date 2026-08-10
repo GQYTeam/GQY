@@ -40,14 +40,33 @@
       el.hidden = true;
     }
   }
-  if (typeof window !== "undefined" && document.readyState !== "loading") {
-    refreshBackupStatus();
-    setInterval(refreshBackupStatus, 60_000);
-  } else {
-    document.addEventListener("DOMContentLoaded", () => {
-      refreshBackupStatus();
-      setInterval(refreshBackupStatus, 60_000);
+  // 点击顶栏备份 chip → 立即备份（POST /api/backup/now），完成后刷新状态
+  function bindBackupChipClick() {
+    const el = document.getElementById("backupStatus");
+    if (!el || el.dataset.clickBound) return;
+    el.dataset.clickBound = "1";
+    el.style.cursor = "pointer";
+    el.title = (el.title || "") + "（点击立即备份）";
+    el.addEventListener("click", async () => {
+      if (el.dataset.busy) return;
+      el.dataset.busy = "1";
+      el.textContent = "备份中…";
+      try {
+        const res = await apiRequest("/api/backup/now", { method: "POST" });
+        const data = await res.json();
+        showToast(data.ok ? `备份完成${data.pushed ? "，已推送远程" : ""}` : (data.error || "备份失败"), data.ok ? "info" : "error");
+      } catch (error) {
+        showToast(error.message || "备份失败", "error");
+      } finally {
+        delete el.dataset.busy;
+        refreshBackupStatus();
+      }
     });
+  }
+  if (typeof window !== "undefined" && document.readyState !== "loading") {
+    bindBackupChipClick();
+  } else {
+    document.addEventListener("DOMContentLoaded", () => bindBackupChipClick());
   }
 
   const MAX_CONTENT_CHARS = 20_000;
@@ -267,6 +286,7 @@
     adminBusy: false,
     loginSubmitting: false,
     modelSelectionSubmitting: false,
+    modelCompacting: false,
     stagedModelKeys: null,
     modelMenuError: "",
     submitting: false,
@@ -1762,6 +1782,12 @@
     minimax: "minimax",
     xiaomi: "xiaomi",
     openrouter: "openrouter",
+    opencode: "opencode",
+    "opencode-go": "opencode",
+    opencodezen: "opencode",
+    "opencode zen": "opencode",
+    gqy: "gqy",
+    "gqy-lora": "gqy",
     kimi: "kimi",
     moonshot: "moonshot",
     lmstudio: "lmstudio",
@@ -2021,18 +2047,54 @@
     cancel.setAttribute("role", "menuitem");
     cancel.textContent = "取消";
     cancel.addEventListener("click", () => closeModelMenu({ restoreFocus: true }));
+    const refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.className = "model-refresh";
+    refresh.setAttribute("role", "menuitem");
+    refresh.textContent = "🔄 刷新模型列表";
+    refresh.title = "重新 GET /models 发现当前供应商的模型（远程关闭/换模型后用它同步）";
+    refresh.addEventListener("click", refreshModelList);
     const confirm = document.createElement("button");
     confirm.type = "button";
     confirm.className = "model-confirm";
     confirm.setAttribute("role", "menuitem");
     confirm.textContent = "确认";
     confirm.addEventListener("click", confirmModelSelection);
-    footer.append(feedback, cancel, confirm);
+    footer.append(feedback, refresh, cancel, confirm);
     elements.modelMenu.append(list, footer);
     updateModelMenuState();
     updateCurrentModelDisplay();
     refreshLiveEndpointVisibility();
     updateControlState();
+  }
+
+  // 刷新当前激活供应商的模型列表：重新 GET /models 发现，写回配置后 watcher 自动 reload
+  async function refreshModelList() {
+    const activeModelsList = activeModels();
+    const providerId = activeModelsList[0]?.provider_id
+      || state.configDraft?.active_provider
+      || "";
+    if (!providerId) {
+      showToast("没有可刷新的供应商", "error");
+      return;
+    }
+    const feedback = elements.modelMenu.querySelector(".model-menu-feedback");
+    const old = feedback?.textContent || "";
+    if (feedback) feedback.textContent = `正在刷新 ${providerId} 的模型…`;
+    try {
+      const response = await apiRequest("/api/models/refresh", {
+        method: "POST",
+        body: JSON.stringify({ provider_id: providerId }),
+      });
+      const data = await response.json();
+      showToast(`已发现 ${data.models?.length || 0} 个模型`, "info");
+      // 配置已写回，watcher 会广播 config.reloaded → loadBootstrap 刷新 state.models
+      if (!state.configLoaded) await loadConfigDraft();
+      openModelMenu();
+    } catch (error) {
+      showToast(error.message || "刷新失败", "error");
+      if (feedback) feedback.textContent = old;
+    }
   }
 
   function updateModelMenuState() {
@@ -2054,8 +2116,14 @@
     }
     const confirm = elements.modelMenu.querySelector(".model-confirm");
     if (confirm) {
-      confirm.textContent = state.modelSelectionSubmitting ? "正在应用" : "确认";
+      confirm.textContent = state.modelSelectionSubmitting
+        ? (state.modelCompacting ? "正在压缩上下文…" : "正在应用")
+        : "确认";
       confirm.disabled = state.modelSelectionSubmitting || state.adminBusy || state.blocked || conversationRunning() || state.submitting || staged.size === 0;
+    }
+    if (feedback && state.modelCompacting) {
+      feedback.textContent = "切换供应商中，先压缩旧上下文（需一点时间）…";
+      feedback.classList.remove("is-error");
     }
     const cancel = elements.modelMenu.querySelector(".model-cancel");
     if (cancel) cancel.disabled = state.modelSelectionSubmitting || (state.adminBusy && !state.modelSelectionSubmitting);
@@ -5056,6 +5124,16 @@
   }
 
   function dispatchSseEvent(name, data) {
+    if (name === "model.compacting") {
+      state.modelCompacting = true;
+      updateModelMenuState();
+      return;
+    }
+    if (name === "model.compacted") {
+      state.modelCompacting = false;
+      updateModelMenuState();
+      return;
+    }
     if (name === "resync_required") {
       if (!state.resyncing) {
         state.resyncing = true;
@@ -5259,6 +5337,8 @@
       await state.bootstrapPromise;
     } finally {
       state.bootstrapPromise = null;
+      // 初始就加载配置：人格徽标等顶栏 UI 依赖 configDraft，懒加载（仅打开设置）会导致不显示
+      if (!state.configLoaded && !state.configLoading) loadConfigDraft();
       handleOpenSettingsParam();
     }
   }
@@ -6122,7 +6202,11 @@
     window.addEventListener("resize", applyCollapseButtonVisibility);
     elements.sidebarCollapseButton?.addEventListener("click", () => {
       const collapsed = elements.body.dataset.sidebarCollapsed === "1";
-      elements.body.dataset.sidebarCollapsed = collapsed ? "" : "1";
+      if (collapsed) {
+        delete elements.body.dataset.sidebarCollapsed;  // 移除属性，恢复展开态
+      } else {
+        elements.body.dataset.sidebarCollapsed = "1";
+      }
       safeStorageSet("gqy.web.sidebarCollapsed", !collapsed);
       elements.sidebarCollapseButton.title = collapsed ? "折叠会话栏" : "展开会话栏";
       elements.sidebarCollapseButton.setAttribute("aria-label", elements.sidebarCollapseButton.title);

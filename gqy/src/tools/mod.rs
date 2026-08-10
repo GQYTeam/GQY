@@ -331,8 +331,13 @@ pub fn is_hybrid_loading_mode(mode: &str) -> bool {
 
 pub fn chat_registry(config: &AppConfig, paths: &GqyPaths) -> ToolRegistry {
     let mut registry = ToolRegistry::new();
-    // 闲聊纯文本模式：不注册任何工具，杜绝本地模型工具循环/重复调用
+    // 闲聊纯文本模式：不注册任何工具，杜绝本地模型工具循环/重复调用。
+    // 但保留只读记忆查询——角色扮演也要能「想起」别处的事（贾维斯式，不因模式失忆），
+    // 被动查询不注入省 token，且只读不会误写。
     if config.prompt.chat_pure_text {
+        if config.memory_config().enabled {
+            memory::register_readonly(&mut registry, config.clone(), paths.clone());
+        }
         return registry;
     }
     web::register_fetch(&mut registry);

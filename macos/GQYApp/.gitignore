@@ -1,0 +1,4 @@
+.build/
+build/
+.check/
+.swiftpm/

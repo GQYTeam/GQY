@@ -641,13 +641,13 @@ impl Agent {
             *last = prepared.message;
         }
         messages.extend(prepared.hints);
-        if self.mode != AgentMode::Chat {
-            if let Some(association) = self.memory.association(&input)? {
-                messages.insert(
-                    1,
-                    ChatMessage::system(self.memory.format_association(&association)),
-                );
-            }
+        // 三模式共享记忆在场感（贾维斯式）：闲聊也按当前输入联想，不因模式而“失忆”。
+        // 联想是本地 SQLite 检索，零模型开销；量受 association_facts/episodes 控制。
+        if let Some(association) = self.memory.association(&input)? {
+            messages.insert(
+                1,
+                ChatMessage::system(self.memory.format_association(&association)),
+            );
         }
         if self.mode != AgentMode::Plan {
             if let Some(reminder) = memes::auto_meme_reminder(&self.config, &input) {

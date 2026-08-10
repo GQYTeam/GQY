@@ -973,7 +973,12 @@ async fn download_and_store_images(
         }
     }
     if downloaded.is_empty() {
-        bail!("image search found candidates, but no image could be downloaded")
+        bail!(concat!(
+            "image search found candidates, but no image could be downloaded; ",
+            "possible causes: network/DNS blocked in your region (no_proxy was removed — ",
+            "set http_proxy/https_proxy if you use a proxy), anti-hotlink headers, or the ",
+            "image hosts refused the request. Try a different web_images.source_mode or check connectivity."
+        ))
     }
     if vision_screening_available(config) {
         progress.report(t("reviewing images", "正在批量审核图片"));
@@ -1087,13 +1092,20 @@ async fn download_image_bytes(
     let mut current = Url::parse(url).context("invalid image URL")?;
     for _ in 0..=8 {
         let remaining = remaining_timeout(deadline)?;
-        let resolution = resolve_public_remote_target(&current, remaining).await?;
+        // 优先跟随系统/环境代理（http_proxy/https_proxy/all_proxy）；无代理时保持直连。
+        // 不再强制 no_proxy：墙内靠代理才能访问图片源，直连只会超时。
         let mut builder = Client::builder()
             .timeout(remaining_timeout(deadline)?)
-            .redirect(reqwest::redirect::Policy::none())
-            .no_proxy();
-        if let Some((host, addresses)) = &resolution {
-            builder = builder.resolve_to_addrs(host, addresses);
+            .redirect(reqwest::redirect::Policy::none());
+        // DNS 覆盖（绕过污染的直连 IP）仅在明确不需要代理时使用；
+        // 解析失败回退默认解析，不让单个域名解析失败杀死整次下载。
+        // 安全：URL 不合法/解析到内网（SSRF）仍直接拒绝，不回退。
+        match resolve_public_remote_target(&current, remaining).await {
+            Ok(Some((ref host, ref addresses))) => {
+                builder = builder.resolve_to_addrs(host, addresses);
+            }
+            Ok(None) => {}
+            Err(err) => return Err(err),
         }
         let client = builder.build()?;
         let response = client
@@ -1216,14 +1228,31 @@ async fn resolve_public_remote_target(
     let port = url
         .port_or_known_default()
         .context("image URL has no port")?;
-    let addresses = tokio::time::timeout(timeout, tokio::net::lookup_host((host, port)))
-        .await
-        .context("image DNS resolution timed out")??
-        .collect::<Vec<_>>();
+    // DNS 查询失败/超时 → 回退（Ok(None)），让 reqwest 用默认解析器再试一次。
+    let addresses = match tokio::time::timeout(timeout, tokio::net::lookup_host((host, port))).await {
+        Ok(Ok(addresses)) => addresses.collect::<Vec<_>>(),
+        _ => return Ok(None),
+    };
+    // fake-ip（Surge/Clash 等代理软件的 198.18.0.0/15 保留段）：
+    // 解析结果只能通过代理/TUN 转发，直连必然失败 → 回退走系统默认路径。
+    if addresses.iter().all(|a| is_fakeip(a.ip())) {
+        return Ok(None);
+    }
+    // 真实内网/非公网地址：拒绝（SSRF 防护，不回退）。
     if addresses.is_empty() || addresses.iter().any(|address| !is_public_ip(address.ip())) {
         bail!("image host resolves to a non-public address")
     }
     Ok(Some((host.to_string(), addresses)))
+}
+
+/// Surge/Clash fake-ip 保留段（RFC 2544 benchmark 198.18.0.0/15）：不是真公网，
+/// 但也不是内网——连接它会被代理软件按域名转发，因此应回退而非拒绝。
+fn is_fakeip(ip: IpAddr) -> bool {
+    if let IpAddr::V4(v4) = ip {
+        let [first, second, _, _] = v4.octets();
+        return first == 198 && matches!(second, 18 | 19);
+    }
+    false
 }
 
 fn is_public_ip(ip: IpAddr) -> bool {

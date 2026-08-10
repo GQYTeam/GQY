@@ -1138,12 +1138,14 @@ fn router(state: WebState) -> Router {
         .route("/api/runs/{run_id}/cancel", post(cancel_run))
         .route("/api/questions/{question_id}/answer", post(answer_question))
         .route("/api/models/active", put(set_models))
+        .route("/api/models/refresh", post(refresh_models_web))
         .route("/api/conversation/reset", post(reset_conversation))
         .route("/api/alarms", get(list_alarms_web))
         .route("/api/state", get(session_state))
         .route("/api/usage/stats", get(usage_stats_web))
         .route("/api/usage/details", get(usage_details_web))
         .route("/api/backup/status", get(backup_status_web))
+        .route("/api/backup/now", post(backup_now_web))
         .route("/api/channels/{channel_id}/turns", get(channel_turns_web))
         .route("/api/search", get(search_web))
         .route("/api/tools/call", post(call_tool_web))
@@ -1442,6 +1444,26 @@ async fn backup_status_web(
     }
 }
 
+/// 手动立即备份（WebUI 顶栏 chip 点击触发）：同步执行并推送远程。
+async fn backup_now_web(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<Value>, ApiError> {
+    require_mutation(&headers, &state)?;
+    let paths = state.paths.clone();
+    // 备份走 CPU/IO，避免阻塞 WebUI actor：spawn_blocking 同步执行
+    let spawned = tokio::task::spawn_blocking(move || crate::backup::backup_now(&paths, true))
+        .await
+        .map_err(|err| ApiError::internal(anyhow::anyhow!(err)))?;
+    let outcome = spawned.map_err(ApiError::internal)?;
+    Ok(Json(json!({
+        "ok": true,
+        "commit": outcome.commit,
+        "committed": outcome.committed,
+        "pushed": outcome.pushed,
+    })))
+}
+
 /// 用量统计（贡献图数据源）：每日 token + 按模型明细。
 async fn usage_stats_web(
     State(state): State<WebState>,
@@ -1731,10 +1753,24 @@ async fn call_tool_web(
     } else {
         Duration::from_secs(180)
     };
-    let (progress_tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
     let progress = crate::tools::ToolProgress::new(progress_tx);
     let result = tokio::time::timeout(timeout, async move {
-        registry.call_with_progress(&name_for_call, &arguments_str, &progress).await
+        // 边跑边消费进度事件：工具会 await prepare_for_external_output（如搜图预览），
+        // Web 端无终端可预览，必须应答 false，否则工具永久挂起到超时。
+        let call = registry.call_with_progress(&name_for_call, &arguments_str, &progress);
+        tokio::pin!(call);
+        loop {
+            tokio::select! {
+                r = &mut call => break r,
+                Some(event) = progress_rx.recv() => {
+                    if let crate::tools::ToolProgressEvent::PrepareForExternalOutput { ready } = event {
+                        let _ = ready.send(false);
+                    }
+                }
+                else => break call.await,
+            }
+        }
     })
     .await;
     let body = match result {
@@ -2534,6 +2570,47 @@ async fn set_models(
     }))
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RefreshModelsRequest {
+    provider_id: String,
+}
+
+/// 手动刷新指定供应商的模型列表：重新 GET /models 发现，写回配置。
+/// 远程服务关闭/换了模型后，模型菜单由此同步（config watcher 会自动 reload 并广播）。
+async fn refresh_models_web(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Json(request): Json<RefreshModelsRequest>,
+) -> std::result::Result<Json<Value>, ApiError> {
+    require_mutation(&headers, &state)?;
+    let provider_id = request.provider_id.trim().to_string();
+    let paths = state.paths.clone();
+    let mut config = { state.manager.lock().unwrap().config.clone() };
+    let Some(provider) = config.providers.iter_mut().find(|p| p.id == provider_id) else {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "provider not found"));
+    };
+    let base_url = provider.base_url.clone();
+    let api_key = provider.api_key.clone().unwrap_or_default();
+    let models = crate::provider::discover_models(&base_url, &api_key)
+        .await
+        .map_err(|err| ApiError::new(StatusCode::BAD_GATEWAY, format!("模型发现失败：{err}")))?;
+    if models.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_GATEWAY,
+            "远程没有返回任何模型（服务可能已关闭或 key 无效）",
+        ));
+    }
+    provider.models = models.clone();
+    provider.default_model = models.first().cloned().unwrap_or_default();
+    config.save(&paths).map_err(ApiError::internal)?;
+    Ok(Json(json!({
+        "ok": true,
+        "provider_id": provider_id,
+        "models": models,
+    })))
+}
+
 async fn reset_conversation(
     State(state): State<WebState>,
     headers: HeaderMap,
@@ -2711,6 +2788,11 @@ async fn actor_loop(
                 let compact_first = provider_will_change(&config, &models);
                 let result = async {
                     if compact_first {
+                        // 前端据此显示「正在压缩上下文…」，避免切换长时间无反馈
+                        events.publish(
+                            "model.compacting",
+                            serde_json::json!({ "provider_change": true }),
+                        );
                         match agent.compact_now(|_| Ok(())).await {
                             Ok(Some(_)) => {
                                 tracing::info!("provider switch: context compacted before switching")
@@ -2723,6 +2805,7 @@ async fn actor_loop(
                                 );
                             }
                         }
+                        events.publish("model.compacted", serde_json::json!({}));
                     }
                     rebuild_for_models(
                         &mut agent,

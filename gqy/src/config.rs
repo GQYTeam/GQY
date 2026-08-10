@@ -2282,8 +2282,10 @@ fn default_on_overflow() -> String {
     "compact".to_string()
 }
 
+/// 闲聊模式历史轮数上限：0 = 纯人格模式（不加载历史，只靠人格提示词）。
+/// 默认 12：够记住最近聊天，又对本地模型上下文友好。
 fn default_chat_history_turns() -> usize {
-    2
+    12
 }
 
 #[cfg(test)]
