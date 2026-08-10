@@ -3,6 +3,21 @@
 本项目所有值得记录的改动都会列在此文件。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.0] - 2026-08-10
+
+### 重大变更
+- **聚焦桌面 App**：移除 QQ/NapCat 与 Telegram 桥接（`gqy napcat`/`gqy tg`）、菜单栏壳（`gqy menubar`）与 pi 工具桥——桌面端统一走 `macos/GQYApp`（Swift + WKWebView，自包含）；
+- 删除 `communication/`（Node.js 桥）、`macos/GQYMenuBar/`、Homebrew cask，仅保留 CLI formula。
+
+### 新增
+- **桌面壳资源自包含**：`build-app.sh` 内嵌 share 资源（scripts/memes/kb），内嵌 gqy 开箱即用。
+
+### 修复
+- 测试：`with_mode_reminder`/`handle_sse_line`/`sanitize_id` 签名与测试未同步导致 `cargo test` 编译失败；
+- 用量统计测试日期假设（昨天在本周内）在周一失败；
+- WebUI `app.js` 星期标签逗号错位导致 JS 解析失败、页面卡在“正在载入”；
+- WebUI 密码支持从 `config.jsonc` 读取（`web_ui.password`）。
+
 ## [0.8.6] - 2026-08-04
 
 ### 新增
