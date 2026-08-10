@@ -4,9 +4,17 @@
 
 # GQY —— 顾清影
 
-一个活在 `MAC终端/菜单栏` 里的二次元少女。
+<p align="center">
+  <img alt="GitHub release" src="https://img.shields.io/github/v/release/GQYTeam/GQY?style=flat-square">
+  <img alt="macOS" src="https://img.shields.io/badge/platform-macOS-333333?style=flat-square">
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.96+-de5c27?style=flat-square">
+  <img alt="License" src="https://img.shields.io/github/license/GQYTeam/GQY?style=flat-square">
+  <img alt="Downloads" src="https://img.shields.io/github/downloads/GQYTeam/GQY/total?style=flat-square">
+</p>
 
-macOS 独立主目录、菜单栏壳与私有 Git 记忆备份的当前用法见 [macOS、独立主目录与记忆备份](docs/01-指南/macos-portable-home-and-backup.md)。
+一个活在 **macOS 桌面 App** 里的二次元少女——Swift 壳内嵌 Rust 核心，开箱即用。
+
+macOS 独立主目录与私有 Git 记忆备份的当前用法见 [macOS、独立主目录与记忆备份](docs/01-指南/macos-portable-home-and-backup.md)。
 
 
 ## 谁是 GQY？
@@ -16,7 +24,7 @@ GQY 是从我的想法中诞生出来的人格，从 [shorin-miyu](https://githu
 ![](./pics/GQY-image.png)
 
 ![](pics/video.mp4) 
-<br><small>顾清影 · 演示视频（若无法播放请<a href="https://github.com/Francis-Xavier-code/GQY/raw/main/pics/video.mp4">下载 mp4</a>）</small>
+<br><small>顾清影 · 演示视频（若无法播放请<a href="https://github.com/GQYTeam/GQY/raw/main/pics/video.mp4">下载 mp4</a>）</small>
 </div>
 
 ## 有什么功能？
@@ -33,24 +41,32 @@ gqy config
 
 ## 如何安装？
 
-### Homebrew（推荐）
+### 桌面 App（推荐）
 
-GQY 通过官方 tap 发布**单一 formula**（终端 CLI 为唯一正式渠道，需要先发布 GitHub Release，见下方「发布新版本」）：
+从 [GitHub Release](https://github.com/GQYTeam/GQY/releases) 下载 `GQYApp-<版本>.zip`，解压后把 `GQYApp.app` 拖进 `/Applications`：
 
 ```zsh
-brew tap Francis-Xavier-code/GQY
-brew trust Francis-Xavier-code/GQY   # Homebrew 新版要求信任非官方 tap
-brew install gqy
+open /Applications/GQYApp.app
 ```
 
-桌面端：`macos/GQYApp`（Swift + WKWebView，自包含，内嵌 gqy 二进制）。
+自包含（内嵌 gqy 二进制 + 资源），无需任何依赖，拷走即用。
+
+### Homebrew（CLI）
+
+终端 CLI 走官方 tap：
+
+```zsh
+brew tap GQYTeam/GQY
+brew trust GQYTeam/GQY   # Homebrew 新版要求信任非官方 tap
+brew install gqy
+```
 
 ### 从源码构建
 
 需要安装 Rust 1.96 或更新版本、C 编译工具链，图片显示功能依赖 `chafa`（`brew install chafa`）。
 
 ```
-git clone https://github.com/Francis-Xavier-code/GQY.git
+git clone https://github.com/GQYTeam/GQY.git
 cd GQY
 cargo build --release --locked
 ./target/release/gqy --version
@@ -76,7 +92,7 @@ GQY 的只读资源（内置脚本、表情库、知识库源）统一放在**�
 | 安装方式 | 资源目录 |
 |---|---|
 | Homebrew CLI | `$(brew --prefix)/share/gqy`（scripts/、memes/、kb/） |
-| 菜单栏 App | `顾清影.app/Contents/Resources/share/gqy`（自包含） |
+| 桌面 App | `GQYApp.app/Contents/Resources/share/gqy`（自包含） |
 | 源码构建 | 仓库内 `src/scripts`、`src/memes`、`kb` 自动识别 |
 
 运行时按 `GQY_SHARE_DIR` 环境变量 → 可执行文件位置自动向上查找 → 源码树 → `/usr/share/gqy` 的顺序解析，`gqy paths` 可查看当前生效的目录。随包的知识库可用一条命令导入：
@@ -85,9 +101,9 @@ GQY 的只读资源（内置脚本、表情库、知识库源）统一放在**�
 gqy kb add "$(brew --prefix)/share/gqy/kb"
 ```
 
-### 菜单栏（已移除）
+### 桌面 App
 
-菜单栏壳与 `gqy menubar` 命令已从代码库移除，不再维护。桌面端统一走 `macos/GQYApp`（Swift + WKWebView 壳）。
+`macos/GQYApp`（Swift + WKWebView）内嵌 gqy 二进制与资源，界面即 WebUI，像素级一致。
 
 ### 界面语言
 
@@ -226,8 +242,7 @@ GQY 的 CLI、REPL、配置 TUI 和工具状态支持英文与简体中文。在
 - 本地模型推理（llama.cpp / Ollama）
 
   支持 Apple Silicon 本地跑模型（Metal 加速）：内置 `llama.cpp`/`ollama`/`lmstudio`
-  provider 预设，`qwen3-abl-nothink` 等去审查无思考模型 2 秒出回复；本地模型
-  可跟随菜单栏启停（启动时自动拉起、退出时关闭，默认不开机自启）。
+  provider 预设，`qwen3-abl-nothink` 等去审查无思考模型 2 秒出回复。
 
 - 供应商热切换（自动发现模型）
 
@@ -277,24 +292,14 @@ GQY 的 CLI、REPL、配置 TUI 和工具状态支持英文与简体中文。在
 - **Q：怎么让她记住特定的事？**
   A：直接说「记住：xxx」她会调用记忆工具；每轮对话结束也会自动写日记。`gqy memory search <词>` 可以查她记得什么。
 
-- **Q：菜单栏里「开机自启」是干什么的？**
-  A：注册/移除 LaunchAgent（`~/Library/LaunchAgents/dev.gqy.menubar.plist`），让她下次登录自动出现在菜单栏。只有你主动点击才会修改。
-
 - **Q：卸载 GQY 会删掉我的记忆吗？**
-  A：不会。`brew uninstall gqy` 只移除程序与自启项；`rm -rf ~/Applications/顾清影.app` 移除菜单栏壳；GQY_HOME（对话、记忆、知识库、备份仓库）是用户数据，卸载不会触碰。想彻底清除请手动删除 `~/Library/Application Support/gqy`。
+  A：不会。`brew uninstall gqy` 只移除程序；`rm -rf /Applications/GQYApp.app` 移除桌面 App；GQY_HOME（对话、记忆、知识库、备份仓库）是用户数据，卸载不会触碰。想彻底清除请手动删除 `~/Library/Application Support/gqy`。
 
-- **Q：同时装了 CLI 和菜单栏 App，终端里 `gqy` 命令找不到？**
-  A：Homebrew 检测到同名 cask 已安装时会跳过公式的 bin 链接。手动补一条链接即可（升级重装后如失效再执行一次）：
-  ```
-  brew link gqy --overwrite
-  ```
-
-- **Q：为什么别的 GitHub 项目下载的 DMG 双击就能开，GQY 的却提示无法验证/打不开？**
+- **Q：为什么别的 GitHub 项目下载的 App 双击就能开，GQY 的却提示无法验证/打不开？**
   A：因为 GQY 是**开源免费项目，没有 Apple 开发者账号**（$99/年）做 Developer ID 签名和公证——这是苹果的付费墙，所有免费开源 macOS 应用都面临同样的问题。「别人能用」的 app 要么付了苹果的钱，要么用户手动放行。GQY 提供的免费方案：
-  - **brew 安装**（推荐）：`brew install --cask gqy` 会自动移除 quarantine，装完直接打开，无感；
-  - **手动放行**：右键（按住 Control 点）→「打开」→ 确认一次即可；或终端执行
+  - **右键放行**：右键（按住 Control 点）→「打开」→ 确认一次即可；或终端执行
     ```
-    xattr -dr com.apple.quarantine /Applications/顾清影.app
+    xattr -dr com.apple.quarantine /Applications/GQYApp.app
     ```
   - 想彻底解决需要 Developer ID 证书 + 公证（苹果年费），开源项目一般靠赞助/众筹支付。
 
@@ -320,7 +325,7 @@ GQY 的 CLI、REPL、配置 TUI 和工具状态支持英文与简体中文。在
    gh release create v0.4.6 --notes-file /tmp/release-notes.md
    ```
 4. 计算 `Formula/gqy.rb` 里的 `sha256`（源码 tarball）并提交；
-5. 同步到 Homebrew tap 仓库（`Francis-Xavier-code/homebrew-GQY`）里的同名文件并推送；
+5. 同步到 Homebrew tap 仓库（`GQYTeam/homebrew-GQY`）里的同名文件并推送；
 6. 本机测试：
    ```zsh
    brew update   # 拉取 tap 更新（不要加 HOMEBREW_NO_AUTO_UPDATE=1，否则用旧 formula）
