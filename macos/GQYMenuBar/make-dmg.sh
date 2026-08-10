@@ -11,7 +11,7 @@ project_dir="${0:A:h}"
 app_dir="$project_dir/.build/顾清影.app"
 staging_dir="$project_dir/.build/dmg-staging"
 repo_dir="${project_dir:h:h}"
-app_version="$(sed -n 's/^version = "\([0-9][0-9.]*\)"/\1/p' "$repo_dir/Cargo.toml" | head -1)"
+app_version="$(sed -n 's/^version = "\([0-9][0-9.]*\)"/\1/p' "$repo_dir/gqy/Cargo.toml" | head -1)"
 dmg_path="$project_dir/.build/GQY-${app_version:-0.0.0}.dmg"
 
 if [[ ! -d "$app_dir" ]]; then

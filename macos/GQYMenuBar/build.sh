@@ -43,18 +43,18 @@ sips -z 1024 1024 "$icon_source" --out "$iconset_dir/icon_512x512@2x.png" >/dev/
 iconutil -c icns "$iconset_dir" -o "$resources_dir/AppIcon.icns"
 
 # 版本号跟随 Cargo.toml
-app_version="$(sed -n 's/^version = "\([0-9][0-9.]*\)"/\1/p' "$repo_dir/Cargo.toml" | head -1)"
+app_version="$(sed -n 's/^version = "\([0-9][0-9.]*\)"/\1/p' "$repo_dir/gqy/Cargo.toml" | head -1)"
 if [[ -n "$app_version" ]]; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $app_version" \
     -c "Set :CFBundleVersion $app_version" "$contents_dir/Info.plist"
 fi
 
 backend_bin="${GQY_BIN:-}"
-if [[ -z "$backend_bin" && -x "$repo_dir/target/release/gqy" ]]; then
-  backend_bin="$repo_dir/target/release/gqy"
+if [[ -z "$backend_bin" && -x "$repo_dir/gqy/target/release/gqy" ]]; then
+  backend_bin="$repo_dir/gqy/target/release/gqy"
 fi
-if [[ -z "$backend_bin" && -x "$repo_dir/target/debug/gqy" ]]; then
-  backend_bin="$repo_dir/target/debug/gqy"
+if [[ -z "$backend_bin" && -x "$repo_dir/gqy/target/debug/gqy" ]]; then
+  backend_bin="$repo_dir/gqy/target/debug/gqy"
 fi
 if [[ -n "$backend_bin" ]]; then
   cp "$backend_bin" "$resources_dir/gqy"
@@ -64,9 +64,9 @@ fi
 # 与 brew 安装的 $(brew --prefix)/share/gqy 布局一致，bundle 内二进制自包含。
 share_dir="$resources_dir/share/gqy"
 mkdir -p "$share_dir"
-cp -R "$repo_dir/src/scripts" "$share_dir/scripts"
+cp -R "$repo_dir/gqy/src/scripts" "$share_dir/scripts"
 mkdir -p "$share_dir/memes"
-cp -R "$repo_dir/src/memes/gqy" "$share_dir/memes/gqy"
+cp -R "$repo_dir/gqy/src/memes/gqy" "$share_dir/memes/gqy"
 cp -R "$repo_dir/kb" "$share_dir/kb"
 
 # 默认 ad-hoc 签名；设置 CODESIGN_IDENTITY 可用 Developer ID 正式签名
