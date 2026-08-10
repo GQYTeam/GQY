@@ -284,11 +284,11 @@ impl ConversationDb {
                  ON queued_prompts(queue_session_id, status, seq);",
         )?;
         let channel = std::env::var("GQY_CHANNEL")
-            .unwrap_or_else(|_| "terminal".to_string())
+            .unwrap_or_else(|_| "webui".to_string())
             .trim()
             .to_string();
         let channel = if channel.is_empty() {
-            "terminal".to_string()
+            "webui".to_string()
         } else {
             channel
         };
