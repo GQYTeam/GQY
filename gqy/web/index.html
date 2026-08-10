@@ -295,6 +295,13 @@
           <section class="settings-section settings-panel" data-settings-panel="general" hidden>
           <h2>全局设置</h2>
           <div class="config-form" id="generalConfigForm"></div>
+          <div class="lan-access" id="lanAccessCard" hidden>
+            <h3>手机访问</h3>
+            <p class="lan-access-hint">手机与电脑连同一 Wi-Fi 后，用相机扫码即可在手机上打开顾清影（本机无需密码）。</p>
+            <img id="lanQrImage" src="/api/auth/qr.png" alt="手机访问二维码" width="200" height="200">
+            <button class="secondary-button compact-button" id="lanQrRefresh" type="button">刷新二维码</button>
+            <p class="lan-access-address" id="lanAccessAddress"></p>
+          </div>
           </section>
           <section class="settings-section settings-panel" data-settings-panel="tasks" hidden>
           <h2>定时任务</h2>

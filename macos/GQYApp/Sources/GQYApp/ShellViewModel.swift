@@ -15,6 +15,16 @@ final class ShellViewModel: ObservableObject {
     private var lanMode = false
     private var lanPassword: String?
 
+    /// App 退出时终止后端进程，避免 gqy 残留占端口（否则重开 App 拉不起新进程）
+    func stopBackend() {
+        healthTask?.cancel()
+        healthTask = nil
+        if let process = backendProcess, process.isRunning {
+            process.terminate()
+        }
+        backendProcess = nil
+    }
+
     /// 局域网 IPv4（ifconfig 解析，优先 192.168/10./172.16 段）
     private static func lanIP() -> String {
         let task = Process()
@@ -59,6 +69,18 @@ final class ShellViewModel: ObservableObject {
     }
 
     func startBackend() {
+        // 已有服务在跑（残留/外部启动）→ 直接复用，不再拉起新进程
+        Task { [weak self] in
+            guard let self else { return }
+            if await self.client.health() {
+                self.connection = .ready
+                return
+            }
+            self.launchBackendProcess()
+        }
+    }
+
+    private func launchBackendProcess() {
         // 一体化优先：内嵌二进制（.app/Contents/Resources/gqy）
         var candidates: [String] = []
         if let bundled = Bundle.main.path(forResource: "gqy", ofType: nil) {

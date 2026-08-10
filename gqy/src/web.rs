@@ -52,6 +52,7 @@ const EVENT_CAPACITY: usize = 4096;
 const AUTH_COOKIE: &str = "gqy_session";
 const LOGIN_WINDOW: Duration = Duration::from_secs(60);
 const LOGIN_ATTEMPT_LIMIT: u8 = 5;
+const SCAN_TOKEN_TTL: Duration = Duration::from_secs(600);
 
 const INDEX_HTML: &str = include_str!("../web/index.html");
 const STYLES_CSS: &str = include_str!("../web/styles.css");
@@ -76,6 +77,9 @@ struct WebState {
     bridge_registry: Arc<std::sync::Mutex<ToolRegistry>>,
     /// 优雅退出信号（/api/shutdown 触发，菜单栏「退出」用它统一收尾）
     shutdown: Arc<tokio::sync::Notify>,
+    /// 监听端口与局域网 IP（扫码登录二维码用）
+    web_port: u16,
+    lan_ip: Option<String>,
 }
 
 #[derive(Clone)]
@@ -83,6 +87,10 @@ struct WebAuth {
     password_digest: Option<[u8; 32]>,
     sessions: Arc<Mutex<HashSet<String>>>,
     attempts: Arc<Mutex<HashMap<IpAddr, LoginAttempt>>>,
+    /// 扫码登录：一次性 token → 创建时间（10 分钟有效，用后即焚）
+    pending_scans: Arc<Mutex<HashMap<String, Instant>>>,
+    /// 本机回环免密：loopback 请求自动带此 session 令牌，电脑上打开 App 无需输密码
+    loopback_session: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -104,10 +112,13 @@ impl WebAuth {
             digest.update(password.as_bytes());
             digest.finalize().into()
         });
+        let loopback_session = password.map(|_| random_token(32));
         Self {
             password_digest,
             sessions: Arc::new(Mutex::new(HashSet::new())),
             attempts: Arc::new(Mutex::new(HashMap::new())),
+            pending_scans: Arc::new(Mutex::new(HashMap::new())),
+            loopback_session,
         }
     }
 
@@ -117,6 +128,14 @@ impl WebAuth {
 
     fn is_authenticated(&self, supplied: Option<&str>) -> bool {
         if !self.required() {
+            return true;
+        }
+        // 本机回环免密：loopback session 令牌始终有效
+        if self
+            .loopback_session
+            .as_deref()
+            .is_some_and(|token| supplied == Some(token))
+        {
             return true;
         }
         supplied.is_some_and(|token| self.sessions.lock().unwrap().contains(token))
@@ -161,6 +180,43 @@ impl WebAuth {
             sessions.insert(token.clone());
         }
         Ok(token)
+    }
+
+    /// 生成一次性扫码 token（10 分钟有效，最多同时存 32 个）
+    fn new_scan_token(&self) -> String {
+        let token = random_token(24);
+        let now = Instant::now();
+        let mut pending = self.pending_scans.lock().unwrap();
+        pending.retain(|_, created| now.duration_since(*created) < SCAN_TOKEN_TTL);
+        pending.insert(token.clone(), now);
+        if pending.len() > 32 {
+            let oldest = pending
+                .iter()
+                .min_by_key(|(_, created)| **created)
+                .map(|(key, _)| key.clone());
+            if let Some(oldest) = oldest {
+                pending.remove(&oldest);
+            }
+        }
+        token
+    }
+
+    /// 扫码兑换登录：token 有效且未过期 → 签发会话并删除 token
+    fn login_by_scan(&self, token: &str) -> Option<String> {
+        let now = Instant::now();
+        let mut pending = self.pending_scans.lock().unwrap();
+        let created = pending.remove(token)?;
+        if now.duration_since(created) >= SCAN_TOKEN_TTL {
+            return None;
+        }
+        let session = random_token(32);
+        let mut sessions = self.sessions.lock().unwrap();
+        sessions.insert(session.clone());
+        if sessions.len() > 64 {
+            sessions.clear();
+            sessions.insert(session.clone());
+        }
+        Some(session)
     }
 }
 
@@ -1069,6 +1125,8 @@ pub async fn run(paths: GqyPaths, args: WebArgs) -> Result<()> {
         balance_cache: Arc::new(Mutex::new(None)),
         bridge_registry,
         shutdown: Arc::new(tokio::sync::Notify::new()),
+        web_port: port,
+        lan_ip: lan_ip(),
     };
     let shutdown_notify = state.shutdown.clone();
     let app = router(state);
@@ -1113,6 +1171,9 @@ fn router(state: WebState) -> Router {
         .route("/api/health", get(health))
         .route("/api/tts", get(tts_web))
         .route("/api/auth/login", post(auth_login))
+        .route("/api/auth/qr-token", get(qr_token_web))
+        .route("/api/auth/qr.png", get(qr_png_web))
+        .route("/api/auth/scan/{token}", get(qr_scan_web))
         .route("/api/bootstrap", get(bootstrap))
         .route("/api/config", get(get_config).put(update_config))
         .route("/api/events", get(events))
@@ -1144,7 +1205,27 @@ fn router(state: WebState) -> Router {
         .route("/api/balance", get(balance_web))
         .route("/api/alarms/{alarm_id}", delete(cancel_alarm_web))
         .layer(DefaultBodyLimit::max(JSON_BODY_LIMIT))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), loopback_autofill))
         .with_state(state)
+}
+
+/// 本机回环免密：来自 127.0.0.1 的请求自动带上 loopback session，
+/// 电脑上打开 App / 浏览器直接进入；手机（局域网）仍需密码/扫码。
+async fn loopback_autofill(
+    State(state): State<WebState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    mut request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    if peer.ip().is_loopback() {
+        if let Some(session) = state.auth.loopback_session.clone() {
+            let cookie = format!("{AUTH_COOKIE}={session}");
+            if let Ok(value) = HeaderValue::from_str(&cookie) {
+                request.headers_mut().insert(COOKIE, value);
+            }
+        }
+    }
+    next.run(request).await
 }
 
 async fn index_asset() -> Response {
@@ -1253,6 +1334,79 @@ async fn auth_login(
     Ok(response)
 }
 
+/// 生成一次性扫码登录 token（供设置页二维码使用）
+async fn qr_token_web(State(state): State<WebState>) -> Json<Value> {
+    let token = state.auth.new_scan_token();
+    let host = state.lan_ip.as_deref().unwrap_or("127.0.0.1");
+    let url = format!("http://{host}:{}/api/auth/scan/{token}", state.web_port);
+    Json(json!({
+        "ok": true,
+        "token": token,
+        "url": url,
+        "host": host,
+        "ttl_seconds": SCAN_TOKEN_TTL.as_secs()
+    }))
+}
+
+/// 渲染扫码登录二维码 PNG：内容为 手机可访问的 scan URL
+async fn qr_png_web(State(state): State<WebState>) -> Result<Response, ApiError> {
+    let token = state.auth.new_scan_token();
+    let port = state.web_port;
+    let host = state.lan_ip.as_deref().unwrap_or("127.0.0.1");
+    let url = format!("http://{host}:{port}/api/auth/scan/{token}");
+    let code = qrcode::QrCode::new(url.as_bytes()).map_err(|error| {
+        ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("QR encode failed: {error}"))
+    })?;
+    let image = code
+        .render::<image::Luma<u8>>()
+        .min_dimensions(240, 240)
+        .build();
+    let mut png: Vec<u8> = Vec::new();
+    image
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .map_err(ApiError::internal)?;
+    let mut response = Response::new(axum::body::Body::from(png));
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("image/png"));
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    Ok(response)
+}
+
+/// 手机扫码访问：token 有效则签发会话 cookie 并跳回主页
+type ScanRedirect = Result<Response, ApiError>;
+async fn qr_scan_web(
+    State(state): State<WebState>,
+    Path(token): Path<String>,
+) -> ScanRedirect {
+    let Some(session) = state.auth.login_by_scan(&token) else {
+        // 已过期/已用：回到登录页，前端会提示重新扫码
+        let mut response = Response::new(axum::body::Body::empty());
+        *response.status_mut() = StatusCode::FOUND;
+        response
+            .headers_mut()
+            .insert(axum::http::header::LOCATION, HeaderValue::from_static("/?scan=expired"));
+        return Ok(response);
+    };
+    let cookie =
+        format!("{AUTH_COOKIE}={session}; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400");
+    let mut response = Response::new(axum::body::Body::empty());
+    *response.status_mut() = StatusCode::FOUND;
+    response
+        .headers_mut()
+        .insert(axum::http::header::LOCATION, HeaderValue::from_static("/"));
+    response.headers_mut().insert(
+        SET_COOKIE,
+        HeaderValue::from_str(&cookie).map_err(ApiError::internal)?,
+    );
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(response)
+}
+
 fn resolve_web_password(args: &WebArgs) -> Result<Option<String>> {
     let password = if let Some(path) = &args.password_file {
         let contents = std::fs::read_to_string(path)
@@ -1299,6 +1453,27 @@ fn web_access_urls(port: u16, include_lan: bool) -> Vec<String> {
         .into_iter()
         .map(|address| format!("http://{address}:{port}"))
         .collect()
+}
+
+/// 局域网 IPv4（扫码登录二维码的 host）：优先私有段，回退回环
+fn lan_ip() -> Option<String> {
+    let Ok(interfaces) = if_addrs::get_if_addrs() else {
+        return None;
+    };
+    let mut fallback = None;
+    for interface in interfaces {
+        if let if_addrs::IfAddr::V4(address) = interface.addr {
+            let ip = address.ip;
+            if ip.is_loopback() || ip.is_unspecified() {
+                continue;
+            }
+            if ip.is_private() {
+                return Some(ip.to_string());
+            }
+            fallback.get_or_insert(ip.to_string());
+        }
+    }
+    fallback
 }
 
 async fn health() -> Json<Value> {

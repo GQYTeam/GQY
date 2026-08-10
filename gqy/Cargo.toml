@@ -1,6 +1,6 @@
 [package]
 name = "gqy"
-version = "0.9.1"
+version = "0.9.2"
 edition = "2021"
 license = "GPL-3.0"
 repository = "https://github.com/Francis-Xavier-code/GQY"
@@ -53,6 +53,7 @@ unicode-width = "0.2"
 urlencoding = "2.1"
 vte = "0.15"
 rustc-hash = "2"
+qrcode = "0.14"
 
 [build-dependencies]
 base64 = "0.22"

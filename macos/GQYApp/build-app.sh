@@ -75,4 +75,7 @@ PLIST
 
 codesign --force --deep -s - "$APP" >/dev/null 2>&1 || true
 echo "✓ $APP"
-open "$APP"
+# 不自动 open：由调用方决定（发布时 cp 到 /Applications 再启动，避免 build/ 与 /Applications 两份同名 App 并存）
+if [ "${GQY_OPEN:-1}" = "1" ]; then
+  open "$APP"
+fi

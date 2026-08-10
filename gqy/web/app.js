@@ -214,6 +214,10 @@
     loginError: document.getElementById("loginError"),
     loginSubmit: document.getElementById("loginSubmit"),
     loginSubmitLabel: document.getElementById("loginSubmitLabel"),
+    lanAccessCard: document.getElementById("lanAccessCard"),
+    lanQrImage: document.getElementById("lanQrImage"),
+    lanQrRefresh: document.getElementById("lanQrRefresh"),
+    lanAccessAddress: document.getElementById("lanAccessAddress"),
     retryBootstrapButton: document.getElementById("retryBootstrapButton"),
     timeline: document.getElementById("timeline"),
     emptyState: document.getElementById("emptyState"),
@@ -651,6 +655,26 @@
       panel.hidden = panel.dataset.settingsPanel !== selected;
     });
     if (selected === "tasks") loadAlarms();
+    if (selected === "general") updateLanAccessCard();
+  }
+
+  function updateLanAccessCard() {
+    const hasPassword = Boolean(String(configValue("web_ui.password", "") || "").trim());
+    elements.lanAccessCard.hidden = !hasPassword;
+    if (!hasPassword) return;
+    refreshQrCode();
+    apiRequest("/api/auth/qr-token")
+      .then((response) => response.json())
+      .then((data) => {
+        if (data?.host && data.host !== "127.0.0.1") {
+          elements.lanAccessAddress.textContent = `手机访问：http://${data.host}:${location.port || "4096"}（同一 Wi-Fi，扫码或输密码）`;
+        } else {
+          elements.lanAccessAddress.textContent = "未检测到局域网地址，请检查电脑网络连接";
+        }
+      })
+      .catch(() => {
+        elements.lanAccessAddress.textContent = "局域网地址获取失败";
+      });
   }
 
   function configValue(path, fallback = undefined) {
@@ -938,6 +962,12 @@
         textConfigField("回忆增强强度", "memory.forgetting_review_boost", { type: "number", inputType: "number", min: 0, step: 0.01 }),
         textConfigField("最小任务字数", "memory.learning_min_task_chars", { type: "number", inputType: "number", integer: true, min: 0 }),
         textConfigField("最小方法字数", "memory.learning_min_method_chars", { type: "number", inputType: "number", integer: true, min: 0 })
+      ]),
+      configGroup("局域网访问", [
+        textConfigField("访问密码", "web_ui.password", {
+          inputType: "password",
+          description: "设置后手机可扫登录页二维码或输入密码访问（电脑与手机需同一网络）。留空则仅本机可访问。保存后重启 App 生效。",
+        }),
       ]),
       configGroup("MCP", [
         booleanConfigField("启用 MCP", "mcp.enabled"),
@@ -1540,6 +1570,7 @@
       applyConfigPayload(await response.json());
       if (resetsConversation) await loadBootstrap();
       state.configSavedAt = Date.now();
+      updateLanAccessCard();
       showToast("配置已保存");
     } catch (error) {
       showToast(error.message || "配置保存失败", "error");
@@ -5324,10 +5355,17 @@
     elements.retryBootstrapButton.hidden = unauthorized;
     elements.loginError.textContent = "";
     elements.loginError.hidden = true;
+    elements.retryBootstrapButton.hidden = unauthorized;
     setLoginSubmitting(false);
     setConnectionStatus(unauthorized ? "blocked" : "offline");
     updateControlState();
     if (unauthorized) window.requestAnimationFrame(() => elements.loginPassword.focus());
+  }
+
+  function refreshQrCode() {
+    const img = elements.lanQrImage;
+    if (!img) return;
+    img.src = `/api/auth/qr.png?t=${Date.now()}`;
   }
 
   function applyBootstrap(snapshot) {
@@ -6525,6 +6563,7 @@
       elements.usageBillingEditor.hidden = !elements.usageBillingEditor.hidden;
     });
     elements.retryBootstrapButton.addEventListener("click", loadBootstrap);
+    elements.lanQrRefresh.addEventListener("click", refreshQrCode);
     elements.chatScroll.addEventListener("scroll", () => {
       state.nearBottom = isNearBottom();
       if (state.nearBottom) {
