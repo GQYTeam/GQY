@@ -2173,12 +2173,14 @@
         ? "历史对话"
         : `${channelLabel(state.viewingChannel)} 通道`;
       elements.conversationTitle.textContent = title;
-      elements.conversationTitle.title = "只读浏览历史记录";
+      elements.conversationTitle.title = state.viewingConversation
+        ? "继续该历史对话，新消息将归入此会话"
+        : "只读浏览历史记录";
       elements.sidebarConversationTitle.textContent = "返回当前对话";
       elements.sidebarConversationTitle.title = "返回当前对话";
       elements.sidebarConversationSnippet.textContent = "点击返回当前对话";
       elements.sidebarConversationTime.textContent = "";
-      elements.conversationMeta.textContent = "只读浏览";
+      elements.conversationMeta.textContent = state.viewingConversation ? "继续对话" : "只读浏览";
       return;
     }
     const details = deriveConversationDetails();
@@ -2468,7 +2470,8 @@
     const queueAvailable = !state.externalRunningTurnId || state.externalQueueAvailable;
     const busy = state.adminBusy || state.submitting;
     const locked = state.blocked || state.adminBusy;
-    const readonly = Boolean(state.viewingChannel || state.viewingConversation);
+    // 历史对话可继续（OpenAI 式）：viewingConversation 时输入可用，消息归入该会话
+    const readonly = Boolean(state.viewingChannel);
     const inputCount = countCharacters(elements.composerInput.value.trim());
 
     elements.composerInput.disabled = locked || readonly;
@@ -2500,9 +2503,8 @@
     elements.stopButton.title = state.cancellationRequested ? "正在停止" : "停止回复";
     elements.stopButton.setAttribute("aria-label", elements.stopButton.title);
 
-    if (readonly) elements.composerState.textContent = state.viewingConversation
-      ? "只读浏览历史对话，返回后即可继续对话"
-      : `只读浏览 ${channelLabel(state.viewingChannel)} 通道，返回后即可继续对话`;
+    if (readonly) elements.composerState.textContent = `只读浏览 ${channelLabel(state.viewingChannel)} 通道，返回后即可继续对话`;
+    else if (state.viewingConversation) elements.composerState.textContent = "正在继续该历史对话，新消息将归入此会话";
     else if (state.blocked) elements.composerState.textContent = "未授权";
     else if (state.cancellationRequested) elements.composerState.textContent = "正在停止";
     else if (hasPendingQuestion()) elements.composerState.textContent = "等待回答";
@@ -3625,7 +3627,7 @@
     if (state.viewingConversation) {
       const conversation = (Array.isArray(state.conversations) ? state.conversations : [])
         .find((item) => String(item?.id) === String(state.viewingConversation));
-      text.textContent = `正在查看历史对话「${conversation?.title || ""}」（只读，不影响当前对话）`;
+      text.textContent = `正在继续历史对话「${conversation?.title || ""}」——发消息会接在这个会话后面`;
     } else {
       text.textContent = `正在查看 ${channelLabel(state.viewingChannel)} 通道的对话记录（只读，不影响各通道上下文）`;
     }
@@ -5631,7 +5633,7 @@
   // 发送一条消息（重试/重新生成也走这里）。images 为 {mime, dataUrl} 列表。
   // 返回是否成功受理。
   async function sendTurnContent(content, mode, images = []) {
-    if (state.adminBusy || state.submitting || state.blocked || state.viewingChannel || state.viewingConversation) return false;
+    if (state.adminBusy || state.submitting || state.blocked || state.viewingChannel) return false;
     if (hasPendingQuestion() || (state.externalRunningTurnId && !state.externalQueueAvailable)) return false;
     const queueing = conversationRunning();
     requestNotificationPermission();
@@ -5649,15 +5651,24 @@
             data_base64: comma >= 0 ? String(image.dataUrl).slice(comma + 1) : "",
           };
         });
+      const body = {
+        content,
+        images: payloadImages,
+        conversation_id: state.viewingConversation || undefined,
+      };
+      if (!queueing) body.mode = mode;
       const response = await apiRequest(queueing ? "/api/queue" : "/api/turns", {
         method: "POST",
-        body: JSON.stringify(
-          queueing
-            ? { content, images: payloadImages }
-            : { content, mode, images: payloadImages }
-        )
+        body: JSON.stringify(body),
       });
       const payload = await response.json();
+      // 已受理：退出历史会话视图，回到实时模式（新消息已归入该会话）
+      if (state.viewingConversation) {
+        state.viewingConversation = null;
+        state.viewedTurns = [];
+        renderConversationList();
+        renderChannelList();
+      }
       const queuedPrompt = queueing ? payload : payload?.queued ? payload.prompt : null;
       if (queuedPrompt) {
         if (!state.queuedPrompts.some((prompt) => String(prompt?.id) === String(queuedPrompt?.id))) {

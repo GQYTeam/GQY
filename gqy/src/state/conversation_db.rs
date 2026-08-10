@@ -310,31 +310,36 @@ impl ConversationDb {
         owner_pid: u32,
         queue_session_id: &str,
         mode: &str,
+        conversation_id_override: Option<&str>,
     ) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         let seq = self.next_seq_locked(&conn)?;
         let now = Utc::now().to_rfc3339();
-        // 会话分组：沿用该通道未归档最近 turn 的 conversation_id（进程重启后恢复会话）；
-        // 无未归档 turns（如刚「新对话」归档过）则开新会话
-        let conversation_id: Option<String> = conn
-            .query_row(
-                "SELECT conversation_id FROM turns
-                 WHERE channel = ?1 AND hidden = 0
-                 ORDER BY seq DESC LIMIT 1",
-                params![self.channel],
-                |row| row.get(0),
-            )
-            .optional()?
-            .flatten()
+        // 会话分组：默认沿用该通道未归档最近 turn 的 conversation_id（进程重启后恢复会话）；
+        // 无未归档 turns（如刚「新对话」归档过）则开新会话。
+        // 显式指定（WebUI 继续历史对话）时优先用指定的会话。
+        let conversation_id: Option<String> = conversation_id_override
+            .map(str::to_string)
             .or_else(|| {
-                Some(format!(
-                    "conv_{}_{}",
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_millis())
-                        .unwrap_or(0),
-                    rand::random::<u32>()
-                ))
+                conn.query_row(
+                    "SELECT conversation_id FROM turns
+                     WHERE channel = ?1 AND hidden = 0
+                     ORDER BY seq DESC LIMIT 1",
+                    params![self.channel],
+                    |row| row.get(0),
+                )
+                .ok()
+                .flatten()
+                .or_else(|| {
+                    Some(format!(
+                        "conv_{}_{}",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis())
+                            .unwrap_or(0),
+                        rand::random::<u32>()
+                    ))
+                })
             });
         conn.execute(
             "INSERT INTO turns (turn_id, seq, user_content, user_timestamp, assistant_content, status, owner_pid, queue_session_id, channel, conversation_id, mode)
@@ -417,6 +422,20 @@ impl ConversationDb {
             "UPDATE turns SET assistant_content = ?1, assistant_timestamp = ?2, status = 'interrupted'
              WHERE turn_id = ?3 AND status = 'running'",
             params![INTERRUPTED_TEXT, now, turn_id],
+        )?;
+        Ok(())
+    }
+
+    /// 模型/服务调用失败：把 turn 标为 interrupted 并写入失败说明，
+    /// 让重载后前端能看到失败原因而不是卡在 running。
+    pub fn fail_turn(&self, turn_id: &str, message: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = Utc::now().to_rfc3339();
+        let note = format!("{}（发送失败，可重试）", message.trim());
+        conn.execute(
+            "UPDATE turns SET assistant_content = ?1, assistant_timestamp = ?2, status = 'interrupted'
+             WHERE turn_id = ?3 AND status = 'running'",
+            params![note, now, turn_id],
         )?;
         Ok(())
     }
@@ -861,6 +880,7 @@ impl ConversationDb {
         mode: &str,
         exclude_turn_id: &str,
         limit: Option<usize>,
+        conversation_id: Option<&str>,
     ) -> Result<Vec<Turn>> {
         let conn = self.conn.lock().unwrap();
         if mode == "chat" {
@@ -875,6 +895,21 @@ impl ConversationDb {
                 .query_map(params![self.channel, exclude_turn_id, limit.unwrap_or(12) as i64], map_turn_row)?
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             turns.reverse();
+            attach_turn_children_locked(&conn, &mut turns)?;
+            Ok(turns)
+        } else if let Some(conversation_id) = conversation_id {
+            // WebUI 继续历史对话：上下文只加载该会话的轮次
+            let mut stmt = conn.prepare(
+                "SELECT turn_id, seq, user_content, user_timestamp, assistant_content,
+                        assistant_reasoning, assistant_provider_id, assistant_model, assistant_timestamp, status, tool_reports, hidden, is_summary, owner_pid,
+                        token_total, token_usage_estimated
+                 FROM turns WHERE channel = ?1 AND hidden = 0 AND mode != 'chat' AND turn_id != ?2
+                   AND (conversation_id = ?3 OR (?3 = 'legacy' AND conversation_id IS NULL))
+                 ORDER BY seq ASC",
+            )?;
+            let mut turns = stmt
+                .query_map(params![self.channel, exclude_turn_id, conversation_id], map_turn_row)?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
             attach_turn_children_locked(&conn, &mut turns)?;
             Ok(turns)
         } else {

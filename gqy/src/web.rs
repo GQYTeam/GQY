@@ -764,6 +764,9 @@ struct CreateTurnRequest {
     mode: String,
     #[serde(default)]
     images: Vec<WebImageInput>,
+    /// 继续历史对话时指定目标会话；缺省 = 沿用最近会话
+    #[serde(default)]
+    conversation_id: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -2284,6 +2287,10 @@ async fn create_turn(
         manager.active_run_id = Some(run_id.clone());
     }
     let pasted = pasted_images_from_input(&request.images);
+    // 继续历史对话：把目标会话设为活动会话，agent 上下文加载/新 turn 都会落到该会话
+    state
+        .state_store
+        .set_active_conversation(request.conversation_id.clone());
     if state
         .actor_tx
         .send(ActorCommand::StartTurn {
@@ -2596,6 +2603,8 @@ async fn reset_conversation(
 ) -> std::result::Result<StatusCode, ApiError> {
     require_mutation(&headers, &state)?;
     require_no_running_turn(&state.state_store)?;
+    // 新对话：离开任何历史会话，回到默认会话
+    state.state_store.set_active_conversation(None);
     reserve_admin(&state.manager)?;
     let (reply, receiver) = oneshot::channel();
     if state
@@ -2876,7 +2885,7 @@ async fn run_agent_turn(
     let control = match setup {
         Ok(control) => control,
         Err(error) => {
-            finish_failed_run(manager, events, questions, agent, &run_id, &error);
+            finish_failed_run(manager, events, questions, state_store, agent, &run_id, &error);
             return true;
         }
     };
@@ -2937,7 +2946,7 @@ async fn run_agent_turn(
             return true;
         }
         TurnOutcome::Finished(Err(error)) => {
-            finish_failed_run(manager, events, questions, agent, &run_id, &error);
+            finish_failed_run(manager, events, questions, state_store, agent, &run_id, &error);
             return true;
         }
         TurnOutcome::Finished(Ok(result)) => result,
@@ -3300,6 +3309,7 @@ fn finish_failed_run(
     manager: &Arc<Mutex<ManagerState>>,
     events: &EventHub,
     questions: &QuestionBroker,
+    state_store: &StateStore,
     agent: &Agent,
     run_id: &str,
     error: &anyhow::Error,
@@ -3308,6 +3318,10 @@ fn finish_failed_run(
     let context = current_context(agent).ok();
     finish_run(manager, run_id, context);
     let message = safe_error_message(error);
+    // 把当前 running turn 落库为 interrupted+失败原因，重载后不再卡在 running
+    if let Ok(Some(target)) = state_store.running_turn_queue_target() {
+        let _ = state_store.fail_turn(&target.turn_id, &message);
+    }
     tracing::error!(run_id, error = %error, "WebUI agent run failed");
     events.publish(
         "run.failed",

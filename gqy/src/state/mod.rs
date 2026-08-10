@@ -33,6 +33,8 @@ pub struct StateStore {
     conv_db: Arc<ConversationDb>,
     queue_session_id: Arc<str>,
     queue_owner_pid: u32,
+    /// WebUI 继续历史对话时的目标会话；终端进程保持 None（沿用默认会话）。
+    active_conversation: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl StateStore {
@@ -56,6 +58,7 @@ impl StateStore {
             conv_db,
             queue_session_id,
             queue_owner_pid,
+            active_conversation: Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
@@ -90,8 +93,9 @@ impl StateStore {
     }
 
     pub fn start_turn(&self, turn_id: &str, user_content: &str, owner_pid: u32) -> Result<()> {
+        let conversation = self.active_conversation.lock().unwrap().clone();
         self.conv_db
-            .start_turn(turn_id, user_content, owner_pid, &self.queue_session_id, "normal")
+            .start_turn(turn_id, user_content, owner_pid, &self.queue_session_id, "normal", conversation.as_deref())
     }
 
     /// 按对话模式开始一轮（闲聊隔离：chat 模式写入 mode='chat'，与正经对话分离）
@@ -102,8 +106,28 @@ impl StateStore {
         owner_pid: u32,
         mode: &str,
     ) -> Result<()> {
-        self.conv_db
-            .start_turn(turn_id, user_content, owner_pid, &self.queue_session_id, mode)
+        let conversation = self
+            .active_conversation
+            .lock()
+            .unwrap()
+            .clone();
+        self.conv_db.start_turn(
+            turn_id,
+            user_content,
+            owner_pid,
+            &self.queue_session_id,
+            mode,
+            conversation.as_deref(),
+        )
+    }
+
+    /// 设置 WebUI 继续历史对话的目标会话（None = 回到默认会话，沿用最近）
+    pub fn set_active_conversation(&self, conversation_id: Option<String>) {
+        *self.active_conversation.lock().unwrap() = conversation_id;
+    }
+
+    pub fn active_conversation(&self) -> Option<String> {
+        self.active_conversation.lock().unwrap().clone()
     }
 
     /// 按模式加载可见历史（闲聊隔离）：chat 只看最近 N 条，其他模式排除 chat。
@@ -117,8 +141,9 @@ impl StateStore {
         exclude_turn_id: &str,
         limit: Option<usize>,
     ) -> Result<Vec<Turn>> {
+        let conversation = self.active_conversation.lock().unwrap().clone();
         self.conv_db
-            .load_visible_turns_for_mode_excluding(mode, exclude_turn_id, limit)
+            .load_visible_turns_for_mode_excluding(mode, exclude_turn_id, limit, conversation.as_deref())
     }
 
     #[allow(dead_code)]
@@ -137,6 +162,10 @@ impl StateStore {
 
     pub fn interrupt_turn(&self, turn_id: &str) -> Result<()> {
         self.conv_db.interrupt_turn(turn_id)
+    }
+
+    pub fn fail_turn(&self, turn_id: &str, message: &str) -> Result<()> {
+        self.conv_db.fail_turn(turn_id, message)
     }
 
     pub fn complete_turn_with_usage_and_model(
@@ -895,6 +924,80 @@ mod tests {
         let turns = store.load_turns().unwrap();
         assert_eq!(turns[0].status, TurnStatus::Interrupted);
         assert_eq!(turns[0].assistant_content, interrupted_text());
+    }
+
+    #[test]
+    fn active_conversation_filters_loaded_history() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = StateStore::new(&GqyPaths {
+            config_dir: temp.path().join("config"),
+            config_file: temp.path().join("config/config.jsonc"),
+            skills_dir: temp.path().join("config/skills"),
+            data_dir: temp.path().join("data"),
+            cache_dir: temp.path().join("cache"),
+            state_dir: temp.path().join("state"),
+            pictures_dir: temp.path().join("pictures"),
+            fish_hook_file: temp.path().join("fish/gqy.fish"),
+            bash_hook_file: temp.path().join("shell/bash-hook.sh"),
+            zsh_hook_file: temp.path().join("shell/zsh-hook.zsh"),
+            scripts_dir: temp.path().join("config/scripts"),
+            system_scripts_dir: PathBuf::new(),
+            share_dir: PathBuf::new(),
+            kb_dir: PathBuf::new(),
+        })
+        .unwrap();
+
+        // 会话 A：两条轮次
+        store.set_active_conversation(Some("conv_a".to_string()));
+        store.start_turn("a1", "A 的第一句", 999999).unwrap();
+        store.complete_turn("a1", "A 回复 1", None).unwrap();
+        store.start_turn("a2", "A 的第二句", 999999).unwrap();
+        store.complete_turn("a2", "A 回复 2", None).unwrap();
+
+        // 会话 B：一条轮次
+        store.set_active_conversation(Some("conv_b".to_string()));
+        store.start_turn("b1", "B 的第一句", 999999).unwrap();
+        store.complete_turn("b1", "B 回复 1", None).unwrap();
+
+        // 切回会话 A：上下文只含 A 的轮次
+        store.set_active_conversation(Some("conv_a".to_string()));
+        let turns_a = store.load_visible_turns_for_mode_excluding("normal", "new_turn", None).unwrap();
+        assert_eq!(turns_a.len(), 2);
+        assert!(turns_a.iter().all(|turn| turn.user_content.starts_with("A ")));
+
+        // 无活动会话：全通道（兼容终端进程）
+        store.set_active_conversation(None);
+        let turns_all = store.load_visible_turns_for_mode_excluding("normal", "new_turn", None).unwrap();
+        assert_eq!(turns_all.len(), 3);
+    }
+
+    #[test]
+    fn fail_turn_records_error_message() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = StateStore::new(&GqyPaths {
+            config_dir: temp.path().join("config"),
+            config_file: temp.path().join("config/config.jsonc"),
+            skills_dir: temp.path().join("config/skills"),
+            data_dir: temp.path().join("data"),
+            cache_dir: temp.path().join("cache"),
+            state_dir: temp.path().join("state"),
+            pictures_dir: temp.path().join("pictures"),
+            fish_hook_file: temp.path().join("fish/gqy.fish"),
+            bash_hook_file: temp.path().join("shell/bash-hook.sh"),
+            zsh_hook_file: temp.path().join("shell/zsh-hook.zsh"),
+            scripts_dir: temp.path().join("config/scripts"),
+            system_scripts_dir: PathBuf::new(),
+            share_dir: PathBuf::new(),
+            kb_dir: PathBuf::new(),
+        })
+        .unwrap();
+
+        store.start_turn("turn_1", "do something", 999999).unwrap();
+        store.fail_turn("turn_1", "upstream timed out").unwrap();
+        let turns = store.load_turns().unwrap();
+        assert_eq!(turns[0].status, TurnStatus::Interrupted);
+        assert!(turns[0].assistant_content.contains("upstream timed out"));
+        assert!(turns[0].assistant_content.contains("发送失败"));
     }
 
     #[test]
