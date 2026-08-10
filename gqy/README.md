@@ -1,9 +1,14 @@
-# GQY — 顾清影
+# GQY 核心(顾清影)
 
-活在终端与菜单栏里的 AI 助理(源码)。
+本目录为 GQY 的**核心源码**(Rust 工程),仓库根目录存放项目其他部分(docs/kb/communication 等)。
 
-本项目源码位于本目录(`gqy/`),仓库根目录仅作容器。
+## 构建
 
-- 编译:`cd gqy && cargo build --release`
-- 提示词:`gqy/src/prompts/`
-- 详见仓库根 README。
+```bash
+cd gqy
+cargo build --release
+```
+
+- 当前版本:v0.8.6(与正在运行的顾清影.app 一致)
+- ⚠️ 构建必需文件(已 gitignore,勿删):`assets/o200k_base.tiktoken`、`pics/GQY-avatar.png`、`pics/GQY-image.png`
+- 提示词:`src/prompts/`
