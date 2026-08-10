@@ -7,7 +7,6 @@ WebUI 是 GQY 的主要图形界面（`gqy web`，默认端口 4096）。菜单�
 ```zsh
 gqy web                # 启动并打开浏览器
 gqy web --no-open      # 只启动服务
-gqy menubar --install  # 菜单栏（⌥H 浏览器 / 左键悬浮卡片 / ⌥G 唤起）
 ```
 
 ## 顶栏

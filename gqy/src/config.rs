@@ -43,6 +43,39 @@ pub struct AppConfig {
     pub system_prompt_file: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
+    /// WebUI 局域网访问配置：设置 password 后 App/CLI 可绑定 0.0.0.0 供手机访问
+    #[serde(default)]
+    pub web_ui: WebUiConfig,
+    /// 用量计费单价：按供应商/模型配置，元/百万 token
+    #[serde(default)]
+    pub usage_billing: UsageBillingConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct WebUiConfig {
+    /// 访问密码；非空时允许监听局域网（手机浏览器访问）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct UsageBillingConfig {
+    /// 默认单价（元/百万 token）：input, output, cache_read
+    #[serde(default)]
+    pub default: Option<BillingRate>,
+    /// 按供应商名称覆盖单价
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub providers: std::collections::HashMap<String, BillingRate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BillingRate {
+    #[serde(default)]
+    pub input: f64,
+    #[serde(default)]
+    pub output: f64,
+    #[serde(default)]
+    pub cache_read: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -612,6 +645,8 @@ impl Default for AppConfig {
             memory: MemoryConfig::default(),
             system_prompt_file: Some("system-prompt.md".to_string()),
             system_prompt: None,
+            web_ui: WebUiConfig::default(),
+            usage_billing: UsageBillingConfig::default(),
         }
     }
 }

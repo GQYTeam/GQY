@@ -63,10 +63,17 @@
       }
     });
   }
-  if (typeof window !== "undefined" && document.readyState !== "loading") {
+  function initBackupChip() {
+    if (typeof window === "undefined") return;
     bindBackupChipClick();
+    refreshBackupStatus();
+    // 每 5 分钟刷新一次备份状态
+    setInterval(refreshBackupStatus, 300_000);
+  }
+  if (document.readyState !== "loading") {
+    initBackupChip();
   } else {
-    document.addEventListener("DOMContentLoaded", () => bindBackupChipClick());
+    document.addEventListener("DOMContentLoaded", initBackupChip);
   }
 
   const MAX_CONTENT_CHARS = 20_000;
@@ -170,11 +177,13 @@
     usageSubtitle: document.getElementById("usageSubtitle"),
     usageBackButton: document.getElementById("usageBackButton"),
     usageSummary: document.getElementById("usageSummary"),
-    usageContribution: document.getElementById("usageContribution"),
-    usageBars: document.getElementById("usageBars"),
+    usageHeatmap: document.getElementById("usageHeatmap"),
+    usageBarsStacked: document.getElementById("usageBarsStacked"),
     usageModelTable: document.getElementById("usageModelTable"),
     usageModelDetail: document.getElementById("usageModelDetail"),
     usageRecentList: document.getElementById("usageRecentList"),
+    usageBillingBtn: document.getElementById("usageBillingBtn"),
+    usageBillingEditor: document.getElementById("usageBillingEditor"),
     conversationStage: document.getElementById("conversationStage"),
     sidebarConversationTitle: document.getElementById("sidebarConversationTitle"),
     sidebarConversationSnippet: document.getElementById("sidebarConversationSnippet"),
@@ -3853,7 +3862,30 @@
     live.assistantText += text;
     live.copyButton.hidden = !live.assistantText.trim();
     scheduleMarkdownRender(live.currentText);
+    updateContextFromLive(live);
     contentAdded();
+  }
+
+  function updateContextFromLive(live) {
+    if (!live) return;
+    const baseline = asFiniteNumber(state.context?.tokens, 0);
+    let liveTokens = 0;
+    if (live.assistantText) liveTokens += Math.ceil(live.assistantText.length / 3);
+    const reasoningText = live.assistantReasoning || collectLiveReasoning(live);
+    if (reasoningText) liveTokens += Math.ceil(reasoningText.length / 2);
+    for (const tool of (live.tools || new Map()).values()) {
+      if (tool.stdoutDetail?.raw) liveTokens += Math.ceil(tool.stdoutDetail.raw.length / 3);
+      if (tool.stderrDetail?.raw) liveTokens += Math.ceil(tool.stderrDetail.raw.length / 3);
+      if (tool.progressDetail?.raw) liveTokens += Math.ceil(tool.progressDetail.raw.length / 4);
+    }
+    const windowSize = state.context?.window;
+    elements.contextNumbers.textContent = windowSize
+      ? `${formatTokens(baseline + liveTokens)} / ${formatTokens(windowSize)}`
+      : `${formatTokens(baseline + liveTokens)} / --`;
+    const percent = windowSize > 0 ? Math.min(100, Math.max(0, ((baseline + liveTokens) / windowSize) * 100)) : 0;
+    elements.contextBar.style.width = `${percent}%`;
+    elements.contextTrack.classList.toggle("is-high", percent >= 75 && percent < 90);
+    elements.contextTrack.classList.toggle("is-critical", percent >= 90);
   }
 
   function ensureLiveReasoning(live) {
@@ -3872,12 +3904,21 @@
     }
     live.reasoning = reasoning;
     live.reasoningParts.push(reasoning);
-    if (live.reasoningTimer) window.clearInterval(live.reasoningTimer);
-    const updateProgress = () => {
-      if (!reasoning.liveStatus || reasoning.startedAt == null) return;
-      const elapsed = Math.max(0, Math.floor((performance.now() - reasoning.startedAt) / 1000));
-      reasoning.liveStatus.textContent = `正在思考 · ${elapsed}s`;
-    };
+  if (live.reasoningTimer) window.clearInterval(live.reasoningTimer);
+  const updateProgress = () => {
+    if (!reasoning.liveStatus || reasoning.startedAt == null) return;
+    const elapsed = Math.max(0, Math.floor((performance.now() - reasoning.startedAt) / 1000));
+    const chars = reasoning.raw ? formatInteger(reasoning.raw.length) : "0";
+    if (reasoning.liveStatus.querySelector(".reasoning-chars")) {
+      reasoning.liveStatus.querySelector(".reasoning-chars").textContent = `${chars} 字`;
+    } else {
+      const charsNode = document.createElement("span");
+      charsNode.className = "reasoning-chars";
+      charsNode.textContent = `${chars} 字`;
+      reasoning.liveStatus.appendChild(charsNode);
+    }
+    reasoning.liveStatus.childNodes[0].textContent = `正在思考 · ${elapsed}s `;
+  };
     updateProgress();
     live.reasoningTimer = window.setInterval(updateProgress, 1000);
     return reasoning;
@@ -3956,6 +3997,7 @@
       reasoning.raw += delta;
       reasoning.body.textContent = reasoning.raw;
       live.assistantReasoning = collectLiveReasoning(live);
+      updateContextFromLive(live);
       contentAdded();
       return;
     }
@@ -4123,8 +4165,13 @@
     const body = document.createElement("div");
     body.className = "tool-body";
     const argumentsDetail = createToolDetail("参数", true);
-    const progressDetail = createToolDetail("进度");
-    const stdoutDetail = createToolDetail("命令输出", true);
+  const progressDetail = createToolDetail("进度");
+  const progressBar = document.createElement("div");
+  progressBar.className = "tool-progress-bar";
+  progressBar.hidden = true;
+  const progressBarFill = document.createElement("i");
+  progressBar.appendChild(progressBarFill);
+  const stdoutDetail = createToolDetail("命令输出", true);
     const stderrDetail = createToolDetail("错误输出", true);
     stderrDetail.wrapper.classList.add("is-stderr");
     const resultDetail = createToolDetail("结果", true);
@@ -4140,11 +4187,12 @@
     rerunButton.textContent = "重跑";
     rerunButton.hidden = true;
     rerunButton.title = "重新执行这个工具";
-    body.append(
-      argumentsDetail.wrapper,
-      progressDetail.wrapper,
-      stdoutDetail.wrapper,
-      stderrDetail.wrapper,
+  body.append(
+    argumentsDetail.wrapper,
+    progressBar,
+    progressDetail.wrapper,
+    stdoutDetail.wrapper,
+    stderrDetail.wrapper,
       resultDetail.wrapper,
       rerunButton
     );
@@ -4164,6 +4212,7 @@
       summary,
       argumentsDetail,
       progressDetail,
+      progressBar,
       stdoutDetail,
       stderrDetail,
       resultDetail,
@@ -4225,7 +4274,6 @@
     } else if (name === "tool.progress") {
       const message = String(data?.message || "");
       if (message) {
-        // 追加式滚动（agent 思考/回复流需要），带长度上限
         tool.progressDetail.raw = tool.progressDetail.raw
           ? boundedAppend(tool.progressDetail.raw, `\n${message}`)
           : message;
@@ -4233,6 +4281,13 @@
         tool.progressDetail.wrapper.hidden = false;
         if (tool.progressDetail.wrapper.scrollTop > 0) {
           tool.progressDetail.wrapper.scrollTop = tool.progressDetail.wrapper.scrollHeight;
+        }
+      }
+      if (tool.progressBar) {
+        tool.progressBar.hidden = false;
+        const pct = data?.progress != null ? Math.min(100, Math.max(0, Number(data.progress) || 0)) : null;
+        if (pct != null) {
+          tool.progressBar.querySelector("i").style.width = `${pct}%`;
         }
       }
       if (!tool.subject && message) tool.subject = compactLine(message);
@@ -4249,20 +4304,52 @@
       tool.finished = true;
       tool.finishedAt = performance.now();
       const output = String(data?.output || "");
-      tool.resultDetail.raw = output.length > MAX_TOOL_OUTPUT_CHARS ? `[较早输出已省略]\n${output.slice(-MAX_TOOL_OUTPUT_CHARS)}` : output;
+      const truncated = output.length > MAX_TOOL_OUTPUT_CHARS;
+      tool.resultDetail.raw = truncated ? `[较早输出已省略]\n${output.slice(-MAX_TOOL_OUTPUT_CHARS)}` : output;
       tool.resultDetail.content.textContent = tool.resultDetail.raw;
       tool.resultDetail.wrapper.hidden = !tool.resultDetail.raw;
+      if (truncated && tool.resultDetail.wrapper) {
+        let badge = tool.resultDetail.wrapper.querySelector(".tool-truncation-badge");
+        if (!badge) {
+          badge = document.createElement("div");
+          badge.className = "tool-truncation-badge";
+          badge.textContent = `输出过长，仅显示末尾 ${formatTokens(MAX_TOOL_OUTPUT_CHARS)} 字符`;
+          tool.resultDetail.wrapper.insertBefore(badge, tool.resultDetail.wrapper.firstChild);
+        }
+      }
       const ok = Boolean(data?.ok);
-      updateToolStatus(tool, ok ? "完成" : "失败", ok ? "check" : "circle-alert", ok ? "is-success" : "is-failure");
+      if (tool.progressBar) tool.progressBar.hidden = true;
+      // 平滑图标切换：spinner 淡出 → check 淡入
+      if (tool.statusIcon) {
+        const iconEl = tool.statusIcon.querySelector(".icon-slot");
+        if (iconEl) {
+          iconEl.classList.add("is-swapping-out");
+          setTimeout(() => {
+            updateToolStatus(tool, ok ? "完成" : "失败", ok ? "check" : "circle-alert",
+                            ok ? "is-success" : "is-failure");
+          }, 120);
+        } else {
+          updateToolStatus(tool, ok ? "完成" : "失败", ok ? "check" : "circle-alert",
+                          ok ? "is-success" : "is-failure");
+        }
+      } else {
+        updateToolStatus(tool, ok ? "完成" : "失败", ok ? "check" : "circle-alert",
+                        ok ? "is-success" : "is-failure");
+      }
       updateToolSummary(tool);
-      // 桥接工具（gqy_*）支持一键重跑
+      // 绿闪动画
+      tool.card.classList.add(ok ? "flash-complete" : "flash-fail");
+      setTimeout(() => {
+        tool.card.classList.remove("flash-complete", "flash-fail");
+        tool.card.classList.add("collapsed");
+        tool.head.setAttribute("aria-expanded", "false");
+      }, ok ? 600 : 700);
       if (tool.rawName.startsWith("gqy_") && tool.toolArgs && tool.rerunButton) {
         tool.rerunButton.hidden = false;
         tool.rerunButton.onclick = () => rerunTool(tool, tool.rerunButton);
       }
-      tool.card.classList.add("collapsed");
-      tool.head.setAttribute("aria-expanded", "false");
     }
+    updateContextFromLive(live);
     contentAdded();
   }
 
@@ -5707,11 +5794,17 @@
       const data = await response.json();
       const stats = data?.stats;
       if (!stats) return;
+      state.usageStats = stats;
+      state.usageBilling = stats.billing || { default: { input: 2, output: 8, cache_read: 0.2 }, providers: {} };
+      const totalCost = asFiniteNumber(stats.total?.cost, 0);
+      const costStr = totalCost > 0 ? ` · ≈ ¥${totalCost.toFixed(2)}` : "";
+      elements.usageSubtitle.textContent =
+        `共 ${formatTokens(stats.total?.total_tokens)} token · ${formatInteger(stats.total?.requests || 0)} 次请求${costStr}`;
       renderUsageSummary(stats);
-      renderUsageBars(stats);
-      renderUsageMonths(stats);
+      renderUsageHeatmap(stats);
+      renderUsageBarsStacked(stats);
       renderUsageModelTable(stats);
-      elements.usageSubtitle.textContent = `共 ${formatTokens(stats.total?.total_tokens)} token · ${formatInteger(stats.total?.requests || 0)} 次请求`;
+      renderUsageBillingEditor();
       loadUsageDetails();
     } catch (error) {
       elements.usageSubtitle.textContent = "加载失败";
@@ -5732,169 +5825,236 @@
     }
   }
 
+  // ── 单价表 ──
+
+  function billingRate(providerId) {
+    const b = state.usageBilling || { default: { input: 2, output: 8, cache_read: 0.2 }, providers: {} };
+    return (b.providers && b.providers[providerId]) || b.default || { input: 2, output: 8, cache_read: 0.2 };
+  }
+
+  function fmtCost(n) {
+    if (n == null || n === 0) return "¥0";
+    if (Math.abs(n) < 0.01) return "¥" + n.toFixed(4);
+    return "¥" + n.toFixed(2);
+  }
+
+  function renderUsageBillingEditor() {
+    const editor = elements.usageBillingEditor;
+    const b = state.usageBilling || { default: { input: 2, output: 8, cache_read: 0.2 }, providers: {} };
+    editor.replaceChildren();
+    const form = document.createElement("div");
+    form.className = "usage-billing-form";
+    const heading = document.createElement("div");
+    heading.className = "usage-billing-heading";
+    heading.textContent = "单价（元/百万 token）· 修改后用量刷新即生效";
+    form.appendChild(heading);
+    const row = document.createElement("div");
+    row.className = "usage-billing-row";
+    ["input", "output", "cache_read"].forEach((field) => {
+      const label = document.createElement("label");
+      label.textContent = { input: "输入", output: "输出", cache_read: "缓存" }[field];
+      const input = document.createElement("input");
+      input.type = "number"; input.step = "0.1"; input.min = "0";
+      input.value = String(b.default[field] || 0);
+      input.addEventListener("change", () => {
+        const v = parseFloat(input.value);
+        if (Number.isFinite(v) && v >= 0) {
+          b.default = Object.assign({}, b.default, { [field]: v });
+          state.usageBilling = b;
+          if (state.usageStats) {
+            state.usageStats.billing = b;
+            renderUsageSummary(state.usageStats);
+            renderUsageModelTable(state.usageStats);
+            const totalCost = asFiniteNumber(state.usageStats.total?.cost, 0);
+            elements.usageSubtitle.textContent =
+              `共 ${formatTokens(state.usageStats.total?.total_tokens)} token · ${formatInteger(state.usageStats.total?.requests || 0)} 次请求` +
+              (totalCost > 0 ? ` · ≈ ¥${totalCost.toFixed(2)}` : "");
+          }
+        }
+      });
+      label.appendChild(input);
+      row.appendChild(label);
+    });
+    form.appendChild(row);
+    editor.appendChild(form);
+  }
+
+  // ── 4 张汇总卡片 ──
+
   function renderUsageSummary(stats) {
     const cards = [
-      ["累计", stats.total?.total_tokens, stats.total?.requests],
-      ["今日", stats.today?.total_tokens, stats.today?.requests],
-      ["本周", stats.this_week?.total_tokens, stats.this_week?.requests],
-      ["本月", stats.this_month?.total_tokens, stats.this_month?.requests]
+      ["累计", stats.total],
+      ["今日", stats.today],
+      ["本周", stats.this_week],
+      ["本月", stats.this_month]
     ];
     elements.usageSummary.replaceChildren();
-    for (const [label, tokens, requests] of cards) {
+    for (const [label, agg] of cards) {
       const card = document.createElement("div");
       card.className = "usage-summary-card";
       const name = document.createElement("span");
       name.className = "usage-summary-label";
       name.textContent = label;
       const value = document.createElement("strong");
-      value.textContent = formatTokens(tokens);
+      value.textContent = formatTokens(agg?.total_tokens);
       const hint = document.createElement("small");
-      hint.textContent = `${formatInteger(requests)} 次请求`;
+      const cost = asFiniteNumber(agg?.cost, 0);
+      hint.textContent = `${formatInteger(agg?.requests || 0)} 次${cost > 0 ? ` · ${fmtCost(cost)}` : ""}`;
       card.append(name, value, hint);
       elements.usageSummary.appendChild(card);
     }
   }
 
-  // 图表跟随鼠标 tooltip（DeepSeek 用量页风格）
-  function chartTooltip(col, lines) {
-    col.classList.add("has-tooltip");
-    col.title = "";
-    col.addEventListener("mouseenter", () => {
-      let tip = document.querySelector(".usage-chart-tooltip");
-      if (!tip) {
-        tip = document.createElement("div");
-        tip.className = "usage-chart-tooltip";
-        document.body.appendChild(tip);
-      }
-      tip.replaceChildren();
-      for (const line of lines) {
-        const p = document.createElement("p");
-        p.textContent = line;
-        tip.appendChild(p);
-      }
-      tip.hidden = false;
-    });
-    col.addEventListener("mousemove", (event) => {
-      const tip = document.querySelector(".usage-chart-tooltip");
-      if (!tip) return;
-      const pad = 14;
-      let left = event.clientX + pad;
-      let top = event.clientY + pad;
-      const rect = tip.getBoundingClientRect();
-      if (left + rect.width > window.innerWidth - 8) left = event.clientX - rect.width - pad;
-      if (top + rect.height > window.innerHeight - 8) top = event.clientY - rect.height - pad;
-      tip.style.left = `${left}px`;
-      tip.style.top = `${top}px`;
-    });
-    col.addEventListener("mouseleave", () => {
-      const tip = document.querySelector(".usage-chart-tooltip");
-      if (tip) tip.hidden = true;
-    });
-  }
+  // ── GitHub 热力图（52 周） ──
 
-  // 近 30 天趋势柱状图
-  function renderUsageBars(stats) {
+  function renderUsageHeatmap(stats) {
     const daily = Array.isArray(stats.daily) ? stats.daily : [];
-    const recent = daily.slice(-30);
-    const container = elements.usageBars;
+    const container = elements.usageHeatmap;
     container.replaceChildren();
-    if (!recent.length) {
-      container.textContent = "暂无消耗数据";
-      return;
+    if (!daily.length) { container.textContent = "暂无消耗数据"; return; }
+    const byDate = new Map(daily.map((d) => [d.date, d]));
+    const today = new Date();
+    const end = new Date(today);
+    end.setDate(end.getDate() + (7 - ((end.getDay() + 6) % 7)));
+    const start = new Date(end);
+    start.setDate(start.getDate() - 52 * 7 + 1);
+    const maxTokens = Math.max(1, ...daily.map((d) => asFiniteNumber(d.tokens, 0)));
+    function cellLevel(v) {
+      if (v === 0) return "l0";
+      if (v < maxTokens * 0.25) return "l1";
+      if (v < maxTokens * 0.5) return "l2";
+      if (v < maxTokens * 0.75) return "l3";
+      return "l4";
     }
-    const maxTokens = Math.max(1, ...recent.map((day) => asFiniteNumber(day.tokens, 0)));
-    const chart = document.createElement("div");
-    chart.className = "usage-bars-chart";
-    for (const day of recent) {
-      const tokens = asFiniteNumber(day.tokens, 0);
+    const grid = document.createElement("div");
+    grid.className = "usage-hm-grid";
+    // month labels
+    const months = document.createElement("div");
+    months.className = "usage-hm-months";
+    const weeks = [];
+    for (let w = 0; w < 53; w++) {
       const col = document.createElement("div");
-      col.className = "usage-bar-col";
-      col.title = `${day.date} · ${formatTokens(tokens)} token${day.requests ? `（${formatInteger(day.requests)} 次）` : ""}`;
-      chartTooltip(col, [
-        day.date,
-        `Token：${formatTokens(tokens)}`,
-        day.requests ? `请求：${formatInteger(day.requests)} 次` : "请求：无",
-      ]);
-      const bar = document.createElement("i");
-      bar.className = "usage-bar" + (tokens === 0 ? " is-zero" : "");
-      bar.style.height = tokens === 0 ? "2px" : `${Math.max(6, (tokens / maxTokens) * 100)}%`;
-      const label = document.createElement("span");
-      label.className = "usage-bar-date";
-      const date = new Date(`${day.date}T00:00:00`);
-      label.textContent = `${date.getMonth() + 1}/${date.getDate()}`;
-      col.append(bar, label);
-      chart.appendChild(col);
+      col.className = "usage-hm-week";
+      const colDate = new Date(start);
+      colDate.setDate(start.getDate() + w * 7);
+      const m = colDate.getMonth();
+      if (w === 0 || (w > 0 && m !== new Date(start.getTime() + (w - 1) * 7 * 86400000).getMonth())) {
+        const lbl = document.createElement("span");
+        lbl.className = "usage-hm-month";
+        const monthsEn = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        const monthsZh = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
+        lbl.textContent = colDate.getFullYear() === today.getFullYear() ? monthsZh[m] : `${colDate.getFullYear()}-${monthsEn[m]}`;
+        months.appendChild(lbl);
+      } else {
+        months.appendChild(document.createElement("span"));
+      }
+      for (let d = 0; d < 7; d++) {
+        const dDate = new Date(colDate);
+        dDate.setDate(colDate.getDate() + d);
+        const key = dDate.toISOString().slice(0, 10);
+        const rec = byDate.get(key);
+        const tokens = rec ? asFiniteNumber(rec.tokens, 0) : 0;
+        const cell = document.createElement("i");
+        cell.className = "usage-hm-cell " + cellLevel(tokens);
+        const cost = rec ? asFiniteNumber(rec.cost, 0) : 0;
+        cell.title = rec ? `${key}\n${formatTokens(tokens)} token · ${rec.requests} 次\n≈ ${fmtCost(cost)}` : `${key}\n无记录`;
+        col.appendChild(cell);
+      }
+      weeks.push(col);
     }
-    container.appendChild(chart);
-    const statsLine = document.createElement("div");
-    statsLine.className = "usage-bars-stats";
-    const peak = recent.reduce((max, day) => (asFiniteNumber(day.tokens, 0) > max.tokens ? day : max), { tokens: 0 });
-    const total = recent.reduce((sum, day) => sum + asFiniteNumber(day.tokens, 0), 0);
-    const avg = Math.round(total / recent.length);
-    statsLine.textContent = `峰值 ${peak.date} · ${formatTokens(peak.tokens)}　日均 ${formatTokens(avg)}　合计 ${formatTokens(total)}`;
-    container.appendChild(statsLine);
-  }
-
-  // 近 12 个月月度柱状图：每月总 token（比 365 天贡献网格更直观、有标注、不溢出）
-  function renderUsageMonths(stats) {
-    const daily = Array.isArray(stats.daily) ? stats.daily : [];
-    const container = elements.usageContribution;
-    container.replaceChildren();
-    if (!daily.length) {
-      container.textContent = "暂无消耗数据";
-      return;
-    }
-    const byMonth = new Map();
-    for (const day of daily) {
-      const key = String(day.date || "").slice(0, 7);
-      if (!key) continue;
-      const entry = byMonth.get(key) || { tokens: 0, requests: 0 };
-      entry.tokens += asFiniteNumber(day.tokens, 0);
-      entry.requests += asFiniteNumber(day.requests, 0);
-      byMonth.set(key, entry);
-    }
-    const months = Array.from(byMonth.entries()).slice(-12);
-    const maxTokens = Math.max(1, ...months.map(([, v]) => v.tokens));
-
-    const chart = document.createElement("div");
-    chart.className = "usage-months-chart";
-    for (const [key, value] of months) {
-      const [year, month] = key.split("-");
-      const col = document.createElement("div");
-      col.className = "usage-month-col";
-      const bar = document.createElement("i");
-      bar.className = "usage-month-bar" + (value.tokens === 0 ? " is-zero" : "");
-      bar.style.height = value.tokens === 0 ? "2px" : `${Math.max(8, (value.tokens / maxTokens) * 100)}%`;
-      const valueLabel = document.createElement("span");
-      valueLabel.className = "usage-month-value";
-      valueLabel.textContent = value.tokens === 0 ? "0" : formatTokens(value.tokens);
-      const label = document.createElement("span");
-      label.className = "usage-month-label";
-      label.textContent = `${month}月`;
-      if (year && year !== String(new Date().getFullYear())) label.textContent = `${month}/${year.slice(2)}`;
-      chartTooltip(col, [
-        `${year}-${month}`,
-        `Token：${formatTokens(value.tokens)}`,
-        `请求：${formatInteger(value.requests)} 次`,
-      ]);
-      col.append(bar, valueLabel, label);
-      chart.appendChild(col);
-    }
-    container.appendChild(chart);
+    // week labels
+    const wl = document.createElement("div");
+    wl.className = "usage-hm-weeks";
+    ["一","三","五"].forEach((s) => {
+      const d = document.createElement("span");
+      d.textContent = s;
+      wl.appendChild(d);
+    });
+    grid.appendChild(wl);
+    grid.appendChild(months);
+    weeks.forEach((c) => grid.appendChild(c));
+    // legend
     const legend = document.createElement("div");
-    legend.className = "usage-legend";
+    legend.className = "usage-hm-legend";
     legend.append(
       Object.assign(document.createElement("span"), { textContent: "少" }),
-      Object.assign(document.createElement("i"), { className: "cell-level-1", ariaHidden: "true" }),
-      Object.assign(document.createElement("i"), { className: "cell-level-3", ariaHidden: "true" }),
-      Object.assign(document.createElement("span"), { textContent: "多" }),
+      ...["l0","l1","l2","l3","l4"].map((l) => {
+        const i = document.createElement("i");
+        i.className = "usage-hm-legend-cell " + l;
+        return i;
+      }),
+      Object.assign(document.createElement("span"), { textContent: "多" })
     );
+    container.appendChild(grid);
     container.appendChild(legend);
   }
+
+  // ── 近 30 天输入/输出/缓存堆叠柱状图 ──
+
+  function renderUsageBarsStacked(stats) {
+    const daily = Array.isArray(stats.daily) ? stats.daily : [];
+    const recent = daily.slice(-30);
+    const container = elements.usageBarsStacked;
+    container.replaceChildren();
+    if (!recent.length) { container.textContent = "暂无消耗数据"; return; }
+    const maxV = Math.max(1, ...recent.map((d) => asFiniteNumber(d.tokens, 0)));
+    const chart = document.createElement("div");
+    chart.className = "usage-stacked-chart";
+    for (const day of recent) {
+      const tokens = asFiniteNumber(day.tokens, 0);
+      const prompt = asFiniteNumber(day.prompt, 0);
+      const completion = asFiniteNumber(day.completion, 0);
+      const cacheRead = asFiniteNumber(day.cache_read, 0);
+      const cost = asFiniteNumber(day.cost, 0);
+      const col = document.createElement("div");
+      col.className = "usage-stacked-col";
+      const bar = document.createElement("div");
+      bar.className = "usage-stacked-bar";
+      const segCache = document.createElement("i"); segCache.className = "usage-stacked-seg seg-cache";
+      segCache.style.height = (cacheRead / maxV * 100).toFixed(2) + "%";
+      const segPrompt = document.createElement("i"); segPrompt.className = "usage-stacked-seg seg-prompt";
+      segPrompt.style.height = Math.max(1, (prompt / maxV * 100)).toFixed(2) + "%";
+      const segComp = document.createElement("i"); segComp.className = "usage-stacked-seg seg-completion";
+      segComp.style.height = Math.max(1, (completion / maxV * 100)).toFixed(2) + "%";
+      bar.append(segCache, segPrompt, segComp);
+      const date = new Date(`${day.date}T00:00:00`);
+      const label = document.createElement("span");
+      label.className = "usage-stacked-label";
+      label.textContent = `${date.getMonth() + 1}/${date.getDate()}`;
+      col.append(bar, label);
+      col.title = `${day.date}\n入 ${formatTokens(prompt)} · 出 ${formatTokens(completion)} · 缓存 ${formatTokens(cacheRead)}\n≈ ${fmtCost(cost)}`;
+      chart.appendChild(col);
+    }
+    const legend = document.createElement("div");
+    legend.className = "usage-stacked-legend";
+    legend.append(
+      objSpan("usage-legend-chip seg-prompt", "输入"),
+      objSpan("usage-legend-chip seg-completion", "输出"),
+      objSpan("usage-legend-chip seg-cache", "缓存命中"),
+    );
+    const statsLine = document.createElement("div");
+    statsLine.className = "usage-stacked-stats";
+    const peak = recent.reduce((max, day) => (asFiniteNumber(day.tokens, 0) > max.tokens ? { date: day.date, tokens: asFiniteNumber(day.tokens, 0) } : max), { date: "", tokens: 0 });
+    const total = recent.reduce((sum, day) => sum + asFiniteNumber(day.tokens, 0), 0);
+    const avg = Math.round(total / recent.length);
+    const totalCost = recent.reduce((sum, day) => sum + asFiniteNumber(day.cost, 0), 0);
+    statsLine.textContent = `峰值 ${peak.date} · ${formatTokens(peak.tokens)}　日均 ${formatTokens(avg)}　合计 ${formatTokens(total)}　≈ ${fmtCost(totalCost)}`;
+    container.append(chart, legend, statsLine);
+  }
+
+  function objSpan(cls, txt) {
+    const s = document.createElement("span");
+    s.className = cls;
+    s.textContent = txt;
+    return s;
+  }
+
+  // ── 模型明细表（含费用列 + 堆叠比例条） ──
 
   function renderUsageModelTable(stats) {
     const models = Array.isArray(stats.models) ? stats.models : [];
     const totalTokens = Math.max(1, asFiniteNumber(stats.total?.total_tokens, 0));
+    const billing = state.usageBilling || { default: { input: 2, output: 8, cache_read: 0.2 }, providers: {} };
     elements.usageModelTable.replaceChildren();
     if (!models.length) {
       const empty = document.createElement("p");
@@ -5907,7 +6067,7 @@
     table.className = "usage-model-table";
     const head = document.createElement("thead");
     const headRow = document.createElement("tr");
-    for (const label of ["模型", "请求", "输入", "输出", "总 Token", "占比"]) {
+    for (const label of ["模型", "请求", "输入", "输出", "缓存", "总 Token", "费用", "占比"]) {
       const th = document.createElement("th");
       th.textContent = label;
       headRow.appendChild(th);
@@ -5930,26 +6090,39 @@
       provider.textContent = model.provider_id || "";
       copy.append(name, provider);
       nameCell.append(mark, copy);
-      const requests = document.createElement("td");
-      requests.textContent = formatInteger(model.requests);
-      const prompt = document.createElement("td");
-      prompt.textContent = formatTokens(model.prompt_tokens);
-      const completion = document.createElement("td");
-      completion.textContent = formatTokens(model.completion_tokens);
+      row.appendChild(nameCell);
+      for (const key of ["requests", "prompt_tokens", "completion_tokens", "cache_read_tokens"]) {
+        const td = document.createElement("td");
+        td.textContent = key === "requests" ? formatInteger(model[key] || 0) : formatTokens(model[key] || 0);
+        row.appendChild(td);
+      }
       const total = document.createElement("td");
       total.className = "usage-model-total";
       total.textContent = formatTokens(model.total_tokens);
+      row.appendChild(total);
+      const costTd = document.createElement("td");
+      costTd.className = "usage-model-cost";
+      costTd.textContent = fmtCost(model.cost);
+      row.appendChild(costTd);
       const shareCell = document.createElement("td");
       const shareWrap = document.createElement("div");
-      shareWrap.className = "usage-share";
-      const bar = document.createElement("i");
-      const share = Math.min(100, (asFiniteNumber(model.total_tokens, 0) / totalTokens) * 100);
-      bar.style.width = `${share.toFixed(1)}%`;
+      shareWrap.className = "usage-share-stacked";
+      const pct = model.total_tokens / totalTokens;
+      const pPrompt = (model.prompt_tokens / Math.max(1, model.total_tokens)) * pct * 100;
+      const pComp = (model.completion_tokens / Math.max(1, model.total_tokens)) * pct * 100;
+      const pCache = ((model.cache_read_tokens || 0) / Math.max(1, model.total_tokens)) * pct * 100;
+      [{ w: pPrompt, c: "share-prompt" }, { w: pComp, c: "share-completion" }, { w: pCache, c: "share-cache" }].forEach((seg) => {
+        if (seg.w > 0) {
+          const i = document.createElement("i");
+          i.className = seg.c;
+          i.style.flex = String(seg.w);
+          shareWrap.appendChild(i);
+        }
+      });
       const shareText = document.createElement("span");
-      shareText.textContent = `${share.toFixed(1)}%`;
-      shareWrap.append(bar, shareText);
-      shareCell.appendChild(shareWrap);
-      row.append(nameCell, requests, prompt, completion, total, shareCell);
+      shareText.textContent = `${(pct * 100).toFixed(1)}%`;
+      shareCell.append(shareWrap, shareText);
+      row.appendChild(shareCell);
       row.classList.add("usage-model-row");
       row.tabIndex = 0;
       row.title = `查看 ${model.model} 的每日消耗与调用明细`;
@@ -5967,7 +6140,6 @@
     elements.usageModelTable.appendChild(table);
   }
 
-  // 模型详情：该模型按日消耗柱状图 + 该模型最近调用明细
   function renderUsageModelDetail(model, records) {
     state.usageDetailModel = model;
     const detail = elements.usageModelDetail;
@@ -5980,7 +6152,7 @@
     const name = document.createElement("strong");
     name.textContent = `${model?.model || "(未标注)"} · 每日消耗`;
     const provider = document.createElement("small");
-    provider.textContent = `${model?.provider_id || ""} · 累计 ${formatTokens(model?.total_tokens)} token · ${formatInteger(model?.requests || 0)} 次请求`;
+    provider.textContent = `${model?.provider_id || ""} · 累计 ${formatTokens(model?.total_tokens)} token · ${formatInteger(model?.requests || 0)} 次请求` + (model?.cost > 0 ? ` · ≈ ${fmtCost(model.cost)}` : "");
     copy.append(name, provider);
     const close = document.createElement("button");
     close.type = "button";
@@ -6001,9 +6173,11 @@
     const days = new Map();
     for (const record of modelRecords) {
       const date = recordDayKey(record?.ts);
-      const entry = days.get(date) || { tokens: 0, requests: 0 };
+      const entry = days.get(date) || { tokens: 0, requests: 0, cost: 0 };
       entry.tokens += asFiniteNumber(record?.total, 0);
       entry.requests += 1;
+      const rate = billingRate(record?.provider || "");
+      entry.cost += ((record?.prompt || 0) * rate.input + (record?.completion || 0) * rate.output + (record?.cache_read || 0) * rate.cache_read) / 1e6;
       days.set(date, entry);
     }
     const maxDayTokens = Math.max(1, ...Array.from(days.values()).map((entry) => entry.tokens));
@@ -6018,7 +6192,7 @@
       for (const [date, entry] of Array.from(days.entries()).sort()) {
         const bar = document.createElement("div");
         bar.className = "usage-detail-bar";
-        bar.title = `${date} · ${formatTokens(entry.tokens)} token（${entry.requests} 次）`;
+        bar.title = `${date} · ${formatTokens(entry.tokens)} token（${entry.requests} 次）` + (entry.cost > 0 ? ` · ≈ ${fmtCost(entry.cost)}` : "");
         const fill = document.createElement("i");
         const height = Math.max(4, Math.round((entry.tokens / maxDayTokens) * 96));
         fill.style.height = `${height}%`;
@@ -6056,11 +6230,9 @@
       const time = document.createElement("span");
       time.className = "usage-record-time";
       time.textContent = formatDateTime(new Date(asFiniteNumber(record?.ts, 0) * 1000));
-      time.title = time.textContent;
       const model = document.createElement("span");
       model.className = "usage-record-model";
       model.textContent = `${record?.model || "(未标注)"}${record?.provider ? ` · ${record.provider}` : ""}`;
-      model.title = model.textContent;
       const tokens = document.createElement("span");
       tokens.className = "usage-record-tokens";
       const parts = [];
@@ -6074,7 +6246,6 @@
         cache.className = "usage-record-cache";
         if (cacheRead > 0) cache.textContent = `缓存命中 ${formatTokens(cacheRead)}`;
         else if (cacheCreation > 0) cache.textContent = `新建缓存 ${formatTokens(cacheCreation)}`;
-        cache.title = `缓存命中 ${formatTokens(cacheRead)} · 新建缓存 ${formatTokens(cacheCreation)}`;
         tokens.after(cache);
       }
       const total = document.createElement("strong");
@@ -6084,16 +6255,20 @@
         const badge = document.createElement("span");
         badge.className = "usage-record-aux";
         badge.textContent = "记忆";
-        badge.title = "记忆归档/压缩等辅助调用";
         total.before(badge);
       }
-      row.append(time, model, tokens, total);
+      const rate = billingRate(record?.provider || "");
+      const recCost = ((record?.prompt || 0) * rate.input + (record?.completion || 0) * rate.output + (record?.cache_read || 0) * rate.cache_read) / 1e6;
+      const costSpan = document.createElement("span");
+      costSpan.className = "usage-record-cost";
+      costSpan.textContent = fmtCost(recCost);
+      if (recCost > 1) costSpan.classList.add("usage-record-cost-hot");
+      row.append(time, model, tokens, total, costSpan);
       list.appendChild(row);
     }
     return list;
   }
 
-  // 最近调用明细列表（用量页底部；含记忆/压缩等辅助消耗）
   function renderUsageRecentList(records) {
     const list = Array.isArray(records) ? records : [];
     elements.usageRecentList.replaceChildren();
@@ -6335,6 +6510,9 @@
     elements.newChatButton.addEventListener("click", requestNewConversation);
     elements.usageButton.addEventListener("click", showUsageView);
     elements.usageBackButton.addEventListener("click", hideUsageView);
+    if (elements.usageBillingBtn) elements.usageBillingBtn.addEventListener("click", () => {
+      elements.usageBillingEditor.hidden = !elements.usageBillingEditor.hidden;
+    });
     elements.retryBootstrapButton.addEventListener("click", loadBootstrap);
     elements.chatScroll.addEventListener("scroll", () => {
       state.nearBottom = isNearBottom();

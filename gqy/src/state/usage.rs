@@ -1,7 +1,9 @@
+use crate::config::{BillingRate, UsageBillingConfig};
 use crate::llm::Usage;
 use anyhow::Result;
 use chrono::{Datelike, TimeZone};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 
@@ -183,6 +185,7 @@ pub struct UsageAggregate {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub total_tokens: u64,
+    pub cost: f64,
 }
 
 #[derive(Serialize)]
@@ -190,6 +193,11 @@ pub struct DailyUsage {
     pub date: String,
     pub tokens: u64,
     pub requests: u64,
+    /// 「主动消耗」token（不含缓存读取）；实际计费 = 未命中部分输入 + 输出 + 缓存读取
+    pub prompt: u64,
+    pub completion: u64,
+    pub cache_read: u64,
+    pub cost: f64,
 }
 
 #[derive(Serialize)]
@@ -200,6 +208,14 @@ pub struct ModelUsage {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub total_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cost: f64,
+}
+
+#[derive(Serialize)]
+pub struct UsageBilling {
+    pub default: BillingRate,
+    pub providers: HashMap<String, BillingRate>,
 }
 
 #[derive(Serialize)]
@@ -212,11 +228,13 @@ pub struct UsageStats {
     pub daily: Vec<DailyUsage>,
     /// 按 提供方/模型 聚合，按总 token 降序
     pub models: Vec<ModelUsage>,
+    /// 计费单价配置
+    pub billing: UsageBilling,
 }
 
 /// 聚合全部历史记录（上限防呆：只读最近 20 万行）。
-pub fn usage_stats(path: &Path) -> Result<UsageStats> {
-    use std::collections::HashMap;
+/// `billing` 用于计算每个模型/每日的费用。
+pub fn usage_stats(path: &Path, billing: &UsageBillingConfig) -> Result<UsageStats> {
     use std::io::{BufRead, BufReader};
 
     let mut records: Vec<UsageRecord> = Vec::new();
@@ -249,8 +267,8 @@ pub fn usage_stats(path: &Path) -> Result<UsageStats> {
     let mut today_agg = UsageAggregate::default();
     let mut week_agg = UsageAggregate::default();
     let mut month_agg = UsageAggregate::default();
-    let mut daily_map: HashMap<chrono::NaiveDate, UsageAggregate> = HashMap::new();
-    let mut model_map: HashMap<(String, String), UsageAggregate> = HashMap::new();
+    let mut daily_map: HashMap<chrono::NaiveDate, (UsageAggregate, u64, u64, u64)> = HashMap::new();
+    let mut model_map: HashMap<(String, String), (UsageAggregate, u64)> = HashMap::new();
 
     for record in &records {
         let local = chrono::Local
@@ -258,40 +276,37 @@ pub fn usage_stats(path: &Path) -> Result<UsageStats> {
             .single()
             .map(|dt| dt.date_naive());
         let date = local.unwrap_or(today);
-        let agg = |value: &mut UsageAggregate| {
+        let provider = if record.provider.is_empty() { "unknown" } else { &record.provider };
+        let provider_key = provider.to_string();
+        let model = if record.model.is_empty() { "(未标注)" } else { &record.model };
+        let model_key = model.to_string();
+
+        let cost = record_cost(record, &provider_key, billing);
+        let cache_read = record.cache_read.unwrap_or(0);
+
+        let mut agg_one = |value: &mut UsageAggregate| {
             value.requests += 1;
             value.prompt_tokens = value.prompt_tokens.saturating_add(record.prompt);
             value.completion_tokens = value.completion_tokens.saturating_add(record.completion);
             value.total_tokens = value.total_tokens.saturating_add(record.total);
+            value.cost += cost;
         };
-        agg(&mut total);
-        if date == today {
-            agg(&mut today_agg);
-        }
-        if date >= week_start && date <= today {
-            agg(&mut week_agg);
-        }
-        if date >= month_start && date <= today {
-            agg(&mut month_agg);
-        }
+        agg_one(&mut total);
+        if date == today { agg_one(&mut today_agg); }
+        if date >= week_start && date <= today { agg_one(&mut week_agg); }
+        if date >= month_start && date <= today { agg_one(&mut month_agg); }
         daily_map.entry(date).or_default();
-        if let Some(entry) = daily_map.get_mut(&date) {
-            agg(entry);
+        if let Some((entry, p, c, cr)) = daily_map.get_mut(&date) {
+            agg_one(entry);
+            *p = p.saturating_add(record.prompt);
+            *c = c.saturating_add(record.completion);
+            *cr = cr.saturating_add(cache_read);
         }
-        let provider = if record.provider.is_empty() {
-            "unknown"
-        } else {
-            &record.provider
-        };
-        let model = if record.model.is_empty() {
-            "(未标注)"
-        } else {
-            &record.model
-        };
         let entry = model_map
-            .entry((provider.to_string(), model.to_string()))
+            .entry((provider_key.clone(), model_key))
             .or_default();
-        agg(entry);
+        agg_one(&mut entry.0);
+        entry.1 = entry.1.saturating_add(cache_read);
     }
 
     let mut daily: Vec<DailyUsage> = Vec::with_capacity(365);
@@ -302,23 +317,34 @@ pub fn usage_stats(path: &Path) -> Result<UsageStats> {
         let entry = daily_map.get(&date);
         daily.push(DailyUsage {
             date: date.format("%Y-%m-%d").to_string(),
-            tokens: entry.map_or(0, |value| value.total_tokens),
-            requests: entry.map_or(0, |value| value.requests),
+            tokens: entry.map_or(0, |e| e.0.total_tokens),
+            requests: entry.map_or(0, |e| e.0.requests),
+            prompt: entry.map_or(0, |e| e.1),
+            completion: entry.map_or(0, |e| e.2),
+            cache_read: entry.map_or(0, |e| e.3),
+            cost: entry.map_or(0.0, |e| e.0.cost),
         });
     }
 
     let mut models: Vec<ModelUsage> = model_map
         .into_iter()
-        .map(|((provider_id, model), value)| ModelUsage {
+        .map(|((provider_id, model), (value, cr))| ModelUsage {
             provider_id,
             model,
             requests: value.requests,
             prompt_tokens: value.prompt_tokens,
             completion_tokens: value.completion_tokens,
             total_tokens: value.total_tokens,
+            cache_read_tokens: cr,
+            cost: value.cost,
         })
         .collect();
     models.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
+
+    let billing_response = UsageBilling {
+        default: billing.default.clone().unwrap_or(BillingRate { input: 2.0, output: 8.0, cache_read: 0.2 }),
+        providers: billing.providers.clone(),
+    };
 
     Ok(UsageStats {
         total,
@@ -327,7 +353,20 @@ pub fn usage_stats(path: &Path) -> Result<UsageStats> {
         this_month: month_agg,
         daily,
         models,
+        billing: billing_response,
     })
+}
+
+fn record_cost(record: &UsageRecord, provider_id: &str, billing: &UsageBillingConfig) -> f64 {
+    let rate = billing
+        .providers
+        .get(provider_id)
+        .or(billing.default.as_ref())
+        .unwrap_or(&BillingRate { input: 2.0, output: 8.0, cache_read: 0.2 });
+    (record.prompt as f64 * rate.input
+        + record.completion as f64 * rate.output
+        + record.cache_read.unwrap_or(0) as f64 * rate.cache_read)
+        / 1_000_000.0
 }
 
 /// 最近调用明细记录（用量页列表 / 模型详情）
@@ -426,6 +465,7 @@ mod tests {
     fn usage_stats_aggregates_daily_and_per_model() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("usage-history.jsonl");
+        let billing = UsageBillingConfig::default();
         // 今天的记录（时间戳用本地当前时间，保证落在 today 桶里）
         let now = chrono::Local::now().timestamp();
         // 昨天的记录
@@ -447,16 +487,16 @@ mod tests {
             record_usage_at(&path, &usage, provider, model, false, ts).unwrap();
         }
 
-        let stats = usage_stats(&path).unwrap();
+        let stats = usage_stats(&path, &billing).unwrap();
         // 总聚合
         assert_eq!(stats.total.requests, 3);
         assert_eq!(stats.total.total_tokens, 2150);
         // 今日只含前两条
         assert_eq!(stats.today.requests, 2);
         assert_eq!(stats.today.total_tokens, 650);
-        // 本周/本月 >= 今日（昨天也在本周内）
-        assert_eq!(stats.this_week.total_tokens, 2150);
-        assert_eq!(stats.this_month.total_tokens, 2150);
+        // 本周/本月 至少包含今日（昨天可能是上周日，不能假定在同周/同月）
+        assert!(stats.this_week.total_tokens >= 650);
+        assert!(stats.this_month.total_tokens >= 650);
         // 每日序列：365 天，最后一天是今天
         assert_eq!(stats.daily.len(), 365);
         assert_eq!(stats.daily.last().unwrap().tokens, 650);

@@ -3575,7 +3575,7 @@ textarea.config-input {
   border-left-color: var(--danger);
 }
 
-/* ── 用量统计视图（GitHub 贡献图风） ── */
+/* ── 用量统计视图 ── */
 .usage-view {
   grid-row: 2;
   display: flex;
@@ -3682,75 +3682,219 @@ textarea.config-input {
   font-size: 10px;
 }
 
-.usage-contribution {
-  --cell-size: 12px;
-  display: flex;
-  margin: 12px 0 6px;
-  flex-direction: column;
-  gap: 4px;
+/* ── 热力图（52 周 GitHub 风） ── */
+
+.usage-heatmap {
+  overflow-x: auto;
+  padding-bottom: 4px;
 }
 
-.contribution-months {
-  display: flex;
-  height: 14px;
-  padding-left: 20px;
-  gap: 12px;
-  color: var(--text-faint);
+.usage-hm-grid {
+  display: grid;
+  grid-template-columns: 18px repeat(53, 1fr);
+  grid-template-rows: 16px repeat(7, 1fr);
+  gap: 3px;
+  min-width: 760px;
+}
+
+.usage-hm-weeks {
+  grid-column: 1;
+  grid-row: 2 / 9;
+  display: grid;
+  grid-template-rows: subgrid;
+  gap: 3px;
   font-size: 9px;
+  color: var(--text-faint);
 }
 
-.contribution-months span {
+.usage-hm-weeks span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.usage-hm-months {
+  grid-column: 2 / 55;
+  grid-row: 1;
+  display: grid;
+  grid-template-columns: subgrid;
+  font-size: 10px;
+  color: var(--text-faint);
   white-space: nowrap;
 }
 
-.contribution-grid {
+.usage-hm-month {
+  grid-column: span 1;
+}
+
+.usage-hm-week {
   display: grid;
-  grid-auto-rows: var(--cell-size);
+  grid-template-rows: subgrid;
+  grid-row: 2 / 9;
   gap: 3px;
 }
 
-.cell {
-  width: var(--cell-size);
-  height: var(--cell-size);
+.usage-hm-cell {
+  width: 11px;
+  height: 11px;
   border-radius: 3px;
   background: var(--surface-2);
 }
 
-.cell-empty {
-  background: transparent;
-}
+.usage-hm-cell.l1 { background: color-mix(in srgb, var(--cyan) 23%, var(--surface-2)); }
+.usage-hm-cell.l2 { background: color-mix(in srgb, var(--cyan) 45%, var(--surface-2)); }
+.usage-hm-cell.l3 { background: color-mix(in srgb, var(--cyan) 70%, var(--surface-2)); }
+.usage-hm-cell.l4 { background: var(--cyan); }
 
-.cell-level-1 {
-  background: color-mix(in srgb, var(--cyan) 26%, var(--surface-2));
-}
-
-.cell-level-2 {
-  background: color-mix(in srgb, var(--cyan) 50%, var(--surface-2));
-}
-
-.cell-level-3 {
-  background: color-mix(in srgb, var(--cyan) 74%, var(--surface-2));
-}
-
-.cell-level-4 {
-  background: var(--cyan);
-}
-
-.usage-legend {
+.usage-hm-legend {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 5px;
+  margin-top: 8px;
   color: var(--text-faint);
   font-size: 9px;
 }
 
-.usage-legend i {
+.usage-hm-legend-cell {
   display: inline-block;
   width: 10px;
   height: 10px;
   border-radius: 2px;
 }
+
+.usage-hm-legend-cell.l0 { background: var(--surface-2); }
+.usage-hm-legend-cell.l1 { background: color-mix(in srgb, var(--cyan) 23%, var(--surface-2)); }
+.usage-hm-legend-cell.l2 { background: color-mix(in srgb, var(--cyan) 45%, var(--surface-2)); }
+.usage-hm-legend-cell.l3 { background: color-mix(in srgb, var(--cyan) 70%, var(--surface-2)); }
+.usage-hm-legend-cell.l4 { background: var(--cyan); }
+
+/* ── 近 30 天堆叠柱状图 ── */
+
+.usage-bars-stacked {
+  overflow-x: auto;
+}
+
+.usage-stacked-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 560px;
+  height: 140px;
+  padding-top: 8px;
+}
+
+.usage-stacked-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  justify-content: flex-end;
+  gap: 3px;
+}
+
+.usage-stacked-bar {
+  width: 100%;
+  max-width: 18px;
+  height: 100%;
+  display: flex;
+  flex-direction: column-reverse;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.usage-stacked-seg {
+  width: 100%;
+  min-height: 0;
+}
+
+.usage-stacked-seg.seg-cache { background: #30d158; }
+.usage-stacked-seg.seg-prompt { background: #0a84ff; }
+.usage-stacked-seg.seg-completion { background: #ff9f0a; }
+
+.usage-stacked-label {
+  font-size: 9px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.usage-stacked-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.usage-legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.usage-legend-chip::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.usage-legend-chip.seg-prompt::before { background: #0a84ff; }
+.usage-legend-chip.seg-completion::before { background: #ff9f0a; }
+.usage-legend-chip.seg-cache::before { background: #30d158; }
+
+.usage-stacked-stats {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+/* ── 单价编辑器 ── */
+
+.usage-billing-editor {
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.usage-billing-heading {
+  color: var(--text-faint);
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+
+.usage-billing-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.usage-billing-row label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.usage-billing-row input {
+  width: 70px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-soft);
+  color: var(--text);
+  font-size: 12px;
+}
+
+/* ── 模型明细表 ── */
 
 .usage-model-table {
   width: 100%;
@@ -3812,29 +3956,11 @@ textarea.config-input {
   font-weight: 600;
 }
 
-.usage-share {
-  display: flex;
-  min-width: 130px;
-  align-items: center;
-  gap: 8px;
+.usage-model-cost {
+  font-weight: 600;
+  color: var(--accent);
 }
 
-.usage-share i {
-  display: block;
-  min-width: 40px;
-  height: 6px;
-  flex: 1;
-  border-radius: 3px;
-  background: linear-gradient(90deg, var(--cyan), var(--accent));
-}
-
-.usage-share span {
-  color: var(--text-faint);
-  font-size: 10px;
-  white-space: nowrap;
-}
-
-/* 模型行可点击 */
 .usage-model-row {
   cursor: pointer;
 }
@@ -3854,7 +3980,37 @@ textarea.config-input {
   border-bottom-right-radius: 6px;
 }
 
-/* 模型详情面板：按日柱状图 + 调用明细 */
+/* 模型占比：输入/输出/缓存堆叠条 */
+
+.usage-share-stacked {
+  display: flex;
+  min-width: 60px;
+  height: 8px;
+  align-items: center;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.usage-share-stacked i {
+  display: block;
+  height: 100%;
+}
+
+.usage-share-stacked i.share-prompt { background: #0a84ff; }
+.usage-share-stacked i.share-completion { background: #ff9f0a; }
+.usage-share-stacked i.share-cache { background: #30d158; }
+
+.usage-share-stacked + span {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-faint);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* 模型详情面板 */
+
 .usage-model-detail {
   margin-top: 12px;
   padding: 12px 14px;
@@ -3922,6 +4078,7 @@ textarea.config-input {
 }
 
 /* 最近调用明细列表 */
+
 .usage-recent {
   padding: 14px 16px;
   border: 1px solid var(--line);
@@ -3937,7 +4094,7 @@ textarea.config-input {
 
 .usage-record-row {
   display: grid;
-  grid-template-columns: 118px minmax(0, 1fr) auto auto auto;
+  grid-template-columns: 118px minmax(0, 1fr) auto auto auto auto;
   align-items: center;
   gap: 10px;
   padding: 6px 8px;
@@ -3989,22 +4146,39 @@ textarea.config-input {
   white-space: nowrap;
 }
 
+.usage-record-cost {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.usage-record-cost-hot {
+  color: #ff453a;
+}
+
 @media (max-width: 700px) {
   .usage-record-row {
     grid-template-columns: 1fr auto;
   }
-
   .usage-record-time,
   .usage-record-model {
     grid-column: 1;
   }
-}
-
-@media (max-width: 700px) {
   .usage-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+@media (max-width: 640px) {
+  .usage-stacked-chart { height: 120px; }
+}
+
+@media (max-width: 480px) {
+  .usage-summary-card { padding: 8px 10px; }
+}
+
+body.panel-mode .usage-view { display: none !important; }
 
 .noscript-state {
   position: fixed;
@@ -4040,6 +4214,76 @@ textarea.config-input {
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(5px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── 工具完成绿闪 ── */
+@keyframes tool-flash-green {
+  0% { border-left-color: var(--cyan); box-shadow: 0 0 0 0 rgba(48, 209, 88, 0.4); }
+  30% { border-left-color: #30d158; box-shadow: 0 0 8px 2px rgba(48, 209, 88, 0.3); }
+  100% { border-left-color: var(--line-strong); box-shadow: 0 0 0 0 rgba(48, 209, 88, 0); }
+}
+
+.tool-card.flash-complete {
+  animation: tool-flash-green 600ms ease-out both;
+}
+
+.tool-card.flash-fail {
+  animation: tool-flash-red 600ms ease-out both;
+}
+
+@keyframes tool-flash-red {
+  0% { border-left-color: var(--cyan); box-shadow: 0 0 0 0 rgba(255, 69, 58, 0.4); }
+  30% { border-left-color: var(--danger); box-shadow: 0 0 8px 2px rgba(255, 69, 58, 0.3); }
+  100% { border-left-color: var(--danger); box-shadow: 0 0 0 0 rgba(255, 69, 58, 0); }
+}
+
+/* ── 工具进度条 ── */
+.tool-progress-bar {
+  height: 4px;
+  margin-bottom: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--surface-3);
+}
+
+.tool-progress-bar i {
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--cyan), var(--accent), var(--cyan));
+  background-size: 200% 100%;
+  animation: reasoning-progress 1.35s ease-in-out infinite, reasoning-shimmer 2.4s linear infinite;
+}
+
+/* ── 工具图标平滑切换 ── */
+.tool-status .icon-slot {
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+.tool-status .icon-slot.is-swapping-out {
+  opacity: 0;
+  transform: scale(0.7);
+}
+
+/* ── 工具输出截断警告徽标 ── */
+.tool-truncation-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  margin-bottom: 6px;
+  border-radius: 4px;
+  background: rgba(255, 159, 10, 0.15);
+  color: #ff9f0a;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+/* ── 思考内容量显示 ── */
+.reasoning-live-status .reasoning-chars {
+  color: var(--cyan);
+  margin-left: 4px;
 }
 
 @media (max-width: 980px) {

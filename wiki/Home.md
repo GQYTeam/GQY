@@ -8,7 +8,7 @@ GQY 是一个由大模型驱动、深度集成 macOS 的个人 AI 助理。她�
 
 核心特性：
 
-- **多通道**：终端 REPL（`gqy`）、WebUI（`gqy web`）、菜单栏悬浮卡片（⌥G / 左键）、Telegram / QQ（通信桥）
+- **双通道**：终端 REPL（`gqy`）、WebUI（`gqy web`，桌面 App 内嵌同一页面）
 - **本地优先**：支持 llama.cpp / Ollama 本地推理（Apple Silicon Metal 加速），2 秒级回复；也支持任意 OpenAI 兼容云端服务
 - **供应商热切换**：对话里说「帮我加个供应商，地址 xx，key 是 yy」→ 自动发现模型 → 写入配置 → 激活，WebUI 即时刷新
 - **人格系统**：`GQY_HOME/prompts/` 下的 `lover.md`（女友人格）+ `chat.md`（闲聊态提醒）；`active_persona` 切换
@@ -29,16 +29,15 @@ gqy
 
 # WebUI
 gqy web
-# 或按 ⌥H 打开浏览器面板
+# 或打开桌面 App（macos/GQYApp）
 ```
 
 本地模型（可选）：
 
 ```zsh
-# llama.cpp 方案（推荐，跟随菜单栏启停）
+# llama.cpp 方案（推荐）
 brew install llama.cpp
-# 放好 GGUF 模型后启动菜单栏，本地推理自动拉起
-gqy menubar --install
+# 放好 GGUF 模型后启动本地推理服务即可
 
 # Ollama 方案
 brew install ollama && ollama pull qwen3:8b

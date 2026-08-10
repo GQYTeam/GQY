@@ -2,8 +2,6 @@ use crate::agent::{
     archive_and_delete_visible_turns, Agent, AgentEvent, AgentMode, AgentTurnControl,
 };
 use crate::backup::{BackupInitOptions, BackupOutcome, RestoreOptions};
-use crate::bridges::napcat::NapcatArgs;
-use crate::bridges::tg::TgArgs;
 use crate::config::{ActiveProviderModelConfig, AppConfig};
 use crate::i18n::{is_zh, text as t};
 use crate::llm::{ChatStreamChunk, LlmClient, ThinkingVariantOptions};
@@ -809,8 +807,6 @@ fn localize_skills_command(mut command: clap::Command) -> clap::Command {
 pub enum Command {
     #[command(name = "__alarm-worker", hide = true)]
     AlarmWorker(AlarmWorkerArgs),
-    /// 菜单栏 App：install（编译并安装 顾清影.app 到 ~/Applications）
-    Menubar(MenubarArgs),
     #[command(name = "__tool", hide = true)]
     Tool(ToolArgs),
     #[command(name = "__preview", hide = true)]
@@ -842,8 +838,6 @@ pub enum Command {
     Watch(WatchArgs),
     Tts(TtsArgs),
     Stt(SttArgs),
-    Napcat(NapcatArgs),
-    Tg(TgArgs),
     Provider(ProviderArgs),
 }
 
@@ -888,13 +882,6 @@ impl std::fmt::Debug for WebArgs {
             .field("password_file", &self.password_file)
             .finish()
     }
-}
-
-#[derive(Debug, Args)]
-pub struct MenubarArgs {
-    /// 安装菜单栏 App
-    #[arg(long)]
-    install: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1441,7 +1428,6 @@ pub async fn run(cli: Cli, paths: GqyPaths) -> Result<()> {
         Some(Command::Stt(args)) => run_stt(&paths, args),
         Some(Command::Provider(args)) => run_provider(&paths, args).await,
         Some(Command::AlarmWorker(args)) => run_alarm_worker(args),
-        Some(Command::Menubar(args)) => run_menubar(&paths, args),
         Some(Command::Tool(args)) => run_tool(&paths, mode, args).await,
         Some(Command::Preview) => {
             crate::repl_avatar::print_if_supported(&mut io::stdout());
@@ -1487,8 +1473,6 @@ pub async fn run(cli: Cli, paths: GqyPaths) -> Result<()> {
         Some(Command::Reset(args)) => run_reset(&paths, args.scope.as_deref()),
         Some(Command::Web(args)) => crate::web::run(paths, args).await,
         Some(Command::Balance) => run_balance(&paths),
-        Some(Command::Napcat(args)) => crate::bridges::napcat::run(&paths, args).await,
-        Some(Command::Tg(args)) => crate::bridges::tg::run(&paths, args).await,
         None => {
             let message = join_message(cli.message);
             if message.is_empty() && io::stdin().is_terminal() {
@@ -1923,20 +1907,6 @@ fn run_alarm_cmd(paths: &GqyPaths, args: AlarmArgs) -> Result<()> {
             Ok(())
         }
     }
-}
-
-fn run_menubar(paths: &GqyPaths, args: MenubarArgs) -> Result<()> {
-    if args.install {
-        return crate::menubar::install(paths);
-    }
-    println!(
-        "{}",
-        t(
-            "usage: gqy menubar --install   (build & install 顾清影.app to ~/Applications)",
-            "用法：gqy menubar --install（编译并安装 顾清影.app 到 ~/Applications）"
-        )
-    );
-    Ok(())
 }
 
 fn run_alarm_worker(args: AlarmWorkerArgs) -> Result<()> {
@@ -3258,7 +3228,6 @@ async fn run_chat_with_images(
         registry,
         AgentMode::Normal,
     )?;
-    crate::pi_bridge::ensure_for_agent(&agent, None, None).await?;
     let mut renderer = render::StreamRenderer::new(
         reasoning_mode,
         tool_call_mode,
@@ -3405,7 +3374,6 @@ async fn run_chat_with_options(
     let show_mixed_model_endpoint = show_mixed_model_endpoint(&config, false);
     let display_config = config.clone();
     let mut agent = Agent::new(config, paths, state.clone(), client, registry, mode)?;
-    crate::pi_bridge::ensure_for_agent(&agent, None, None).await?;
     let mut renderer = render::StreamRenderer::new(
         reasoning_mode,
         tool_call_mode,
@@ -3689,7 +3657,6 @@ async fn run_repl(paths: &GqyPaths, initial_mode: AgentMode) -> Result<()> {
         initial_registry,
         mode,
     )?;
-    crate::pi_bridge::ensure_for_agent(&agent, None, None).await?;
     let mut footer =
         ReplFooterStatus::from_config(&config, agent.effective_context_tokens()?, None);
     let thinking_summary = client.thinking_variant_summary();

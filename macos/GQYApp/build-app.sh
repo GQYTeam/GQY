@@ -26,6 +26,17 @@ else
     echo "警告: 找不到 gqy 二进制，App 将依赖系统已安装的 gqy"
 fi
 
+# ── 内嵌 share 资源（scripts/memes/kb，供内嵌 gqy 按 <exe 向上找>/share/gqy 解析）─
+SHARE="$APP/Contents/Resources/share/gqy"
+for pair in "gqy/src/scripts:scripts" "gqy/src/memes:memes" "kb:kb"; do
+    src="../../${pair%%:*}"; dst="${pair##*:}"
+    if [ -d "$src" ]; then
+        mkdir -p "$SHARE/$dst"
+        cp -R "$src"/* "$SHARE/$dst/" 2>/dev/null || true
+        echo "内嵌资源: $dst"
+    fi
+done
+
 # ── 图标（GQY-icon.png → .icns）────────────────────────────────────
 ICON_SRC="../../pics/GQY-icon.png"
 if [ -f "$ICON_SRC" ]; then

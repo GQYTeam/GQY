@@ -56,7 +56,6 @@ const LOGIN_ATTEMPT_LIMIT: u8 = 5;
 const INDEX_HTML: &str = include_str!("../web/index.html");
 const STYLES_CSS: &str = include_str!("../web/styles.css");
 const APP_JS: &str = include_str!("../web/app.js");
-const USAGE_VIZ_JS: &str = include_str!("../web/usage-viz.js");
 const GQY_LOGO: &[u8] = include_bytes!("../pics/GQY-avatar.png");
 const GQY_WALLPAPER: &[u8] = include_bytes!("../pics/GQY-image.png");
 const PROVIDER_ICONS: &str = include_str!("../web/assets/provider-icons.svg");
@@ -991,20 +990,24 @@ pub async fn run(paths: GqyPaths, args: WebArgs) -> Result<()> {
     if std::env::var_os("GQY_CHANNEL").is_none() {
         unsafe { std::env::set_var("GQY_CHANNEL", "webui") };
     }
-    let password = resolve_web_password(&args)?;
+    AppConfig::init_files(&paths)?;
+    let config = AppConfig::load_or_default(&paths)?;
+    // 密码：命令行 > 配置文件 web_ui.password
+    let password = match resolve_web_password(&args)? {
+        Some(p) => Some(p),
+        None => config.web_ui.password.clone(),
+    };
     let bind_ip: IpAddr = args
         .host
         .parse()
         .with_context(|| format!("invalid WebUI host: {}", args.host))?;
     if !bind_ip.is_loopback() && password.is_none() {
         anyhow::bail!(
-            "绑定非回环地址（{}）必须设置访问密码：gqy web --host {} -p <password>",
+            "绑定非回环地址（{}）必须设置访问密码：gqy web --host {} -p <password> 或 config set web_ui.password <password>",
             args.host,
             args.host
         );
     }
-    AppConfig::init_files(&paths)?;
-    let config = AppConfig::load_or_default(&paths)?;
     let state_store = StateStore::new(&paths)?;
     state_store.init_files()?;
     let client = LlmClient::from_config(&config, &paths)?;
@@ -1045,26 +1048,6 @@ pub async fn run(paths: GqyPaths, args: WebArgs) -> Result<()> {
         events.clone(),
         questions.clone(),
     )?;
-
-    // pi 底座模式：启动工具桥；图片事件（表情包等）经 events/state_store 落到 WebUI 资产
-    let bridge_sink: Option<Arc<dyn Fn(std::path::PathBuf, String) + Send + Sync>> = Some(Arc::new({
-        let events = events.clone();
-        let state_store = state_store.clone();
-        let manager = manager.clone();
-        move |path, alt| {
-            publish_bridge_image(&events, &state_store, &manager, path, alt);
-        }
-    }));
-    let bridge_progress_sink: Option<Arc<dyn Fn(String) + Send + Sync>> = Some(Arc::new({
-        let events = events.clone();
-        let manager = manager.clone();
-        move |message| {
-            publish_bridge_progress(&events, &manager, message);
-        }
-    }));
-    crate::pi_bridge::ensure_pi_bridge(bridge_registry.clone(), &paths, bridge_sink, bridge_progress_sink)
-        .await
-        .with_context(|| "failed to start pi tool bridge")?;
 
     // 配置文件热重载：检测 GQY_HOME/config/config.jsonc 被外部修改
     // （CLI `gqy config set`、直接编辑等），自动重建 agent 并通知前端，
@@ -1121,7 +1104,6 @@ fn router(state: WebState) -> Router {
         .route("/", get(index_asset))
         .route("/styles.css", get(styles_asset))
         .route("/app.js", get(app_asset))
-        .route("/usage-viz.js", get(usage_viz_asset))
         .route("/assets/gqy-logo.png", get(logo_asset))
         .route("/assets/gqy-wallpaper.png", get(wallpaper_asset))
         .route("/assets/provider-icons.svg", get(provider_icons_asset))
@@ -1172,10 +1154,6 @@ async fn styles_asset() -> Response {
 
 async fn app_asset() -> Response {
     text_asset(APP_JS, "application/javascript; charset=utf-8")
-}
-
-async fn usage_viz_asset() -> Response {
-    text_asset(USAGE_VIZ_JS, "application/javascript; charset=utf-8")
 }
 
 async fn logo_asset() -> Response {
@@ -1464,15 +1442,16 @@ async fn backup_now_web(
     })))
 }
 
-/// 用量统计（贡献图数据源）：每日 token + 按模型明细。
+/// 用量统计（贡献图数据源）：每日 token + 按模型明细，含计费单价与费用。
 async fn usage_stats_web(
     State(state): State<WebState>,
     headers: HeaderMap,
 ) -> std::result::Result<Response, ApiError> {
     require_auth(&headers, &state)?;
+    let billing = state.manager.lock().unwrap().config.usage_billing.clone();
     let stats = state
         .state_store
-        .usage_stats()
+        .usage_stats(&billing)
         .map_err(ApiError::internal)?;
     Ok(Json(json!({ "ok": true, "stats": stats })).into_response())
 }
@@ -2855,77 +2834,6 @@ async fn actor_loop(
             ActorCommand::Shutdown => break,
         }
     }
-}
-
-/// pi 工具桥产生的图片（表情包等）：保存为 WebUI 资产并推送 tool.image 事件。
-/// 图片事件发生在 axum 工具调用线程，与 agent 回合并发，这里通过
-/// state_store 找到当前运行中的回合来归属资产。
-fn publish_bridge_image(
-    events: &EventHub,
-    state_store: &StateStore,
-    manager: &Arc<Mutex<ManagerState>>,
-    path: std::path::PathBuf,
-    alt: String,
-) {
-    let run_id = manager
-        .lock()
-        .unwrap()
-        .active_run_id
-        .clone()
-        .unwrap_or_else(|| "unknown".to_string());
-    let turn_id = match state_store.running_turn_queue_target() {
-        Ok(Some(target)) => target.turn_id.clone(),
-        _ => String::new(),
-    };
-    if turn_id.is_empty() {
-        return;
-    }
-    let tool_id = format!("{run_id}_bridge_image");
-    let name = if alt.contains("表情") || alt.contains("meme") {
-        "show_meme"
-    } else {
-        "image"
-    };
-    match state_store.save_image_asset(&turn_id, Some(&tool_id), &path, &alt) {
-        Ok(asset) => {
-            let hide_caption = name == "show_meme";
-            events.publish(
-                "tool.image",
-                json!({
-                    "run_id": run_id,
-                    "tool_id": tool_id,
-                    "name": name,
-                    "asset": SafeImageAsset::from_asset(asset, hide_caption),
-                }),
-            );
-        }
-        Err(error) => {
-            tracing::warn!(run_id, error = %error, "pi bridge: failed to persist image asset");
-        }
-    }
-}
-
-/// pi 工具桥产生的进度消息（agent 思考/回复增量等）→ tool.progress SSE，
-/// 挂到独立的「agent 集群活动」工具卡（实时滚动）。
-fn publish_bridge_progress(events: &EventHub, manager: &Arc<Mutex<ManagerState>>, message: String) {
-    let run_id = manager
-        .lock()
-        .unwrap()
-        .active_run_id
-        .clone()
-        .unwrap_or_else(|| "unknown".to_string());
-    if run_id == "unknown" {
-        return;
-    }
-    events.publish(
-        "tool.progress",
-        json!({
-            "run_id": run_id,
-            "tool_id": format!("{run_id}_agent_activity"),
-            "name": "agent 集群活动",
-            "message": message,
-        }),
-    );
 }
 
 #[allow(clippy::too_many_arguments)]

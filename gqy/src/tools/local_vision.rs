@@ -51,7 +51,7 @@ pub fn register(registry: &mut ToolRegistry, paths: GqyPaths) {
     ));
 }
 
-async fn analyze_image_local(args: Value, paths: &GqyPaths) -> Result<String> {
+pub async fn analyze_image_local(args: Value, paths: &GqyPaths) -> Result<String> {
     let path = args
         .get("path")
         .and_then(Value::as_str)

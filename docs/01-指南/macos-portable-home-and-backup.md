@@ -39,16 +39,15 @@ GQY_HOME="$HOME/Library/Application Support/gqy" ./target/release/gqy zsh-init
 
 hook 本体位于 `GQY_HOME/config/shell/`。安装动作只会在宿主机 `~/.zshrc` 中加入一个带边界标记的 `source` 块，`gqy remove-shell-hook` 可以移除它。
 
-## 菜单栏入口
+## 桌面 App 入口
 
-轻量 AppKit 壳位于 `macos/GQYMenuBar`，不依赖第三方 GUI 框架或完整 Xcode：
+桌面壳位于 `macos/GQYApp`（Swift + WKWebView，自包含，内嵌后端二进制）：
 
 ```zsh
-zsh macos/GQYMenuBar/build.sh
-open "macos/GQYMenuBar/.build/顾清影.app"
+zsh macos/GQYApp/build-app.sh
 ```
 
-构建脚本会把现有的 release 后端打进 `.app`；找不到 release 时会使用 debug 后端。菜单提供终端对话、本地 Web 面板、立即备份和打开独立主目录入口。
+构建脚本会把 release 后端打进 `build/GQYApp.app`。App 提供独立窗口，直接内嵌 WebUI（`http://127.0.0.1:4096`），界面与 WebUI 完全一致。
 
 ## 独立 Git 备份
 
@@ -117,4 +116,4 @@ gqy backup restore \
 
 ## 开机自启
 
-菜单栏应用的“开机自启”菜单项会安装 `~/Library/LaunchAgents/dev.gqy.menubar.plist`，让顾清影在下次登录时自动启动；再次点击可移除。该 LaunchAgent 会为后端设置同一个 `GQY_HOME`。
+桌面 App 暂无自启功能；如需开机自启，可用 macOS「登录项」把 `GQYApp.app` 加入。后端由 App 拉起时使用同一个 `GQY_HOME`。

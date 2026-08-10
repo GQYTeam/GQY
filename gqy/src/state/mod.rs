@@ -598,8 +598,8 @@ impl StateStore {
         usage::record_usage(&self.usage_history_file(), usage, provider_id, model, true)
     }
 
-    pub fn usage_stats(&self) -> Result<usage::UsageStats> {
-        usage::usage_stats(&self.usage_history_file())
+    pub fn usage_stats(&self, billing: &crate::config::UsageBillingConfig) -> Result<usage::UsageStats> {
+        usage::usage_stats(&self.usage_history_file(), billing)
     }
 
     /// 最近调用明细（新→旧），供 WebUI 用量页列表与模型详情

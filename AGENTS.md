@@ -2,7 +2,7 @@
 
 ## Project overview
 
-GQY is a Rust terminal/menu-bar AI assistant with a character persona. Single Rust crate at `gqy/` (not a Cargo workspace), plus separate macOS apps and Node.js bridges.
+GQY is a Rust AI assistant with a character persona, focused on the macOS desktop app. Single Rust crate at `gqy/` plus the Swift desktop shell in `macos/GQYApp`.
 
 ## Key commands
 
@@ -17,25 +17,11 @@ cargo fmt                # format (default rustfmt, no rustfmt.toml)
 cargo run -- web         # start WebUI on port 4096
 ```
 
-macOS apps (run from repo root):
-
-```bash
-zsh macos/GQYMenuBar/build.sh     # build menu bar app (ObjC, clang)
-zsh macos/GQYMenuBar/make-dmg.sh  # package DMG
-```
-
-Swift desktop shell:
+macOS desktop shell:
 
 ```bash
 cd macos/GQYApp && ./build-app.sh   # release build
 cd macos/GQYApp && swift run        # dev run
-```
-
-Node.js bridges (run from `communication/`):
-
-```bash
-node napcat/bridge.cjs   # QQ/NapCat bridge
-node tg/bridge.cjs       # Telegram bridge
 ```
 
 **No CI, no pre-commit hooks, no Makefile, no justfile** in this repo.
@@ -59,7 +45,7 @@ All runtime state lives in `$GQY_HOME` (default `~/Library/Application Support/g
 - `conversation.db` — SQLite WAL-mode turn storage (`channel_id` + `mode` columns for isolation)
 - `memory.db` — long-term memory
 - `prompts/` — personality files
-- `sessions/` — bridge session state
+- `sessions/` — session state
 
 ### Source layout (`gqy/src/`)
 
@@ -69,12 +55,12 @@ All runtime state lives in `$GQY_HOME` (default `~/Library/Application Support/g
 - `llm/` — LLM client, provider routing, streaming
 - `memory/` — vector search, git-backed snapshots
 - `tools/` — tool implementations (system, knowledge, entertainment)
-- `tui/` — terminal rendering (crossterm + rustyline)
+- `render/` — terminal rendering (crossterm + rustyline)
 - `prompts/` — system prompt templates (obfuscated at build time)
 
 ### Channel isolation
 
-Four channels: `terminal`, `webui`, `qq`, `tg`. Each channel runs its own daemon process with independent context. The conversation DB stores `channel_id` to keep histories separate.
+Channels: `terminal`, `webui`. Each channel runs its own daemon process with independent context. The conversation DB stores `channel_id` to keep histories separate.
 
 ### Agent modes
 

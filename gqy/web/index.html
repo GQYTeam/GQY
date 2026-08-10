@@ -8,7 +8,6 @@
   <title>顾清影</title>
   <link rel="stylesheet" href="/styles.css">
   <script defer src="/app.js"></script>
-  <script defer src="/usage-viz.js"></script>
 </head>
 <body data-theme="graphite">
   <!-- 悬浮卡片嵌入模式（NSPanel + WKWebView 加载 ?panel=1）：隐藏侧栏/顶栏，单聊卡片形态 -->
@@ -225,29 +224,23 @@
           <div class="usage-summary" id="usageSummary"></div>
           <div class="usage-chart-section">
             <div class="usage-section-heading">
-              <h3>近 30 天趋势</h3>
-              <span class="usage-chart-hint">每日 token 消耗</span>
+              <h3>Token 贡献热力图（近 52 周）</h3>
             </div>
-            <div class="usage-bars" id="usageBars" role="img" aria-label="近 30 天 token 消耗柱状图"></div>
+            <div class="usage-heatmap" id="usageHeatmap"></div>
           </div>
           <div class="usage-chart-section">
             <div class="usage-section-heading">
-              <h3>每月 Token 消耗</h3>
-              <span class="usage-chart-hint">近 12 个月</span>
+              <h3>近 30 天 Token 构成</h3>
+              <span class="usage-chart-hint">输入 / 输出 / 缓存命中</span>
             </div>
-            <div class="usage-contribution" id="usageContribution" role="img" aria-label="每日 token 消耗贡献图"></div>
-            <div class="usage-legend">
-              <span>少</span>
-              <i class="cell-level-0" aria-hidden="true"></i>
-              <i class="cell-level-1" aria-hidden="true"></i>
-              <i class="cell-level-2" aria-hidden="true"></i>
-              <i class="cell-level-3" aria-hidden="true"></i>
-              <i class="cell-level-4" aria-hidden="true"></i>
-              <span>多</span>
-            </div>
+            <div class="usage-bars-stacked" id="usageBarsStacked"></div>
           </div>
           <div class="usage-models">
-            <h3>模型消耗明细<span class="usage-models-hint">点击行查看详情</span></h3>
+            <div class="usage-section-heading">
+              <h3>模型消耗明细<span class="usage-models-hint">点击行查看详情</span></h3>
+              <button class="secondary-button compact-button" id="usageBillingBtn" type="button">⚙ 单价</button>
+            </div>
+            <div class="usage-billing-editor" id="usageBillingEditor" hidden></div>
             <div class="usage-model-table-wrap" id="usageModelTable"></div>
             <div class="usage-model-detail" id="usageModelDetail" hidden></div>
           </div>

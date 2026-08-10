@@ -265,7 +265,24 @@ pub async fn analyze_local_image_with_prompt(
     prompt: &str,
 ) -> Result<String> {
     let image_url = local_image_data_url(&image.display().to_string())?;
-    analyze_image_url_with_prompt(config, paths, &image_url, prompt).await
+    match analyze_image_url_with_prompt(config, paths, &image_url, prompt).await {
+        Ok(text) => Ok(text),
+        Err(cloud_error) => {
+            // 云端视觉不可用（网络/限流/空响应）→ 回退本地 Apple Vision 离线分析，
+            // 保证本地图片至少能 OCR/分类，不白白失败
+            match crate::tools::local_vision::analyze_image_local(
+                json!({ "path": image.display().to_string() }),
+                paths,
+            )
+            .await
+            {
+                Ok(text) => Ok(format!(
+                    "（云端视觉不可用，已改用本地离线分析）\n{text}"
+                )),
+                Err(_) => Err(cloud_error),
+            }
+        }
+    }
 }
 
 pub async fn analyze_image_url_with_prompt(

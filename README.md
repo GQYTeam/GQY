@@ -41,15 +41,9 @@ GQY 通过官方 tap 发布**单一 formula**（终端 CLI 为唯一正式渠道
 brew tap Francis-Xavier-code/GQY
 brew trust Francis-Xavier-code/GQY   # Homebrew 新版要求信任非官方 tap
 brew install gqy
-
-# 菜单栏（可选，一条命令现场编译安装，无需单独的 cask/DMG）
-gqy menubar --install
 ```
 
-> 0.7.1 起菜单栏不再单独发 cask/DMG——`gqy menubar --install` 用 clang
-> 现场编译轻量 AppKit 壳到 `~/Applications/顾清影.app`（内置 gqy 二进制与资源，自包含），
-> 升级只需 `brew upgrade gqy` 后重跑一次。旧版 `brew install --cask gqy` 的
-> `/Applications/顾清影.app` 请卸载清理，避免误开旧版。
+桌面端：`macos/GQYApp`（Swift + WKWebView，自包含，内嵌 gqy 二进制）。
 
 ### 从源码构建
 
@@ -91,15 +85,9 @@ GQY 的只读资源（内置脚本、表情库、知识库源）统一放在**�
 gqy kb add "$(brew --prefix)/share/gqy/kb"
 ```
 
-### 菜单栏
+### 菜单栏（已移除）
 
-轻量 AppKit 菜单栏壳位于 `macos/GQYMenuBar`（约 300 行，不需要完整 Xcode），
-由 `gqy menubar --install` 现场编译安装到 `~/Applications/顾清影.app`。
-
-菜单提供：打开 WebUI（⌥H）、配置、重启面板服务、终端对话、立即备份、
-打开独立主目录、开机自启与退出。**「退出」会统一关闭后台守护进程
-（`gqy web`）及其 pi 子进程**，不留孤儿。详细说明见
-[macOS、独立主目录与记忆备份](docs/01-指南/macos-portable-home-and-backup.md)。
+菜单栏壳与 `gqy menubar` 命令已从代码库移除，不再维护。桌面端统一走 `macos/GQYApp`（Swift + WKWebView 壳）。
 
 ### 界面语言
 
@@ -124,10 +112,6 @@ GQY 的 CLI、REPL、配置 TUI 和工具状态支持英文与简体中文。在
 | `gqy web` | 启动本地 Web 面板 |
 | `gqy balance` | 查询 DeepSeek 账户余额 |
 | `gqy config set <key> <value>` / `gqy config get [key]` | 免交互读写配置（密钥脱敏） |
-| `gqy menubar --install` | 现场编译安装菜单栏 App 到 `~/Applications` |
-| `gqy tools import/list/show/disable/enable/remove` | 工具包管理（仓库转工具） |
-| `gqy napcat status/install/uninstall/config` | NapCat (QQ) 桥接管理（含自启动） |
-| `gqy tg status/install/uninstall/token/config` | Telegram 桥接管理（含自启动） |
 | `gqy backup init` / `gqy backup now` / `gqy backup status` | 备份初始化 / 立即备份 / 状态 |
 | `gqy backup remote <url>` | 绑定远程仓库 |
 | `gqy backup restore --remote <url>` | 从远程恢复 |
@@ -326,23 +310,22 @@ GQY 的 CLI、REPL、配置 TUI 和工具状态支持英文与简体中文。在
 > 不要手工覆盖 `/opt/homebrew/bin/gqy` 或直接跑 `target/release/gqy` 当日常环境，
 > 否则会出现二进制残留、版本错乱、hook 与数据不同步的麻烦。
 
-1. bump `Cargo.toml` 版本号（菜单栏 Info.plist 由 `build.sh` 自动跟随），并把改动写进 `CHANGELOG.md`；
+1. bump `Cargo.toml` 版本号，并把改动写进 `CHANGELOG.md`；
 2. `git tag v0.4.6 && git push origin v0.4.6`；
 3. 构建并上传发布资产（release notes 从 CHANGELOG 对应小节生成）：
    ```zsh
    cargo build --release --offline
-   zsh macos/GQYMenuBar/build.sh
-   zsh macos/GQYMenuBar/make-dmg.sh   # 产出 .build/GQY-0.4.6.dmg
+   zsh macos/GQYApp/build-app.sh   # 桌面 App（自包含，内嵌 gqy 二进制）
    awk '/^## \[0.4.6\]/{flag=1;next}/^## \[/{if(flag)exit}flag' CHANGELOG.md > /tmp/release-notes.md
-   gh release create v0.4.6 macos/GQYMenuBar/.build/GQY-0.4.6.dmg --notes-file /tmp/release-notes.md
+   gh release create v0.4.6 --notes-file /tmp/release-notes.md
    ```
-4. 计算 `Formula/gqy.rb` 与 `Casks/gqy.rb` 里两个 `sha256`（源码 tarball 与 dmg）并提交；
+4. 计算 `Formula/gqy.rb` 里的 `sha256`（源码 tarball）并提交；
 5. 同步到 Homebrew tap 仓库（`Francis-Xavier-code/homebrew-GQY`）里的同名文件并推送；
 6. 本机测试：
    ```zsh
    brew update   # 拉取 tap 更新（不要加 HOMEBREW_NO_AUTO_UPDATE=1，否则用旧 formula）
-   brew upgrade gqy && brew upgrade --cask gqy
-   brew link gqy --overwrite   # cask 与 formula 同名时补 bin 链接
+   brew upgrade gqy
+   brew link gqy --overwrite
    ```
    数据全在 `GQY_HOME`，升级只换二进制，对话/记忆/配置分毫不动。
 
