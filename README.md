@@ -330,4 +330,4 @@ PR时必须提供功能的设计理念，作用场景和实际意义。一个 PR
 
 ## 许可
 
-GQY 使用 GPL-3.0 License 发布，见 `LICENSE`。本项目 fork 自 [Miyu](https://github.com/SHORiN-KiWATA/Miyu)（MIT License），上游 MIT 部分仍按 MIT 授权，新增代码与修改部分按 GPL-3.0 授权。
+GQY 使用 GPL-3.0 License 发布，见 `LICENSE`。本项目 fork 自 [Miyu](https://github.com/SHORiN-KiWATA/Miyu)（MIT License）后二次更改，上游 MIT 部分仍按 MIT 授权，新增代码与修改部分按 GPL-3.0 授权。
