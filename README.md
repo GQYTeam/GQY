@@ -1,89 +1,41 @@
 <p align="center">
-  <img src="pics/GQY-icon.png" alt="顾清影" width="180">
+  <img src="pics/GQY-image.png" alt="顾清影">
 </p>
 
 # GQY —— 顾清影
 
 <p align="center">
-  <img alt="GitHub release" src="https://img.shields.io/github/v/release/GQYTeam/GQY?style=flat-square">
-  <img alt="macOS" src="https://img.shields.io/badge/platform-macOS-333333?style=flat-square">
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.96+-de5c27?style=flat-square">
-  <img alt="License" src="https://img.shields.io/github/license/GQYTeam/GQY?style=flat-square">
-  <img alt="Downloads" src="https://img.shields.io/github/downloads/GQYTeam/GQY/total?style=flat-square">
+  <a href="https://github.com/GQYTeam/GQY/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/GQYTeam/GQY?style=for-the-badge&labelColor=1c1917&color=de5c27"></a>
+  <a href="https://github.com/GQYTeam/GQY/releases"><img alt="下载量" src="https://img.shields.io/github/downloads/GQYTeam/GQY/total?style=for-the-badge&labelColor=1c1917&color=de5c27&label=%E4%B8%8B%E8%BD%BD"></a>
+  <img alt="平台 macOS" src="https://img.shields.io/badge/macOS-11%2B-1c1917?style=for-the-badge&logo=apple&logoColor=white">
+  <img alt="Rust" src="https://img.shields.io/badge/Rust-2021-1c1917?style=for-the-badge&logo=rust&logoColor=white">
+  <a href="LICENSE"><img alt="许可证 GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-1c1917?style=for-the-badge"></a>
 </p>
 
-一个活在 **macOS 桌面 App** 里的二次元少女——Swift 壳内嵌 Rust 核心，开箱即用。
+一个活在 **macOS** 里的二次元少女。
 
 macOS 独立主目录与私有 Git 记忆备份的当前用法见 [macOS、独立主目录与记忆备份](docs/01-指南/macos-portable-home-and-backup.md)。
 
 
 ## 谁是 GQY？
 
-GQY 是从我的想法中诞生出来的人格，从 [shorin-miyu](https://github.com/SHORiN-KiWATA/Miyu)`FORK` 过来的一个终端助理
+GQY 是从我的想法中诞生出来的人格，从 [shorin-miyu](https://github.com/SHORiN-KiWATA/Miyu)`FORK` 过来的一个助理、个人伴侣。
 
-![](./pics/GQY-image.png)
-
-![](pics/video.mp4) 
-<br><small>顾清影 · 演示视频（若无法播放请<a href="https://github.com/GQYTeam/GQY/raw/main/pics/video.mp4">下载 mp4</a>）</small>
-</div>
+![顾清影角色展示](pics/GQY-she.png)
 
 ## 有什么功能？
 
-`GQY` 由大模型驱动，默认接入了 [opencode](https://github.com/anomalyco/opencode) 的公共模型服务，你也可以配置自己的大模型服务。她并非专业的 Coding Agent，而是更偏向聊天日常、游戏娱乐、系统排障等日用场景。并且 `GQY` 无缝与 `zsh`（mac） 集成，终端打字直接无缝对话！
+`GQY` 由大模型驱动，功能可以参考钢铁侠中的 `贾维斯`
 
-`GQY` 还自带了 TUI 方便修改配置：
 
-```
-gqy config
-```
 
 她的所有配置、记忆和对话状态都收拢在独立主目录 `GQY_HOME`（建议 `~/Library/Application Support/gqy`）中，与宿主机其他配置隔离；每一轮对话后还会自动生成 Git 快照保存记忆，绑定私有远程仓库后自动推送，换机器一键恢复。详见 [macOS、独立主目录与记忆备份](docs/01-指南/macos-portable-home-and-backup.md)。
 
 ## 如何安装？
 
-### 桌面 App（推荐）
+从 [GitHub Release](https://github.com/GQYTeam/GQY/releases) 下载
 
-从 [GitHub Release](https://github.com/GQYTeam/GQY/releases) 下载 `GQYApp-<版本>.zip`，解压后把 `GQYApp.app` 拖进 `/Applications`：
 
-```zsh
-open /Applications/GQYApp.app
-```
-
-自包含（内嵌 gqy 二进制 + 资源），无需任何依赖，拷走即用。
-
-### Homebrew（CLI）
-
-终端 CLI 走官方 tap：
-
-```zsh
-brew tap GQYTeam/GQY
-brew trust GQYTeam/GQY   # Homebrew 新版要求信任非官方 tap
-brew install gqy
-```
-
-### 从源码构建
-
-需要安装 Rust 1.96 或更新版本、C 编译工具链，图片显示功能依赖 `chafa`（`brew install chafa`）。
-
-```
-git clone https://github.com/GQYTeam/GQY.git
-cd GQY
-cargo build --release --locked
-./target/release/gqy --version
-```
-
-macOS 依赖示例：
-
-```
-brew install rust chafa
-```
-
-首次运行（会创建 GQY_HOME 与默认配置）：
-
-```
-export GQY_HOME="$HOME/Library/Application Support/gqy"
-./target/release/gqy
-```
 
 ### 安装的资源放在哪？
 
@@ -91,7 +43,6 @@ GQY 的只读资源（内置脚本、表情库、知识库源）统一放在**�
 
 | 安装方式 | 资源目录 |
 |---|---|
-| Homebrew CLI | `$(brew --prefix)/share/gqy`（scripts/、memes/、kb/） |
 | 桌面 App | `GQYApp.app/Contents/Resources/share/gqy`（自包含） |
 | 源码构建 | 仓库内 `src/scripts`、`src/memes`、`kb` 自动识别 |
 
@@ -341,25 +292,25 @@ GQY 的 CLI、REPL、配置 TUI 和工具状态支持英文与简体中文。在
 
 ### 设计理念
 
-GQY 的定位是桌面助手，不是 Coding Agent，她更注重拟真、系统集成度、实用、日常排障等方面。GQY 应该开箱即用，并且足够轻量，不开发超重的 3D 桌宠，不使用 GUI 框架，也不设计需要学习成本的 CLI 选项，尽量通过自然语言和无缝无感的触发方式进行所有的操作。
+GQY 的定位是全能助手，更注重拟真、系统集成度、实用、日常排障等方面。尽量通过自然语言和无缝无感的触发方式进行所有的操作。
 
 以下是一些可能的方向：
 
 - 提升系统日常排障能力、系统维护能力
 
-  作为桌面助手，尤其是 macOS 桌面端助手，对日常问题的排障能力是重中之重。她应当能够解决日用系统会遇到的问题，如软件崩溃、磁盘空间、网络代理、启动项异常等。
+  作为助手，尤其是 macOS 桌面端助手，对日常问题的排障能力是重中之重。她应当能够解决日用系统会遇到的问题，如软件崩溃、磁盘空间、网络代理、启动项异常等。
 
 - 知识和信息
 
   扩充她自己的知识库。增加对软件推荐、时事新闻、学习辅助等非开发场景下会出现的情景的处理能力。增加知识和信息检索的时效性和可靠性也是关键点。
 
-- 提升角色扮演能力，提高对话娱乐性和拟真度
+- 提升对自身认知的能力，提高对话带来的情绪价值
 
-  需要更多像“发送表情包”、“玄学算命”那样提升对话时的趣味性或拟真度的功能。TTS、语音对话等重要功能也在日程上。
+  需要更多像“发送表情包”、“玄学算命”那样提升对话时的趣味性，包括提示词带来的情商和陪伴。
 
 - 提高和系统的无缝集成
 
-  不使用任何命令作为触发器，能够直接使用自然语言开启对话。目前是通过 Command Not Found 内容交给 GQY 的方式做到和终端的无缝集成（zsh/fish 已支持多行自然语言整块拦截；bash 的多行拦截仍在实验）。终端以外的集成也值得研究，例如做成守护进程，拥有持续运行的能力，监听系统事件，在特定事件发生时做出特定反应等。
+  不使用任何命令作为触发器，能够直接使用自然语言开启对话。目前是通过 自然语言内容交给 GQY 的方式，让她做到和终端的无缝集成。终端以外的集成也值得研究，例如做成守护进程，拥有持续运行的能力，监听系统事件，在特定事件发生时做出特定反应等。
 
 - 优化功能和修复 BUG
 
@@ -375,6 +326,7 @@ PR时必须提供功能的设计理念，作用场景和实际意义。一个 PR
 ## 致谢
 
 - [opencode](https://github.com/anomalyco/opencode) 最好的开源 Coding Agent。
+- [Miyu](https://github.com/SHORiN-KiWATA/Miyu) 顾清影最好的底座。
 
 ## 许可
 
