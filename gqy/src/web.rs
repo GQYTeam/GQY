@@ -1274,7 +1274,10 @@ fn asset_response(content: &'static [u8], content_type: &'static str) -> Respons
     response.headers_mut().insert(
         CONTENT_SECURITY_POLICY,
         HeaderValue::from_static(
-            "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+            // frame-ancestors 放行编辑器 webview：VSCode 的祖先链是
+            // vscode-file://（工作台）→ vscode-webview://（宿主）→ 本页，两层都要允许，
+            // 少一层整个 iframe 就白屏。这两个 scheme 只有编辑器能构造，网页伪造不出来。
+            "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'self' vscode-webview: vscode-file:; form-action 'self'",
         ),
     );
     response

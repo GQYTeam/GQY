@@ -1,0 +1,58 @@
+{
+  "name": "gqy-vscode",
+  "displayName": "顾清影",
+  "description": "在 VSCode 里和顾清影聊天，她能直接读你的代码",
+  "version": "0.1.0",
+  "publisher": "GQYTeam",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Other"],
+  "icon": "images/icon.png",
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "commands": [
+      {
+        "command": "gqy.open",
+        "title": "打开顾清影",
+        "category": "顾清影",
+        "icon": "images/gqy-16.png"
+      },
+      {
+        "command": "gqy.ask",
+        "title": "把当前文件发给顾清影",
+        "category": "顾清影",
+        "icon": "$(send)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        { "command": "gqy.open", "group": "navigation@100" },
+        { "command": "gqy.ask", "group": "navigation@101" }
+      ],
+      "commandPalette": [
+        { "command": "gqy.open" },
+        { "command": "gqy.ask", "when": "editorIsOpen" }
+      ]
+    },
+    "keybindings": [
+      { "command": "gqy.open", "key": "cmd+alt+j", "mac": "cmd+alt+j" },
+      { "command": "gqy.ask", "key": "cmd+alt+g", "mac": "cmd+alt+g", "when": "editorTextFocus" }
+    ],
+    "configuration": {
+      "title": "顾清影",
+      "properties": {
+        "gqy.port": {
+          "type": "number",
+          "default": 4096,
+          "description": "顾清影 WebUI 的本机端口"
+        },
+        "gqy.mode": {
+          "type": "string",
+          "enum": ["normal", "plan", "chat"],
+          "default": "normal",
+          "description": "「发给她」用的模式：normal 可改文件，plan 只读，chat 闲聊"
+        }
+      }
+    }
+  }
+}
