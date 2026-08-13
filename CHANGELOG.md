@@ -3,7 +3,9 @@
 本项目所有值得记录的改动都会列在此文件。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [1.0.0] - 2026-08-14
+
+首个正式版：从 0.9.3 到 1.0.0 是一次能力大跃迁——插件框架、打扰判断、好感度、QQ 平台、用量页对齐、App 体验修复等。
 
 ### QQ onebot 平台接入（第一阶段：文本双向通道）
 
