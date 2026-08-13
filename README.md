@@ -72,18 +72,38 @@ GQY 的 CLI、REPL、配置 TUI 和工具状态支持英文与简体中文。在
 |---|---|
 | `gqy` | 进入 REPL 对话（无参数） |
 | `gqy "问题"` | 直接问一句 |
+| `gqy ask "问题"` | 同直接消息（显式子命令） |
+| `gqy init` | 创建默认配置与状态文件 |
+| `gqy paths` | 显示配置/数据/缓存目录（GQY_HOME 布局） |
 | `gqy config` | 配置 TUI |
-| `gqy kb add <目录>` / `gqy kb search <词>` | 知识库导入 / 检索 |
-| `gqy memory stats` / `gqy memory remember <内容>` | 记忆查看 / 手动记忆 |
-| `gqy zsh-init` / `gqy remove-shell-hook` | 安装 / 移除终端自然语言 hook |
-| `gqy web` | 启动本地 Web 面板 |
-| `gqy qq` | 启动 QQ onebot 反向 WebSocket 监听（NapCat 接入） |
-| `gqy balance` | 查询 DeepSeek 账户余额 |
 | `gqy config set <key> <value>` / `gqy config get [key]` | 免交互读写配置（密钥脱敏） |
+| `gqy models` | 列出 / 切换模型 |
+| `gqy variant` | 查看 / 切换思考档位 |
+| `gqy fish-init` / `gqy bash-init` / `gqy zsh-init` | 集成到对应 shell，之后可用自然语言交流 |
+| `gqy remove-shell-hook` | 安全删除已安装的 shell hook |
+| `gqy history` | 显示会话历史 |
+| `gqy activity` | 活动记录 |
+| `gqy archive` | 归档旧对话 |
+| `gqy pop` | 将对话轮次移出当前上下文 |
+| `gqy memes` | 管理表情包 |
+| `gqy kb add <目录>` / `gqy kb search <词>` / `gqy kb list` | 知识库导入 / 检索 / 列出 |
+| `gqy memory stats` / `gqy memory remember <内容>` / `gqy memory search <词>` | 记忆查看 / 手动记忆 / 检索 |
+| `gqy skills` | 管理助手 skills |
+| `gqy tools` | 查看工具 |
+| `gqy web` | 启动本地 Web 面板（--no-open 不自动开浏览器） |
+| `gqy qq` | 启动 QQ onebot 反向 WebSocket 监听（NapCat 接入） |
+| `gqy balance` | 查询账户余额 |
+| `gqy alarm` | 管理闹钟 |
+| `gqy watch` | 系统管家监控（进程/磁盘） |
+| `gqy tts "文字"` | macOS 本地朗读（语音合成） |
+| `gqy stt 音频` | macOS 本地语音识别（离线） |
+| `gqy provider add <url> --api-key <key>` | 添加供应商（自动发现模型） |
 | `gqy backup init` / `gqy backup now` / `gqy backup status` | 备份初始化 / 立即备份 / 状态 |
 | `gqy backup remote <url>` | 绑定远程仓库 |
 | `gqy backup restore --remote <url>` | 从远程恢复 |
 | `gqy reset --all` | 清空对话与记忆 |
+
+常用选项：`--plan`（只读计划模式）、`--debug`（详细诊断日志）、`--stdout`（纯文本输出，适合管道）。
 
 ### 内置功能
 
