@@ -52,7 +52,8 @@ if [ -f "$ICON_SRC" ]; then
     echo "图标: GQYIcon.icns"
 fi
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+GQY_VERSION="$(grep '^version' ../../gqy/Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')"
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -61,7 +62,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleIdentifier</key><string>dev.gqy.app</string>
   <key>CFBundleName</key><string>顾清影</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleShortVersionString</key><string>${GQY_VERSION}</string>
   <key>CFBundleIconFile</key><string>GQYIcon</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
