@@ -839,6 +839,9 @@ struct QueuePromptRequest {
     content: String,
     #[serde(default)]
     images: Vec<WebImageInput>,
+    /// 消息来源：user（默认）/ system（系统主动事件，如 watch 管家提醒）/ app（应用注入）
+    #[serde(default)]
+    source: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1001,6 +1004,9 @@ struct SafeTurn {
     assistant_timestamp: Option<String>,
     token_total: u64,
     token_usage_estimated: bool,
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    cache_read_tokens: u64,
     question_exchanges: Vec<crate::question::QuestionExchange>,
     followups: Vec<SafeFollowup>,
     assets: Vec<SafeImageAsset>,
@@ -1200,17 +1206,26 @@ fn router(state: WebState) -> Router {
         .route("/api/usage/stats", get(usage_stats_web))
         .route("/api/usage/details", get(usage_details_web))
         .route("/api/backup/status", get(backup_status_web))
+        .route("/api/backup/settings", get(backup_settings_web))
         .route("/api/backup/now", post(backup_now_web))
         .route("/api/channels/{channel_id}/turns", get(channel_turns_web))
         .route("/api/search", get(search_web))
         .route("/api/tools/call", post(call_tool_web))
         .route("/api/pi/{kind}", get(pi_control_web).post(pi_control_web))
+        .route("/api/logs", get(logs_web))
+        .route("/api/avatar/from-path", get(avatar_from_path_web))
+        .route("/api/avatar/user", get(avatar_user_web))
+        .route("/api/avatar/upload", post(avatar_upload_web))
+        .route("/api/affection", get(affection_web))
+        .route("/api/moods", get(moods_web))
+        .route("/api/files/preview", get(file_preview_web))
         .route("/api/export", get(export_conversation_web))
         .route("/api/shutdown", post(shutdown_web))
         .route(
             "/api/conversations/{conversation_id}/turns",
             get(conversation_turns_web),
         )
+        .route("/api/conversations/{conversation_id}", delete(delete_conversation_web))
         .route("/api/balance", get(balance_web))
         .route("/api/alarms/{alarm_id}", delete(cancel_alarm_web))
         .layer(DefaultBodyLimit::max(JSON_BODY_LIMIT))
@@ -1551,9 +1566,9 @@ async fn tts_web(
     let mut resp = match client.get(&url).timeout(std::time::Duration::from_secs(90)).send().await {
         Ok(r) => r,
         Err(_) => {
-            // TTS 服务未运行：自动拉起（按需启停，省内存）
-            spawn_tts_server()?;
-            tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+            // TTS 服务未运行：按需拉起（运行环境运行时解析，App/源码/自托管均可）
+            crate::speech::ensure_tts_server(std::time::Duration::from_secs(120))
+                .map_err(|err| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string()))?;
             client
                 .get(&url)
                 .timeout(std::time::Duration::from_secs(90))
@@ -1572,23 +1587,6 @@ async fn tts_web(
         .header("Content-Length", bytes.len())
         .body(axum::body::Body::from(bytes))
         .unwrap())
-}
-
-/// 按需拉起本地 TTS 服务（scripts/tts-server.py，venv python），空闲自动退出省内存。
-fn spawn_tts_server() -> Result<(), ApiError> {
-    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/tts-server.py");
-    let venv_python = concat!(env!("CARGO_MANIFEST_DIR"), "/venv/bin/python");
-    if !std::path::Path::new(&venv_python).exists() {
-        return Err(ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "未找到 venv python（TTS 依赖未安装）"));
-    }
-    std::process::Command::new(venv_python)
-        .arg(script)
-        .arg("8091")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("TTS 服务拉起失败: {e}")))?;
-    Ok(())
 }
 
 /// 会话状态（供终端/面板同步轮询）：当前会话最大 seq + 是否有运行中的轮次。
@@ -1617,6 +1615,16 @@ async fn session_state(
         "running": running,
     }))
     .into_response())
+}
+
+/// 备份设置页：远程配置 + 最近快照（远程 URL 脱敏）。
+async fn backup_settings_web(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<Value>, ApiError> {
+    require_auth(&headers, &state)?;
+    let snapshot = crate::backup::settings_snapshot(&state.paths).map_err(ApiError::internal)?;
+    Ok(Json(snapshot))
 }
 
 /// 最近一次备份结果（WebUI 展示）：读 state/last_backup.json（由 backup.rs 写入）
@@ -1661,25 +1669,32 @@ async fn backup_now_web(
 async fn usage_stats_web(
     State(state): State<WebState>,
     headers: HeaderMap,
+    Query(query): Query<std::collections::HashMap<String, String>>,
 ) -> std::result::Result<Response, ApiError> {
     require_auth(&headers, &state)?;
     let billing = state.manager.lock().unwrap().config.usage_billing.clone();
+    let range = crate::state::UsageRange::parse(query.get("range").map(String::as_str).unwrap_or("all"));
     let stats = state
         .state_store
-        .usage_stats(&billing)
+        .usage_stats(&billing, range)
         .map_err(ApiError::internal)?;
     Ok(Json(json!({ "ok": true, "stats": stats })).into_response())
 }
 
-/// 最近调用明细（时间/模型/输入/输出/缓存命中/是否记忆辅助），供用量页列表与模型详情。
+/// 最近调用明细（时间/来源/模型/输入/输出/缓存命中/是否记忆辅助），供用量页列表与模型详情；
+/// 可按来源（src）与模型（model）过滤。
 async fn usage_details_web(
     State(state): State<WebState>,
     headers: HeaderMap,
+    Query(query): Query<std::collections::HashMap<String, String>>,
 ) -> std::result::Result<Response, ApiError> {
     require_auth(&headers, &state)?;
+    let limit = query.get("limit").and_then(|value| value.parse::<usize>().ok()).unwrap_or(500).min(2000);
+    let src = query.get("src").map(String::as_str);
+    let model = query.get("model").map(String::as_str);
     let details = state
         .state_store
-        .usage_details(500)
+        .usage_details(limit, src, model)
         .map_err(ApiError::internal)?;
     let mut response = Json(json!({ "ok": true, "records": details })).into_response();
     response
@@ -1878,6 +1893,275 @@ async fn pi_control_web(
     Ok(Json(json!({ "ok": true, "data": payload })).into_response())
 }
 
+/// 日志查看：运行日志（gqy.*.log，tracing 文本）与活动记录（activity.jsonl）。
+/// 供 WebUI 日志视图与顾清影自查（read_logs 工具）共用。
+#[derive(Deserialize)]
+struct LogsQuery {
+    /// run（默认）| activity
+    #[serde(default)]
+    kind: String,
+    /// 返回行数（默认 200，上限 2000）
+    #[serde(default)]
+    lines: Option<usize>,
+    /// 关键词过滤（可选）
+    #[serde(default)]
+    query: Option<String>,
+}
+
+async fn logs_web(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Query(query): Query<LogsQuery>,
+) -> std::result::Result<Json<Value>, ApiError> {
+    require_auth(&headers, &state)?;
+    let kind = if query.kind == "activity" { "activity" } else { "run" };
+    let limit = query.lines.unwrap_or(200).clamp(1, 2000);
+    let logs_dir = state.paths.logs_dir();
+    let (file_path, display_name) = if kind == "activity" {
+        (logs_dir.join("activity.jsonl"), "activity.jsonl".to_string())
+    } else {
+        // 取最新的 gqy.*.log
+        let mut candidates = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&logs_dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with("gqy.") && name.ends_with(".log") {
+                    candidates.push((entry.path(), name));
+                }
+            }
+        }
+        candidates.sort_by(|a, b| b.1.cmp(&a.1));
+        let Some((path, name)) = candidates.first() else {
+            return Ok(Json(json!({ "ok": true, "file": "", "lines": [] })));
+        };
+        (path.clone(), name.clone())
+    };
+    let Ok(content) = std::fs::read_to_string(&file_path) else {
+        return Ok(Json(json!({ "ok": true, "file": display_name, "lines": [] })));
+    };
+    let mut all: Vec<&str> = content.lines().collect();
+    if let Some(needle) = query.query.as_deref().filter(|value| !value.trim().is_empty()) {
+        let needle_lower = needle.to_lowercase();
+        all.retain(|line| line.to_lowercase().contains(&needle_lower));
+    }
+    let mut tail: Vec<String> = all
+        .iter()
+        .rev()
+        .take(limit)
+        .map(|line| (*line).to_string())
+        .collect();
+    tail.reverse();
+    Ok(Json(json!({
+        "ok": true,
+        "file": display_name,
+        "kind": kind,
+        "total": all.len(),
+        "lines": tail,
+    })))
+}
+
+/// 从本机路径导入头像：读图片 → 缩到 96×96 JPEG → base64 data URL。
+/// 供 WebUI 头像自定义的「路径导入」通道（文件选择器在 WKWebView 中不可靠）。
+#[derive(Deserialize)]
+struct AvatarPathQuery {
+    path: String,
+}
+
+async fn avatar_from_path_web(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Query(query): Query<AvatarPathQuery>,
+) -> std::result::Result<Json<Value>, ApiError> {
+    require_auth(&headers, &state)?;
+    let path = std::path::PathBuf::from(query.path);
+    if !path.is_absolute() {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "path must be absolute"));
+    }
+    let ext = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase());
+    if !matches!(
+        ext.as_deref(),
+        Some("jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp")
+    ) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "only image files are supported (jpg/png/gif/webp/bmp)",
+        ));
+    }
+    let Ok(metadata) = std::fs::metadata(&path) else {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "file not found"));
+    };
+    if !metadata.is_file() || metadata.len() > 20 * 1024 * 1024 {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "invalid file"));
+    }
+    let bytes = std::fs::read(&path).map_err(ApiError::internal)?;
+    let image = image::load_from_memory(&bytes)
+        .map_err(|_| ApiError::new(StatusCode::BAD_REQUEST, "cannot decode image"))?;
+    let resized = image.thumbnail(96, 96);
+    let mut buffer = Vec::new();
+    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buffer, 85);
+    encoder
+        .encode_image(&resized)
+        .map_err(ApiError::internal)?;
+    let data_url = format!(
+        "data:image/jpeg;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(buffer)
+    );
+    Ok(Json(json!({
+        "ok": true,
+        "data_url": data_url,
+        "bytes": data_url.len(),
+    })))
+}
+
+/// 读取头像文件（pictures/avatars/user.*），返回图片响应。
+async fn avatar_user_web(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+) -> std::result::Result<Response, ApiError> {
+    require_auth(&headers, &state)?;
+    let dir = state.paths.pictures_dir.join("avatars");
+    for name in ["user.jpg", "user.jpeg", "user.png"] {
+        let path = dir.join(name);
+        if path.is_file() {
+            let bytes = std::fs::read(&path).map_err(ApiError::internal)?;
+            let mime = if name.ends_with(".png") { "image/png" } else { "image/jpeg" };
+            return Ok(Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", mime)
+                .header("Content-Length", bytes.len())
+                .body(axum::body::Body::from(bytes))
+                .unwrap());
+        }
+    }
+    Err(ApiError::new(StatusCode::NOT_FOUND, "avatar not set"))
+}
+
+/// 头像上传请求体：{ "data_url": "data:image/jpeg;base64,..." } 或 { "base64": "..." }。
+#[derive(serde::Deserialize)]
+struct AvatarUploadBody {
+    #[serde(default)]
+    data_url: String,
+    #[serde(default)]
+    base64: String,
+}
+
+/// 上传头像：解码 data_url/base64 → 缩到 96px JPEG → 存 pictures/avatars/user.jpg。
+async fn avatar_upload_web(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Json(body): Json<AvatarUploadBody>,
+) -> std::result::Result<Json<Value>, ApiError> {
+    require_auth(&headers, &state)?;
+    let raw = if !body.data_url.is_empty() {
+        body.data_url
+            .split_once(',')
+            .map(|(_, b64)| b64.to_string())
+            .unwrap_or(body.data_url)
+    } else {
+        body.base64
+    };
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(raw.trim())
+        .map_err(|_| ApiError::new(StatusCode::BAD_REQUEST, "invalid base64"))?;
+    let image = image::load_from_memory(&bytes)
+        .map_err(|_| ApiError::new(StatusCode::BAD_REQUEST, "cannot decode image"))?;
+    let resized = image.thumbnail(96, 96);
+    let mut buffer = Vec::new();
+    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buffer, 85);
+    encoder
+        .encode_image(&resized)
+        .map_err(ApiError::internal)?;
+    let dir = state.paths.pictures_dir.join("avatars");
+    std::fs::create_dir_all(&dir).map_err(ApiError::internal)?;
+    std::fs::write(dir.join("user.jpg"), &buffer).map_err(ApiError::internal)?;
+    Ok(Json(json!({ "ok": true, "bytes": buffer.len() })))
+}
+
+/// 好感度快照（WebUI 顶栏 chip / 设置详情页）。
+async fn affection_web(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<Value>, ApiError> {
+    require_auth(&headers, &state)?;
+    Ok(Json(crate::affection::snapshot(&state.paths)))
+}
+
+/// 顾清影最近的心情记录（log_mood 写入的 episodes source='mood'）。
+/// 前端空状态展示「她的心情」，让人格可见。
+async fn moods_web(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<Value>, ApiError> {
+    require_auth(&headers, &state)?;
+    let paths = state.paths.clone();
+    let config = crate::config::AppConfig::load_or_default(&paths).map_err(ApiError::internal)?;
+    let store = crate::memory::MemoryStore::new(&config, &paths);
+    let moods = store.recent_moods(5).map_err(ApiError::internal)?;
+    Ok(Json(moods))
+}
+
+/// 本地图片预览（消息内路径缩略图/灯箱用）：只读、仅图片扩展名、限大小。
+/// 不暴露目录列举；路径必须是绝对路径且是存在的常规文件。
+const FILE_PREVIEW_MAX_BYTES: u64 = 20 * 1024 * 1024;
+
+fn preview_mime_for_path(path: &std::path::Path) -> Option<&'static str> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    match ext.as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        _ => None,
+    }
+}
+
+#[derive(Deserialize)]
+struct FilePreviewQuery {
+    path: String,
+}
+
+async fn file_preview_web(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Query(query): Query<FilePreviewQuery>,
+) -> std::result::Result<Response, ApiError> {
+    require_auth(&headers, &state)?;
+    let path = std::path::PathBuf::from(query.path);
+    if !path.is_absolute() {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "path must be absolute"));
+    }
+    let Some(mime) = preview_mime_for_path(&path) else {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "only image files can be previewed",
+        ));
+    };
+    let Ok(metadata) = std::fs::metadata(&path) else {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "file not found"));
+    };
+    if !metadata.is_file() {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "not a regular file"));
+    }
+    if metadata.len() > FILE_PREVIEW_MAX_BYTES {
+        return Err(ApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "file too large to preview",
+        ));
+    }
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|err| ApiError::new(StatusCode::NOT_FOUND, format!("read failed: {err}")))?;
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", mime)
+        .header("Content-Length", bytes.len())
+        .body(axum::body::Body::from(bytes))
+        .unwrap())
+}
+
 /// 导出当前会话为 markdown 文档。
 async fn export_conversation_web(
     State(state): State<WebState>,
@@ -2033,6 +2317,36 @@ struct SearchQuery {
 }
 
 /// 读取指定历史会话的 turns（当前通道内，含归档轮次；只读数据源）
+/// 删除一个历史会话（WebUI 会话列表 hover 操作）。
+/// 事件广播 conversation.deleted，各端面板同步刷新列表。
+async fn delete_conversation_web(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Path(conversation_id): Path<String>,
+) -> std::result::Result<Json<Value>, ApiError> {
+    require_mutation(&headers, &state)?;
+    if conversation_id.is_empty()
+        || conversation_id.len() > 96
+        || !conversation_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+    {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "conversation not found"));
+    }
+    let deleted = state
+        .state_store
+        .delete_conversation(&conversation_id)
+        .map_err(ApiError::internal)?;
+    state.events.publish(
+        "conversation.deleted",
+        json!({
+            "conversation_id": conversation_id,
+            "deleted": deleted,
+        }),
+    );
+    Ok(Json(json!({ "ok": true, "deleted": deleted })))
+}
+
 async fn conversation_turns_web(
     State(state): State<WebState>,
     headers: HeaderMap,
@@ -2398,6 +2712,7 @@ fn enqueue_running_prompt(
     state: &WebState,
     content: &str,
     attachments: &[QueuedPromptAttachment],
+    source: &str,
 ) -> std::result::Result<(Option<String>, Option<String>, SafeQueuedPrompt), ApiError> {
     let active_run_id = {
         let manager = state.manager.lock().unwrap();
@@ -2413,7 +2728,7 @@ fn enqueue_running_prompt(
     if let Some(run_id) = active_run_id {
         let prompt = state
             .state_store
-            .enqueue_prompt(&prompt_id, content, content, attachments)
+            .enqueue_prompt_with_source(&prompt_id, content, content, attachments, source)
             .map_err(ApiError::internal)?;
         return Ok((Some(run_id), None, SafeQueuedPrompt::from(prompt)));
     }
@@ -2440,7 +2755,7 @@ fn enqueue_running_prompt(
     }
     let prompt = state
         .state_store
-        .enqueue_prompt_for_target(&target, &prompt_id, content, content, &[])
+        .enqueue_prompt_for_target_with_source(&target, &prompt_id, content, content, &[], source)
         .map_err(ApiError::internal)?;
     Ok((None, Some(target.turn_id), SafeQueuedPrompt::from(prompt)))
 }
@@ -2475,7 +2790,7 @@ async fn create_turn(
         .map_err(ApiError::internal)?
     {
         let (run_id, turn_id, prompt) =
-            enqueue_running_prompt(&state, &content, &[])?;
+            enqueue_running_prompt(&state, &content, &[], "user")?;
         publish_queued_prompt(&state, run_id.as_deref(), turn_id.as_deref(), &prompt);
         return Ok((
             StatusCode::ACCEPTED,
@@ -2590,10 +2905,24 @@ async fn queue_prompt(
 ) -> std::result::Result<Response, ApiError> {
     require_mutation(&headers, &state)?;
     let content = validate_content(request.content)?;
+    let source = normalize_prompt_source(request.source.as_deref())?;
     let attachments = queued_attachments_from_input(&request.images);
-    let (run_id, turn_id, safe) = enqueue_running_prompt(&state, &content, &attachments)?;
+    let (run_id, turn_id, safe) = enqueue_running_prompt(&state, &content, &attachments, source)?;
     publish_queued_prompt(&state, run_id.as_deref(), turn_id.as_deref(), &safe);
     Ok((StatusCode::ACCEPTED, Json(safe)).into_response())
+}
+
+/// 归一化入队消息来源：空 / user → user；system / app 放行；其他值拒绝（防止伪造来源）。
+fn normalize_prompt_source(source: Option<&str>) -> std::result::Result<&'static str, ApiError> {
+    match source.unwrap_or("user") {
+        "" | "user" => Ok("user"),
+        "system" => Ok("system"),
+        "app" => Ok("app"),
+        other => Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!("invalid prompt source: {other}"),
+        )),
+    }
 }
 
 async fn remove_queue_prompt(
@@ -4305,6 +4634,9 @@ impl SafeTurn {
             assistant_timestamp: turn.assistant_timestamp,
             token_total: turn.token_total,
             token_usage_estimated: turn.token_usage_estimated,
+            prompt_tokens: turn.prompt_tokens,
+            completion_tokens: turn.completion_tokens,
+            cache_read_tokens: turn.cache_read_tokens,
             question_exchanges: turn.question_exchanges,
             followups: turn.followups.into_iter().map(SafeFollowup::from).collect(),
             assets,
@@ -4734,6 +5066,67 @@ fn open_browser(_url: &str) {}
 mod tests {
     use super::*;
     use crate::question::{QuestionOption, QuestionPrompt};
+
+    #[test]
+    fn prompt_source_normalization() {
+        // 默认/空 → user；system/app 放行；其他拒绝
+        assert_eq!(normalize_prompt_source(None).unwrap(), "user");
+        assert_eq!(normalize_prompt_source(Some("")).unwrap(), "user");
+        assert_eq!(normalize_prompt_source(Some("user")).unwrap(), "user");
+        assert_eq!(normalize_prompt_source(Some("system")).unwrap(), "system");
+        assert_eq!(normalize_prompt_source(Some("app")).unwrap(), "app");
+        assert!(normalize_prompt_source(Some("root")).is_err());
+        assert!(normalize_prompt_source(Some("SYSTEM")).is_err());
+    }
+
+    /// WebUI 稳定性防线：页面/资源 smoke 测试。
+    /// 每个关键 DOM id 都必须存在于 index.html，每个引用的静态资源都必须能加载——
+    /// 防止重构/拆分时漏引用导致白屏。
+    #[tokio::test]
+    async fn webui_assets_smoke() {
+        // 页面主体 + 关键 id
+        let index = index_asset().await;
+        let body = body_text(index).await;
+        for key in [
+            "appShell",
+            "sidebar",
+            "mainStage",
+            "composerForm",
+            "composerInput",
+            "sendButton",
+            "timeline",
+            "settingsDrawer",
+            "usageView",
+            "conversationList",
+            "channelList",
+            "loginForm",
+            "loginPassword",
+        ] {
+            assert!(
+                body.contains(&format!("id=\"{key}\"")) || body.contains(&format!("id='{key}'"))
+                    || body.contains(&format!("id=\"{key}\" ")),
+                "index.html 缺少关键元素 id={key}"
+            );
+        }
+
+        // 静态资源都能加载且非空
+        let app = app_asset().await;
+        assert!(!body_text(app).await.is_empty(), "app.js 为空");
+        let styles = styles_asset().await;
+        assert!(!body_text(styles).await.is_empty(), "styles.css 为空");
+        let icons = provider_icons_asset().await;
+        assert!(!body_text(icons).await.is_empty(), "provider-icons.svg 为空");
+    }
+
+    /// 从 axum Response 里取文本（smoke 测试辅助；按值消费 Body）。
+    async fn body_text(response: Response) -> String {
+        use axum::body::to_bytes;
+        // 上限 16MB：app.js 产物已超 1MB（含 inline sourcemap）
+        let bytes = to_bytes(response.into_body(), 16 * 1024 * 1024)
+            .await
+            .unwrap_or_default();
+        String::from_utf8_lossy(&bytes).to_string()
+    }
 
     #[test]
     fn assistant_sentinels_are_never_exposed() {

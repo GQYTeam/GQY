@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#111512">
   <title>顾清影</title>
@@ -92,18 +92,12 @@
 
         <div class="topbar-actions">
           <span class="backup-chip persona-chip" id="personaChip" title="当前人格" hidden></span>
+          <span class="backup-chip affection-chip" id="affectionChip" title="好感度" hidden></span>
+          <span class="backup-chip date-chip" id="dateChip" title="今天" hidden></span>
           <span class="backup-chip" id="backupStatus" title="最近备份" hidden></span>
           <button class="topbar-icon-button" id="exportButton" type="button" title="导出当前对话" aria-label="导出当前对话">
             <span class="icon-slot" data-icon="download" aria-hidden="true"><span class="icon-fallback">↓</span></span>
           </button>
-          <div class="model-menu-wrap" id="modelMenuWrap">
-            <button class="model-button" id="modelButton" type="button" aria-haspopup="menu" aria-expanded="false" disabled>
-              <span class="model-mark" id="modelMark">--</span>
-              <span class="model-label" id="modelLabel">正在载入</span>
-              <span class="icon-slot" data-icon="chevron-down" aria-hidden="true"><span class="icon-fallback">⌄</span></span>
-            </button>
-            <div class="model-menu" id="modelMenu" role="menu" aria-label="选择模型" hidden></div>
-          </div>
         </div>
       </header>
 
@@ -142,12 +136,16 @@
 
           <section class="empty-state" id="emptyState" aria-labelledby="emptyTitle" hidden>
             <div class="empty-visual">
-              <img src="/assets/gqy-wallpaper.png" alt="顾清影坐在窗边的书桌前">
+              <div class="empty-avatar">
+                <img src="/assets/gqy-logo.png" alt="顾清影">
+                <i class="empty-halo" aria-hidden="true"></i>
+              </div>
             </div>
             <div class="empty-copy">
               <span class="empty-kicker"><i class="status-dot"></i>顾清影在这里</span>
               <h1 id="emptyTitle">今天想聊些什么？</h1>
-              <p>从一个问题、计划或此刻的想法开始。</p>
+              <p id="emptyHint">从一个问题、计划或此刻的想法开始。</p>
+              <p class="mood-line" id="moodLine" hidden></p>
             </div>
             <div class="prompt-grid" id="promptGrid">
               <button type="button" data-prompt="帮我整理一下今天的安排">
@@ -177,16 +175,29 @@
 
         <footer class="composer-dock" id="composerDock">
           <div class="question-dock" id="questionDock" aria-label="待回答问题" aria-live="polite" hidden></div>
+          <div class="composer-model-row">
+            <div class="model-menu-wrap" id="modelMenuWrap">
+              <button class="model-button" id="modelButton" type="button" aria-haspopup="menu" aria-expanded="false" disabled>
+                <span class="model-mark" id="modelMark">--</span>
+                <span class="model-label" id="modelLabel">正在载入</span>
+                <span class="icon-slot" data-icon="chevron-down" aria-hidden="true"><span class="icon-fallback">⌄</span></span>
+              </button>
+              <div class="model-menu" id="modelMenu" role="menu" aria-label="选择模型" hidden></div>
+            </div>
+            <span class="model-row-status" id="modelRowStatus"></span>
+          </div>
           <form class="composer" id="composerForm">
             <div class="image-tray" id="imageTray" aria-label="待发送图片" hidden></div>
             <textarea id="composerInput" rows="3" placeholder="给顾清影发消息（可粘贴/拖入图片）" aria-label="消息" disabled></textarea>
             <div class="queue-tray" id="queueTray" aria-label="排队中的消息" hidden></div>
             <div class="composer-footer">
               <div class="composer-controls">
+                <button class="composer-attach" id="attachButton" type="button" title="添加图片" aria-label="添加图片">
+                  <span class="icon-slot" data-icon="paperclip" aria-hidden="true"><span class="icon-fallback">+</span></span>
+                </button>
+                <input type="file" id="attachInput" accept="image/*" multiple hidden>
                 <div class="mode-switch" id="modeSwitch" role="group" aria-label="对话模式">
-                  <button class="active" type="button" data-mode="normal" aria-pressed="true">普通</button>
-                  <button type="button" data-mode="plan" aria-pressed="false">计划</button>
-                  <button type="button" data-mode="chat" aria-pressed="false">闲聊</button>
+                  <span class="mode-auto" title="任务来了就利落，聊开了就放松——她自动适应">自动</span>
                 </div>
                 <span class="composer-state" id="composerState">正在载入</span>
               </div>
@@ -219,7 +230,15 @@
             <h2 id="usageTitle">用量统计</h2>
             <small id="usageSubtitle">正在载入…</small>
           </div>
-          <button class="secondary-button compact-button" id="usageBackButton" type="button">返回对话</button>
+          <div class="usage-header-actions">
+            <div class="usage-range-seg" id="usageRangeSeg" role="group" aria-label="统计范围">
+              <button type="button" data-range="1d">近 1 天</button>
+              <button type="button" data-range="7d">7 天</button>
+              <button type="button" data-range="30d">30 天</button>
+              <button type="button" data-range="all" class="on">至今</button>
+            </div>
+            <button class="secondary-button compact-button" id="usageBackButton" type="button">返回对话</button>
+          </div>
         </header>
         <div class="usage-scroll" id="usageScroll">
           <div class="usage-summary" id="usageSummary"></div>
@@ -236,6 +255,7 @@
             </div>
             <div class="usage-bars-stacked" id="usageBarsStacked"></div>
           </div>
+          <div class="usage-sources" id="usageSources"></div>
           <div class="usage-models">
             <div class="usage-section-heading">
               <h3>模型消耗明细<span class="usage-models-hint">点击行查看详情</span></h3>
@@ -249,6 +269,10 @@
             <div class="usage-section-heading">
               <h3>最近调用</h3>
               <span class="usage-chart-hint">含记忆/压缩等辅助消耗</span>
+              <div class="usage-rec-filters">
+                <select id="usageSrcFilter" aria-label="按来源筛选"><option value="">全部来源</option></select>
+                <select id="usageModelFilter" aria-label="按模型筛选"><option value="">全部模型</option></select>
+              </div>
             </div>
             <div class="usage-recent-list" id="usageRecentList"></div>
           </div>
@@ -280,6 +304,10 @@
             <button type="button" data-settings-view="plugins">插件</button>
             <button type="button" data-settings-view="prompts">提示词</button>
           </div>
+          <div class="settings-nav-group"><h3>数据</h3>
+            <button type="button" data-settings-view="backup">备份</button>
+            <button type="button" data-settings-view="affection">好感度</button>
+          </div>
           <div class="settings-nav-group"><h3>系统</h3>
             <button type="button" data-settings-view="general">全局</button>
             <button type="button" data-settings-view="advanced">高级</button>
@@ -289,8 +317,42 @@
           <section class="settings-section settings-panel" data-settings-panel="interface">
           <h2>界面主题</h2>
           <div class="theme-options" role="group" aria-label="界面主题">
-            <button type="button" data-theme-choice="linen"><i class="theme-swatch linen"></i><span>浅色</span></button>
             <button type="button" data-theme-choice="graphite"><i class="theme-swatch graphite"></i><span>石墨</span></button>
+            <button type="button" data-theme-choice="moon"><i class="theme-swatch moon"></i><span>月神</span></button>
+            <button type="button" data-theme-choice="linen"><i class="theme-swatch linen"></i><span>浅色</span></button>
+          </div>
+          <div class="config-field">
+            <label for="bgIntensityRange">背景强度</label>
+            <input type="range" id="bgIntensityRange" min="0" max="100" value="20">
+            <small>对话区背景壁纸 / 月夜氛围的显示强度（0 = 纯色背景）</small>
+          </div>
+          <div class="config-field">
+            <label>我的头像</label>
+            <div class="avatar-picker">
+              <img id="userAvatarPreview" class="avatar-preview" alt="我的头像" hidden>
+              <input type="file" id="userAvatarInput" accept="image/*" hidden>
+              <button type="button" class="secondary-button compact-button" id="userAvatarButton">选择图片</button>
+              <button type="button" class="secondary-button compact-button" id="userAvatarClear" hidden>移除</button>
+            </div>
+            <div class="avatar-path-row">
+              <input type="text" id="userAvatarPath" placeholder="或输入本机图片路径，如 /Users/mac/Pictures/xxx.jpg" spellcheck="false" autocomplete="off">
+              <button type="button" class="secondary-button compact-button" id="userAvatarPathImport">导入</button>
+            </div>
+            <small>对话中显示在我的消息旁（96px 内自动压缩，仅存本机）</small>
+          </div>
+          <div class="config-field">
+            <label>顾清影头像</label>
+            <div class="avatar-picker">
+              <img id="assistantAvatarPreview" class="avatar-preview" alt="顾清影头像" hidden>
+              <input type="file" id="assistantAvatarInput" accept="image/*" hidden>
+              <button type="button" class="secondary-button compact-button" id="assistantAvatarButton">选择图片</button>
+              <button type="button" class="secondary-button compact-button" id="assistantAvatarClear" hidden>移除</button>
+            </div>
+            <div class="avatar-path-row">
+              <input type="text" id="assistantAvatarPath" placeholder="或输入本机图片路径" spellcheck="false" autocomplete="off">
+              <button type="button" class="secondary-button compact-button" id="assistantAvatarPathImport">导入</button>
+            </div>
+            <small>替换顾清影在对话中的头像（仅存本机）</small>
           </div>
           </section>
           <section class="settings-section settings-panel" data-settings-panel="general" hidden>
@@ -333,6 +395,16 @@
           <h2>自定义提示词</h2>
           <div class="prompt-editor" id="promptEditor"></div>
           </section>
+          <section class="settings-section settings-panel" data-settings-panel="backup" hidden>
+          <h2>备份</h2>
+          <p class="settings-description">顾清影的记忆（配置/记忆/对话/图片）每轮对话后自动 Git 快照，可推送到远程私有仓库。换机时一条命令恢复。</p>
+          <div id="backupSettingsCard">正在载入…</div>
+          </section>
+          <section class="settings-section settings-panel" data-settings-panel="affection" hidden>
+          <h2>好感度</h2>
+          <p class="settings-description">顾清影对你积累的亲密度：每轮对话后按内容与情境自动增减，深夜倾诉、任务利落会加分。仅本机保存，不影响使用。</p>
+          <div id="affectionCard">正在载入…</div>
+          </section>
           <section class="settings-section settings-panel" data-settings-panel="advanced" hidden>
           <h2>能力状态</h2>
           <dl class="capability-list" id="capabilityList">
@@ -340,6 +412,22 @@
             <div><dt>附件</dt><dd>正在载入</dd></div>
             <div><dt>消息队列</dt><dd>正在载入</dd></div>
           </dl>
+          <h2>运行日志</h2>
+          <p class="settings-description">运行日志（gqy.*.log）与活动记录（activity.jsonl），排查问题时先用它。</p>
+          <div class="logs-toolbar">
+            <select id="logsKind" aria-label="日志类型">
+              <option value="run" selected>运行日志</option>
+              <option value="activity">活动记录</option>
+            </select>
+            <select id="logsLines" aria-label="行数">
+              <option value="100">100 行</option>
+              <option value="200" selected>200 行</option>
+              <option value="1000">1000 行</option>
+            </select>
+            <input type="search" id="logsQuery" placeholder="关键词过滤…" autocomplete="off">
+            <button class="secondary-button compact-button" id="logsRefresh" type="button">刷新</button>
+          </div>
+          <pre class="logs-viewer" id="logsViewer" tabindex="0">正在载入…</pre>
           <h2>完整配置</h2>
           <p class="settings-description">这里包含结构化表单未单独展示的所有配置项。应用到草稿后仍需保存。</p>
           <textarea class="config-json-editor" id="advancedConfigEditor" spellcheck="false" aria-label="完整配置 JSON"></textarea>

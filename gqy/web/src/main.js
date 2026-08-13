@@ -1,0 +1,7733 @@
+import {
+  asFiniteNumber,
+  formatInteger,
+  formatTokens,
+  formatTime,
+  formatDateTime,
+  formatRelativeTime,
+  dayKey,
+  formatDayLabel,
+  firstLine,
+  modelMark,
+} from "./utils.js";
+
+(() => {
+  "use strict";
+
+  // ── 稳定性防线：全局错误边界 ─────────────────────────────
+  // 任何未捕获异常/未处理的 Promise 拒绝都显示错误遮罩（带复制按钮），
+  // 替代"白屏 + 控制台才有线索"。这是最后一道网，不依赖任何其他代码。
+  function installErrorBoundary() {
+    let overlay = null;
+    function showFatalOverlay(message) {
+      if (overlay) return;
+      overlay = document.createElement("div");
+      overlay.id = "fatalOverlay";
+      overlay.style.cssText = [
+        "position:fixed;inset:0;z-index:99999;display:flex;align-items:center;",
+        "justify-content:center;background:rgba(10,12,10,0.92);color:#e8e6e1;",
+        "font:14px/1.7 -apple-system,sans-serif;padding:24px;",
+      ].join("");
+      const box = document.createElement("div");
+      box.style.cssText = "max-width:640px;width:100%;background:#1b1f1b;border:1px solid #333;border-radius:12px;padding:20px 24px;";
+      const title = document.createElement("h1");
+      title.textContent = "界面出错了";
+      title.style.cssText = "margin:0 0 8px;font-size:16px;color:#ff8a65;";
+      const detail = document.createElement("pre");
+      detail.textContent = message || "未知错误";
+      detail.style.cssText = "white-space:pre-wrap;word-break:break-all;max-height:40vh;overflow:auto;margin:8px 0 16px;font-size:12px;color:#b8b6ae;";
+      const actions = document.createElement("div");
+      actions.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;";
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.textContent = "复制错误信息";
+      copy.style.cssText = "padding:6px 14px;border-radius:8px;border:1px solid #444;background:#262b26;color:#e8e6e1;cursor:pointer;";
+      copy.addEventListener("click", () => {
+        navigator.clipboard?.writeText(message || "").catch(() => {});
+      });
+      const reload = document.createElement("button");
+      reload.type = "button";
+      reload.textContent = "重新载入";
+      reload.style.cssText = "padding:6px 14px;border-radius:8px;border:1px solid #444;background:#262b26;color:#e8e6e1;cursor:pointer;";
+      reload.addEventListener("click", () => location.reload());
+      actions.append(copy, reload);
+      box.append(title, detail, actions);
+      overlay.append(box);
+      document.body.append(overlay);
+    }
+    window.addEventListener("error", (event) => {
+      showFatalOverlay(event.message || "脚本错误");
+    });
+    window.addEventListener("unhandledrejection", (event) => {
+      const reason = event.reason;
+      const message = reason instanceof Error ? reason.stack || reason.message : String(reason || "未处理的 Promise 拒绝");
+      showFatalOverlay(message);
+    });
+  }
+  installErrorBoundary();
+
+  // Panel 模式（悬浮卡片嵌入）：NSPanel + WKWebView 加载 ?panel=1
+  const IS_PANEL = new URLSearchParams(location.search).has("panel");
+  if (IS_PANEL) document.body.classList.add("panel-mode");
+
+  // 备份可见性：轮询 /api/backup/status，顶栏显示最近备份结果（失败也能发现）
+  async function refreshBackupStatus() {
+    const el = document.getElementById("backupStatus");
+    if (!el) return;
+    try {
+      const res = await fetch("/api/backup/status");
+      const data = await res.json();
+      if (!data || data.ok === undefined) { el.hidden = true; return; }
+      const ts = Number(data.ts || 0);
+      const age = ts ? Math.floor(Date.now() / 1000 - ts) : -1;
+      let label, cls;
+      if (!data.ok) {
+        label = "备份失败";
+        cls = "error";
+      } else if (age < 0) {
+        label = "备份：—";
+        cls = "";
+      } else if (age < 60) {
+        label = "备份：刚刚";
+        cls = "fresh";
+      } else if (age < 3600) {
+        label = `备份：${Math.floor(age / 60)} 分钟前`;
+        cls = "fresh";
+      } else {
+        label = `备份：${Math.floor(age / 3600)} 小时前`;
+        cls = "stale";
+      }
+      el.textContent = label;
+      el.className = "backup-chip " + cls;
+      el.title = data.error ? `最近备份失败：${data.error}` : (data.commit ? `commit ${data.commit}` : "最近备份");
+      el.hidden = false;
+    } catch (_) {
+      el.hidden = true;
+    }
+  }
+  // 点击顶栏备份 chip → 立即备份（POST /api/backup/now），完成后刷新状态
+  function bindBackupChipClick() {
+    const el = document.getElementById("backupStatus");
+    if (!el || el.dataset.clickBound) return;
+    el.dataset.clickBound = "1";
+    el.style.cursor = "pointer";
+    el.title = (el.title || "") + "（点击立即备份）";
+    el.addEventListener("click", async () => {
+      if (el.dataset.busy) return;
+      el.dataset.busy = "1";
+      el.textContent = "备份中…";
+      try {
+        const res = await apiRequest("/api/backup/now", { method: "POST" });
+        const data = await res.json();
+        showToast(data.ok ? `备份完成${data.pushed ? "，已推送远程" : ""}` : (data.error || "备份失败"), data.ok ? "info" : "error");
+      } catch (error) {
+        showToast(error.message || "备份失败", "error");
+      } finally {
+        delete el.dataset.busy;
+        refreshBackupStatus();
+      }
+    });
+  }
+  function initBackupChip() {
+    if (typeof window === "undefined") return;
+    bindBackupChipClick();
+    refreshBackupStatus();
+    // 每 5 分钟刷新一次备份状态
+    setInterval(refreshBackupStatus, 300_000);
+  }
+  if (document.readyState !== "loading") {
+    initBackupChip();
+  } else {
+    document.addEventListener("DOMContentLoaded", initBackupChip);
+  }
+
+  const MAX_CONTENT_CHARS = 20_000;
+  const MAX_CUSTOM_ANSWER_CHARS = 4_000;
+  const MAX_TOOL_OUTPUT_CHARS = 200_000;
+  const NEAR_BOTTOM_PX = 120;
+
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const ICONS = {
+    "arrow-down": [["path", { d: "M12 5v14" }], ["path", { d: "m19 12-7 7-7-7" }]],
+    "arrow-up": [["path", { d: "m5 12 7-7 7 7" }], ["path", { d: "M12 19V5" }]],
+    "paperclip": [["path", { d: "m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" }]],
+    "chart-column": [["path", { d: "M3 3v16a2 2 0 0 0 2 2h16" }], ["path", { d: "M7 15v-3" }], ["path", { d: "M12 15V8" }], ["path", { d: "M17 15v-5" }]],
+    atom: [["circle", { cx: "12", cy: "12", r: "1" }], ["path", { d: "M20.2 20.2c2.04-2.03.02-7.37-4.5-11.9-4.52-4.52-9.87-6.54-11.9-4.5-2.04 2.03-.02 7.37 4.5 11.9 4.52 4.52 9.87 6.54 11.9 4.5Z" }], ["path", { d: "M15.7 15.7c4.52-4.52 6.54-9.87 4.5-11.9-2.03-2.04-7.37-.02-11.9 4.5-4.52 4.52-6.54 9.87-4.5 11.9 2.03 2.04 7.37.02 11.9-4.5Z" }]],
+    check: [["path", { d: "M20 6 9 17l-5-5" }]],
+    "chevron-down": [["path", { d: "m6 9 6 6 6-6" }]],
+    "chevron-right": [["path", { d: "m9 18 6-6-6-6" }]],
+    "circle-alert": [["circle", { cx: "12", cy: "12", r: "10" }], ["line", { x1: "12", x2: "12", y1: "8", y2: "12" }], ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16" }]],
+    "circle-help": [["circle", { cx: "12", cy: "12", r: "10" }], ["path", { d: "M9.09 9a3 3 0 1 1 5.83 1c0 2-3 3-3 3" }], ["path", { d: "M12 17h.01" }]],
+    "circle-stop": [["circle", { cx: "12", cy: "12", r: "10" }], ["rect", { width: "6", height: "6", x: "9", y: "9", rx: "1" }]],
+    copy: [["rect", { width: "14", height: "14", x: "8", y: "8", rx: "2", ry: "2" }], ["path", { d: "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" }]],
+    download: [["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }], ["polyline", { points: "7 10 12 15 17 10" }], ["line", { x1: "12", x2: "12", y1: "15", y2: "3" }]],
+    "external-link": [["path", { d: "M15 3h6v6" }], ["path", { d: "M10 14 21 3" }], ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }]],
+    fileTerminal: [["path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }], ["polyline", { points: "14 2 14 8 20 8" }], ["path", { d: "m8 13 2 2-2 2" }], ["path", { d: "M12 17h4" }]],
+    lightbulb: [["path", { d: "M9 18h6" }], ["path", { d: "M10 22h4" }], ["path", { d: "M15.09 14c.18-.59.59-1.05 1.05-1.52A6 6 0 1 0 7.86 12.5c.45.44.85.9 1.03 1.5" }], ["path", { d: "M9 14h6v1a3 3 0 0 1-6 0v-1Z" }]],
+    "list-todo": [["rect", { x: "3", y: "5", width: "6", height: "6", rx: "1" }], ["path", { d: "m3 17 2 2 4-4" }], ["path", { d: "M13 6h8" }], ["path", { d: "M13 12h8" }], ["path", { d: "M13 18h8" }]],
+    "loader-circle": [["path", { d: "M21 12a9 9 0 1 1-6.219-8.56" }]],
+    "lock-keyhole": [["circle", { cx: "12", cy: "16", r: "1" }], ["rect", { x: "3", y: "10", width: "18", height: "12", rx: "2" }], ["path", { d: "M7 10V7a5 5 0 0 1 10 0v3" }]],
+    "log-in": [["path", { d: "M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" }], ["polyline", { points: "10 17 15 12 10 7" }], ["line", { x1: "15", x2: "3", y1: "12", y2: "12" }]],
+    "message-circle": [["path", { d: "M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" }]],
+    "messages-square": [["path", { d: "M14 9a2 2 0 0 1-2 2H6l-4 4V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z" }], ["path", { d: "M18 9h2a2 2 0 0 1 2 2v10l-4-4h-6a2 2 0 0 1-2-2v-1" }]],
+    moon: [["path", { d: "M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" }]],
+    "panel-left": [["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2" }], ["path", { d: "M9 3v18" }]],
+    "panel-left-close": [["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2" }], ["path", { d: "M9 3v18" }], ["path", { d: "m16 15-3-3 3-3" }]],
+    "panel-left-open": [["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2" }], ["path", { d: "M9 3v18" }], ["path", { d: "m14 15 3-3-3-3" }]],
+    "refresh-cw": [["path", { d: "M21 12a9 9 0 0 0-15.35-6.35L3 8" }], ["path", { d: "M3 3v5h5" }], ["path", { d: "M3 12a9 9 0 0 0 15.35 6.35L21 16" }], ["path", { d: "M16 16h5v5" }]],
+    route: [["circle", { cx: "6", cy: "19", r: "3" }], ["path", { d: "M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15" }], ["circle", { cx: "18", cy: "5", r: "3" }]],
+    "settings-2": [["path", { d: "M20 7h-9" }], ["path", { d: "M14 17H5" }], ["circle", { cx: "17", cy: "17", r: "3" }], ["circle", { cx: "7", cy: "7", r: "3" }]],
+    "sliders-horizontal": [["line", { x1: "21", x2: "14", y1: "4", y2: "4" }], ["line", { x1: "10", x2: "3", y1: "4", y2: "4" }], ["line", { x1: "21", x2: "12", y1: "12", y2: "12" }], ["line", { x1: "8", x2: "3", y1: "12", y2: "12" }], ["line", { x1: "21", x2: "16", y1: "20", y2: "20" }], ["line", { x1: "12", x2: "3", y1: "20", y2: "20" }], ["line", { x1: "14", x2: "14", y1: "2", y2: "6" }], ["line", { x1: "8", x2: "8", y1: "10", y2: "14" }], ["line", { x1: "16", x2: "16", y1: "18", y2: "22" }]],
+    sparkles: [["path", { d: "m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z" }], ["path", { d: "M5 3v4" }], ["path", { d: "M19 17v4" }], ["path", { d: "M3 5h4" }], ["path", { d: "M17 19h4" }]],
+    "square-pen": [["path", { d: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }], ["path", { d: "M18.37 2.63a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z" }]],
+    sun: [["circle", { cx: "12", cy: "12", r: "4" }], ["path", { d: "M12 2v2" }], ["path", { d: "M12 20v2" }], ["path", { d: "m4.93 4.93 1.42 1.42" }], ["path", { d: "m17.66 17.66 1.41 1.41" }], ["path", { d: "M2 12h2" }], ["path", { d: "M20 12h2" }], ["path", { d: "m6.34 17.66-1.41 1.41" }], ["path", { d: "m19.07 4.93-1.41 1.41" }]],
+    "sun-moon": [["path", { d: "M12 8a2.83 2.83 0 0 0 4 4 4 4 0 1 1-4-4" }], ["path", { d: "M12 2v2" }], ["path", { d: "M12 20v2" }], ["path", { d: "m4.9 4.9 1.4 1.4" }], ["path", { d: "m17.7 17.7 1.4 1.4" }], ["path", { d: "M2 12h2" }], ["path", { d: "M20 12h2" }], ["path", { d: "m6.3 17.7-1.4 1.4" }], ["path", { d: "m19.1 4.9-1.4 1.4" }]],
+    "triangle-alert": [["path", { d: "m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" }], ["path", { d: "M12 9v4" }], ["path", { d: "M12 17h.01" }]],
+    wrench: [["path", { d: "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94z" }]],
+    x: [["path", { d: "M18 6 6 18" }], ["path", { d: "m6 6 12 12" }]]
+  };
+
+  const EVENT_NAMES = [
+    "run.started",
+    "turn.started",
+    "assistant.delta",
+    "reasoning.start",
+    "reasoning.reset",
+    "reasoning.part_start",
+    "reasoning.part_end",
+    "reasoning.title",
+    "reasoning.delta",
+    "tool.started",
+    "tool.progress",
+    "tool.output",
+    "tool.image",
+    "tool.finished",
+    "question.requested",
+    "question.answered",
+    "context.compact_start",
+    "context.compact_delta",
+    "context.compact_end",
+    "context.pop_start",
+    "context.pop_end",
+    "context.error",
+    "queue.added",
+    "queue.removed",
+    "queue.consumed",
+    "run.completed",
+    "run.cancelled",
+    "run.failed",
+    "conversation.reset",
+    "config.reloaded",
+    "resync_required"
+  ];
+
+  const RUN_EVENTS = new Set(EVENT_NAMES.filter((name) => !["conversation.reset", "resync_required", "queue.added", "queue.removed"].includes(name)));
+
+  const elements = {
+    body: document.body,
+    sidebar: document.getElementById("sidebar"),
+    sidebarScrim: document.getElementById("sidebarScrim"),
+    sidebarClose: document.getElementById("sidebarClose"),
+    mobileMenuButton: document.getElementById("mobileMenuButton"),
+    sidebarStatusDot: document.getElementById("sidebarStatusDot"),
+    sidebarConnectionStatus: document.getElementById("sidebarConnectionStatus"),
+    newChatButton: document.getElementById("newChatButton"),
+    channelList: document.getElementById("channelList"),
+    sidebarSearchInput: document.getElementById("sidebarSearchInput"),
+    searchResults: document.getElementById("searchResults"),
+    conversationList: document.getElementById("conversationList"),
+    balanceChip: document.getElementById("balanceChip"),
+    currentConversation: document.getElementById("currentConversation"),
+    usageButton: document.getElementById("usageButton"),
+    usageView: document.getElementById("usageView"),
+    usageSubtitle: document.getElementById("usageSubtitle"),
+    usageBackButton: document.getElementById("usageBackButton"),
+    usageSummary: document.getElementById("usageSummary"),
+    usageHeatmap: document.getElementById("usageHeatmap"),
+    usageBarsStacked: document.getElementById("usageBarsStacked"),
+    usageRangeSeg: document.getElementById("usageRangeSeg"),
+    usageSources: document.getElementById("usageSources"),
+    usageSrcFilter: document.getElementById("usageSrcFilter"),
+    usageModelFilter: document.getElementById("usageModelFilter"),
+    usageModelTable: document.getElementById("usageModelTable"),
+    usageModelDetail: document.getElementById("usageModelDetail"),
+    usageRecentList: document.getElementById("usageRecentList"),
+    usageBillingBtn: document.getElementById("usageBillingBtn"),
+    usageBillingEditor: document.getElementById("usageBillingEditor"),
+    conversationStage: document.getElementById("conversationStage"),
+    sidebarConversationTitle: document.getElementById("sidebarConversationTitle"),
+    sidebarConversationSnippet: document.getElementById("sidebarConversationSnippet"),
+    sidebarConversationTime: document.getElementById("sidebarConversationTime"),
+    contextNumbers: document.getElementById("contextNumbers"),
+    contextTrack: document.getElementById("contextTrack"),
+    contextBar: document.getElementById("contextBar"),
+    settingsButton: document.getElementById("settingsButton"),
+    previewBanner: document.getElementById("previewBanner"),
+    sidebarThemeButton: document.getElementById("sidebarThemeButton"),
+    sidebarCollapseButton: document.getElementById("sidebarCollapseButton"),
+    conversationTitle: document.getElementById("conversationTitle"),
+    conversationMeta: document.getElementById("conversationMeta"),
+    modeSwitch: document.getElementById("modeSwitch"),
+    modelMenuWrap: document.getElementById("modelMenuWrap"),
+    modelButton: document.getElementById("modelButton"),
+    exportButton: document.getElementById("exportButton"),
+    modelMark: document.getElementById("modelMark"),
+    modelLabel: document.getElementById("modelLabel"),
+    modelMenu: document.getElementById("modelMenu"),
+    errorRegion: document.getElementById("errorRegion"),
+    chatScroll: document.getElementById("chatScroll"),
+    loadingState: document.getElementById("loadingState"),
+    blockedState: document.getElementById("blockedState"),
+    blockedTitle: document.getElementById("blockedTitle"),
+    blockedMessage: document.getElementById("blockedMessage"),
+    loginForm: document.getElementById("loginForm"),
+    loginPassword: document.getElementById("loginPassword"),
+    loginError: document.getElementById("loginError"),
+    loginSubmit: document.getElementById("loginSubmit"),
+    loginSubmitLabel: document.getElementById("loginSubmitLabel"),
+    lanAccessCard: document.getElementById("lanAccessCard"),
+    lanQrImage: document.getElementById("lanQrImage"),
+    lanQrRefresh: document.getElementById("lanQrRefresh"),
+    lanAccessAddress: document.getElementById("lanAccessAddress"),
+    retryBootstrapButton: document.getElementById("retryBootstrapButton"),
+    timeline: document.getElementById("timeline"),
+    emptyState: document.getElementById("emptyState"),
+    promptGrid: document.getElementById("promptGrid"),
+    jumpBottomButton: document.getElementById("jumpBottomButton"),
+    composerDock: document.getElementById("composerDock"),
+    questionDock: document.getElementById("questionDock"),
+    composerForm: document.getElementById("composerForm"),
+    imageTray: document.getElementById("imageTray"),
+    composerInput: document.getElementById("composerInput"),
+    attachButton: document.getElementById("attachButton"),
+    attachInput: document.getElementById("attachInput"),
+    bgIntensityRange: document.getElementById("bgIntensityRange"),
+    queueTray: document.getElementById("queueTray"),
+    composerState: document.getElementById("composerState"),
+    characterCount: document.getElementById("characterCount"),
+    stopButton: document.getElementById("stopButton"),
+    sendButton: document.getElementById("sendButton"),
+    drawerScrim: document.getElementById("drawerScrim"),
+    settingsDrawer: document.getElementById("settingsDrawer"),
+    settingsClose: document.getElementById("settingsClose"),
+    settingsNav: document.querySelector(".settings-nav"),
+    settingsPanels: Array.from(document.querySelectorAll("[data-settings-panel]")),
+    settingsModelMark: document.getElementById("settingsModelMark"),
+    settingsModelName: document.getElementById("settingsModelName"),
+    settingsModelProvider: document.getElementById("settingsModelProvider"),
+    capabilityList: document.getElementById("capabilityList"),
+    versionLabel: document.getElementById("versionLabel"),
+    generalConfigForm: document.getElementById("generalConfigForm"),
+    providerEditor: document.getElementById("providerEditor"),
+    addProviderButton: document.getElementById("addProviderButton"),
+    modelPoolEditor: document.getElementById("modelPoolEditor"),
+    pluginEditor: document.getElementById("pluginEditor"),
+    promptEditor: document.getElementById("promptEditor"),
+    advancedConfigEditor: document.getElementById("advancedConfigEditor"),
+    applyAdvancedConfigButton: document.getElementById("applyAdvancedConfigButton"),
+    reloadConfigButton: document.getElementById("reloadConfigButton"),
+    saveConfigButton: document.getElementById("saveConfigButton"),
+    settingsStatus: document.getElementById("settingsStatus"),
+    toastRegion: document.getElementById("toastRegion")
+  };
+
+  const state = {
+    bootId: null,
+    latestEventId: 0,
+    lastEventId: 0,
+    replayRunId: null,
+    replayCutoff: 0,
+    turns: [],
+    queuedPrompts: [],
+    models: [],
+    display: {
+      reasoning: "summary",
+      tool_calls: "summary",
+      readable_tool_names: true,
+      command_output_lines: 10,
+      mixed_model_endpoint_display: "interactive",
+      show_mixed_model_endpoint: false
+    },
+    context: { tokens: 0, window: null },
+    usage: {},
+    usageRecords: [],
+    usageRange: "all",
+    usageSrcFilterValue: "",
+    usageModelFilterValue: "",
+    usageDetailModel: null,
+    capabilities: {},
+    version: null,
+    // 多通道会话：本 WebUI 所属通道 + 全部通道摘要 + 当前浏览通道（null = 本通道）
+    channel: "webui",
+    channels: [],
+    viewingChannel: null,
+    viewedTurns: [],
+    // 历史对话列表：当前通道会话摘要 + 正在浏览的历史会话
+    conversations: [],
+    viewingConversation: null,
+    balanceLastRefresh: 0,
+    activeRunId: null,
+    externalRunningTurnId: null,
+    externalQueueAvailable: false,
+    live: null,
+    eventSource: null,
+    connection: "connecting",
+    blocked: false,
+    adminBusy: false,
+    loginSubmitting: false,
+    modelSelectionSubmitting: false,
+    modelCompacting: false,
+    stagedModelKeys: null,
+    modelMenuError: "",
+    submitting: false,
+    cancellationRequested: false,
+    pendingSubmission: null,
+    pendingImages: [],
+    piModels: [],
+    piCurrentModel: "",
+    piThinking: "",
+    engine: "",
+    searchResults: [],
+    searchQuery: "",
+    bootstrapPromise: null,
+    resyncing: false,
+    nearBottom: true,
+    followOutput: true,
+    programmaticScroll: false,
+    settingsOpener: null,
+    sidebarOpener: null,
+    toastTimer: null,
+    healthTimer: null,
+    externalSyncTimer: null,
+    terminalRunIds: new Set(),
+    mode: "normal",
+    composing: false,
+    settingsView: "interface",
+    configLoaded: false,
+    configLoading: false,
+    configSaving: false,
+    configDirty: false,
+    configDraft: null,
+    configOriginal: null,
+    promptDraft: null,
+    promptOriginal: null,
+    secretStates: {},
+    secretChanges: {},
+    providerSecretStates: [],
+    configMultimodalModels: [],
+    invalidConfigFields: new Map()
+  };
+
+  class ApiError extends Error {
+    constructor(message, status) {
+      super(message);
+      this.name = "ApiError";
+      this.status = status;
+    }
+  }
+
+  function createIcon(name, className = "") {
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    if (className) svg.setAttribute("class", className);
+    const definition = ICONS[name] || ICONS["circle-alert"];
+    for (const [tag, attributes] of definition) {
+      const node = document.createElementNS(SVG_NS, tag);
+      for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
+      svg.appendChild(node);
+    }
+    return svg;
+  }
+
+  function renderIconSlots(root = document) {
+    const slots = [];
+    if (root instanceof Element && root.matches("[data-icon]")) slots.push(root);
+    slots.push(...root.querySelectorAll("[data-icon]"));
+    for (const slot of slots) {
+      slot.replaceChildren(createIcon(slot.dataset.icon));
+    }
+  }
+
+  function makeIconSlot(name, className = "") {
+    const slot = document.createElement("span");
+    slot.className = `icon-slot${className ? ` ${className}` : ""}`;
+    slot.setAttribute("aria-hidden", "true");
+    slot.appendChild(createIcon(name));
+    return slot;
+  }
+
+  function safeStorageGet(key) {
+    try {
+      return window.localStorage.getItem(key);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function safeStorageSet(key, value) {
+    try {
+      window.localStorage.setItem(key, value);
+    } catch (_) {
+      // Storage can be unavailable in hardened browser profiles.
+    }
+  }
+
+  const THEMES = ["graphite", "moon", "linen"];
+
+  function setTheme(theme, persist = true) {
+    const selected = THEMES.includes(theme) ? theme : "graphite";
+    elements.body.dataset.theme = selected;
+    document.querySelectorAll("[data-theme-choice]").forEach((button) => {
+      button.classList.toggle("selected", button.dataset.themeChoice === selected);
+      button.setAttribute("aria-pressed", String(button.dataset.themeChoice === selected));
+    });
+    const themeButton = elements.sidebarThemeButton;
+    const slot = themeButton.querySelector(".icon-slot");
+    if (slot) {
+      // 图标提示下一个主题：石墨→月神→浅色→石墨
+      const nextIndex = (THEMES.indexOf(selected) + 1) % THEMES.length;
+      slot.replaceChildren(createIcon(THEMES[nextIndex] === "linen" ? "sun" : "moon"));
+      const themeHints = { graphite: "切换到月神主题", moon: "切换到浅色主题", linen: "切换到石墨主题" };
+      themeButton.title = themeHints[selected] || "切换主题";
+      themeButton.setAttribute("aria-label", themeButton.title);
+    }
+    const themeColor = document.querySelector('meta[name="theme-color"]');
+    if (themeColor) {
+      themeColor.content = { graphite: "#111512", moon: "#0b1120", linen: "#f2f5f3" }[selected] || "#111512";
+    }
+    if (persist) safeStorageSet("gqy.web.theme", selected);
+    // 主题切换时，若用户未手动调过背景强度，跟随新主题默认
+    const storedBg = safeStorageGet("gqy.web.bgIntensity");
+    if (storedBg === null || storedBg === "") applyBgIntensity(defaultBgIntensity());
+  }
+
+  function setMode(mode, persist = true) {
+    const selected = ["normal", "plan", "chat"].includes(mode) ? mode : "normal";
+    state.mode = selected;
+    elements.modeSwitch.querySelectorAll("[data-mode]").forEach((button) => {
+      const active = button.dataset.mode === selected;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
+    if (persist) safeStorageSet("gqy.web.mode", selected);
+    // 闲聊隔离：切换模式后按新模式重新拉当前会话历史
+    if (typeof switchToChannel === "function" && state.viewingChannel) {
+      switchToChannel(state.viewingChannel);
+    }
+  }
+
+  function closeSidebar() {
+    elements.sidebar.classList.remove("open");
+    elements.sidebarScrim.classList.remove("visible");
+    elements.sidebarScrim.tabIndex = -1;
+  }
+
+  function openSidebar(opener = document.activeElement) {
+    state.sidebarOpener = opener;
+    elements.sidebar.classList.add("open");
+    elements.sidebarScrim.classList.add("visible");
+    elements.sidebarScrim.tabIndex = 0;
+  }
+
+  function getFocusable(container) {
+    return Array.from(container.querySelectorAll("button:not(:disabled), input:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex='-1'])"))
+      .filter((node) => !node.hidden && node.getClientRects().length > 0);
+  }
+
+  function openSettings(opener = document.activeElement) {
+    state.settingsOpener = opener;
+    closeModelMenu();
+    elements.settingsDrawer.classList.add("open");
+    elements.settingsDrawer.setAttribute("aria-hidden", "false");
+    elements.drawerScrim.classList.add("visible");
+    elements.drawerScrim.tabIndex = 0;
+    window.requestAnimationFrame(() => elements.settingsClose.focus());
+    if (!state.configLoaded && !state.configLoading) loadConfigDraft();
+  }
+
+  // 菜单栏「打开配置」通过 evaluateJavaScript 调用；URL ?open=settings 走 handleOpenSettingsParam
+  window.__gqyOpenSettings = function () {
+    openSettings();
+    if (!state.configLoaded && !state.configLoading) loadConfigDraft();
+  };
+
+  function closeSettings({ restoreFocus = true } = {}) {
+    if (!elements.settingsDrawer.classList.contains("open")) return;
+    elements.settingsDrawer.classList.remove("open");
+    elements.settingsDrawer.setAttribute("aria-hidden", "true");
+    elements.drawerScrim.classList.remove("visible");
+    elements.drawerScrim.tabIndex = -1;
+    if (restoreFocus && state.settingsOpener instanceof HTMLElement) state.settingsOpener.focus();
+    state.settingsOpener = null;
+  }
+
+  // pi 模式：模型选择器（单选）+ 思考级别
+  async function openPiModelMenu() {
+    if (state.engine !== "pi") return;
+    state.modelMenuError = "";
+    elements.modelMenu.replaceChildren();
+    const loading = document.createElement("p");
+    loading.className = "model-menu-empty";
+    loading.textContent = "加载 pi 模型列表…";
+    elements.modelMenu.appendChild(loading);
+    elements.modelMenu.hidden = false;
+    elements.modelButton.setAttribute("aria-expanded", "true");
+    try {
+      const [modelsResp, stateResp] = await Promise.all([
+        apiRequest("/api/pi/models"),
+        apiRequest("/api/pi/state"),
+      ]);
+      const modelsData = await modelsResp.json();
+      const stateData = await stateResp.json();
+      state.piModels = Array.isArray(modelsData?.data) ? modelsData.data : [];
+      state.piCurrentModel = String(stateData?.data?.model || "");
+      state.piThinking = String(stateData?.data?.thinking_level || "");
+      renderPiModelMenu();
+    } catch (error) {
+      state.modelMenuError = `加载失败：${error.message || error}`;
+      elements.modelMenu.replaceChildren();
+      const err = document.createElement("p");
+      err.className = "model-menu-empty is-error";
+      err.textContent = state.modelMenuError;
+      elements.modelMenu.appendChild(err);
+    }
+  }
+
+  function renderPiModelMenu() {
+    elements.modelMenu.replaceChildren();
+    const list = document.createElement("div");
+    list.className = "model-menu-list";
+    list.setAttribute("role", "group");
+    list.setAttribute("aria-label", "pi 可用模型");
+    const models = Array.isArray(state.piModels) ? state.piModels : [];
+    if (!models.length) {
+      const empty = document.createElement("p");
+      empty.className = "model-menu-empty";
+      empty.textContent = "暂无可用模型（pi 未登录？）";
+      list.appendChild(empty);
+    }
+    for (const model of models) {
+      const id = String(model?.id || model?.name || "");
+      const provider = String(model?.provider || "");
+      if (!id) continue;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "model-menu-item";
+      button.setAttribute("role", "menuitemradio");
+      button.dataset.modelId = id;
+      const selected = id === state.piCurrentModel;
+      button.classList.toggle("selected", selected);
+      const mark = document.createElement("span");
+      mark.className = "model-mark";
+      mark.textContent = id.slice(0, 2).toUpperCase();
+      const copy = document.createElement("span");
+      const name = document.createElement("strong");
+      name.textContent = id;
+      const prov = document.createElement("small");
+      prov.textContent = provider || "";
+      copy.append(name, prov);
+      button.append(mark, copy);
+      button.addEventListener("click", async () => {
+        state.piCurrentModel = id;
+        renderPiModelMenu();
+        try {
+          await apiRequest("/api/pi/model", {
+            method: "POST",
+            body: JSON.stringify({ modelId: id }),
+          });
+          showToast(`已切换 pi 模型：${id}`, "info");
+          updateCurrentModelDisplay();
+        } catch (error) {
+          showToast(`切换失败：${error.message || error}`, "error");
+        }
+      });
+      list.appendChild(button);
+    }
+    // 思考级别
+    const thinkLabel = document.createElement("p");
+    thinkLabel.className = "model-menu-think-label";
+    thinkLabel.textContent = "思考级别";
+    list.appendChild(thinkLabel);
+    const thinkRow = document.createElement("div");
+    thinkRow.className = "model-menu-think-row";
+    for (const level of ["off", "low", "medium", "high", "xhigh", "max"]) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "model-menu-think" + (level === state.piThinking ? " active" : "");
+      btn.textContent = level;
+      btn.addEventListener("click", async () => {
+        state.piThinking = level;
+        renderPiModelMenu();
+        try {
+          await apiRequest("/api/pi/thinking", {
+            method: "POST",
+            body: JSON.stringify({ level }),
+          });
+          showToast(`思考级别：${level}`, "info");
+        } catch (error) {
+          showToast(`设置失败：${error.message || error}`, "error");
+        }
+      });
+      thinkRow.appendChild(btn);
+    }
+    list.appendChild(thinkRow);
+    elements.modelMenu.appendChild(list);
+  }
+
+  function openModelMenu() {
+    if (elements.modelButton.disabled || state.models.length === 0) return;
+    state.stagedModelKeys = new Set(activeModels().map(modelKey));
+    state.modelMenuError = "";
+    renderModelMenu();
+    elements.modelMenu.hidden = false;
+    elements.modelButton.setAttribute("aria-expanded", "true");
+    const selected = elements.modelMenu.querySelector(".model-menu-item.selected:not(:disabled)");
+    const first = elements.modelMenu.querySelector(".model-menu-item:not(:disabled)");
+    window.requestAnimationFrame(() => (selected || first)?.focus());
+  }
+
+  function closeModelMenu({ restoreFocus = false, discard = true } = {}) {
+    if (elements.modelMenu.hidden) return;
+    elements.modelMenu.hidden = true;
+    elements.modelButton.setAttribute("aria-expanded", "false");
+    if (discard) {
+      state.stagedModelKeys = null;
+      state.modelMenuError = "";
+    }
+    if (restoreFocus) elements.modelButton.focus();
+  }
+
+  function showToast(message, type = "info") {
+    const toast = document.createElement("div");
+    toast.className = `toast${type === "error" ? " is-error" : ""}`;
+    toast.textContent = String(message || "操作未完成");
+    elements.toastRegion.replaceChildren(toast);
+    if (state.toastTimer) window.clearTimeout(state.toastTimer);
+    state.toastTimer = window.setTimeout(() => {
+      if (toast.isConnected) toast.remove();
+    }, type === "error" ? 6000 : 3000);
+  }
+
+  function showInlineError(message) {
+    const text = String(message || "操作未完成").trim();
+    elements.errorRegion.textContent = text;
+    elements.errorRegion.hidden = !text;
+  }
+
+  function clearInlineError() {
+    elements.errorRegion.textContent = "";
+    elements.errorRegion.hidden = true;
+  }
+
+  function deepClone(value) {
+    if (typeof structuredClone === "function") return structuredClone(value);
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function setSettingsView(view) {
+    const selected = ["interface", "general", "tasks", "providers", "models", "plugins", "prompts", "advanced", "backup", "affection"].includes(view) ? view : "interface";
+    // 记住上次打开的分区，下次打开设置直接回到那里
+    if (state.settingsView !== selected) safeStorageSet("gqy.web.settingsView", selected);
+    state.settingsView = selected;
+    elements.settingsNav.querySelectorAll("[data-settings-view]").forEach((button) => {
+      const active = button.dataset.settingsView === selected;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-current", active ? "page" : "false");
+    });
+    elements.settingsPanels.forEach((panel) => {
+      panel.hidden = panel.dataset.settingsPanel !== selected;
+    });
+    if (selected === "tasks") loadAlarms();
+    if (selected === "general") updateLanAccessCard();
+    if (selected === "advanced") loadLogs();
+    if (selected === "backup") loadBackupSettings();
+    if (selected === "affection") loadAffection();
+  }
+
+  function updateLanAccessCard() {
+    const hasPassword = Boolean(String(configValue("web_ui.password", "") || "").trim());
+    elements.lanAccessCard.hidden = !hasPassword;
+    if (!hasPassword) return;
+    refreshQrCode();
+    apiRequest("/api/auth/qr-token")
+      .then((response) => response.json())
+      .then((data) => {
+        if (data?.host && data.host !== "127.0.0.1") {
+          elements.lanAccessAddress.textContent = `手机访问：http://${data.host}:${location.port || "4096"}（同一 Wi-Fi，扫码或输密码）`;
+        } else {
+          elements.lanAccessAddress.textContent = "未检测到局域网地址，请检查电脑网络连接";
+        }
+      })
+      .catch(() => {
+        elements.lanAccessAddress.textContent = "局域网地址获取失败";
+      });
+  }
+
+  function configValue(path, fallback = undefined) {
+    let value = state.configDraft;
+    for (const key of path.split(".")) {
+      if (value == null || typeof value !== "object" || !(key in value)) return fallback;
+      value = value[key];
+    }
+    return value;
+  }
+
+  function setConfigValue(path, value) {
+    if (!state.configDraft) return;
+    const keys = path.split(".");
+    let target = state.configDraft;
+    for (const key of keys.slice(0, -1)) {
+      if (!target[key] || typeof target[key] !== "object") target[key] = {};
+      target = target[key];
+    }
+    target[keys[keys.length - 1]] = value;
+    markConfigDirty();
+  }
+
+  function clearConfigFieldError(input) {
+    const message = state.invalidConfigFields.get(input);
+    if (message) message.remove();
+    state.invalidConfigFields.delete(input);
+    input.classList.remove("is-invalid");
+  }
+
+  function setConfigFieldError(input, message) {
+    clearConfigFieldError(input);
+    const error = document.createElement("small");
+    error.className = "config-field-error";
+    error.textContent = message;
+    input.classList.add("is-invalid");
+    input.closest(".config-field")?.appendChild(error);
+    state.invalidConfigFields.set(input, error);
+  }
+
+  function parseConfigInput(input) {
+    clearConfigFieldError(input);
+    if (input.dataset.valueType === "boolean") return input.checked;
+    const raw = input.value;
+    if (input.dataset.valueType === "number") {
+      const number = Number(raw);
+      if (!Number.isFinite(number)) throw new Error("请输入有效数字");
+      return input.dataset.integer === "true" ? Math.trunc(number) : number;
+    }
+    if (input.dataset.valueType === "json") {
+      if (!raw.trim()) return input.dataset.nullable === "true" ? null : {};
+      try {
+        return JSON.parse(raw);
+      } catch (_) {
+        throw new Error("请输入有效 JSON");
+      }
+    }
+    if (input.dataset.valueType === "lines") {
+      return raw.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean);
+    }
+    return raw;
+  }
+
+  function bindConfigInput(input, path, options = {}) {
+    input.dataset.configPath = path;
+    input.dataset.valueType = options.type || "string";
+    if (options.integer) input.dataset.integer = "true";
+    if (options.nullable) input.dataset.nullable = "true";
+    const eventName = input.tagName === "SELECT" || input.type === "checkbox" ? "change" : "input";
+    input.addEventListener(eventName, () => {
+      try {
+        const value = parseConfigInput(input);
+        setConfigValue(path, value);
+        updateAdvancedConfigEditor();
+        if (options.rerender) renderConfigEditors();
+      } catch (error) {
+        setConfigFieldError(input, error.message);
+        updateSettingsControls();
+      }
+    });
+    return input;
+  }
+
+  function configField(labelText, input, description = "") {
+    const label = document.createElement("label");
+    label.className = "config-field";
+    const heading = document.createElement("span");
+    heading.className = "config-field-label";
+    heading.textContent = labelText;
+    label.append(heading, input);
+    if (description) {
+      const hint = document.createElement("small");
+      hint.className = "config-field-hint";
+      hint.textContent = description;
+      label.appendChild(hint);
+    }
+    return label;
+  }
+
+  function textConfigField(label, path, options = {}) {
+    const current = configValue(path, options.defaultValue ?? "");
+    const input = options.multiline ? document.createElement("textarea") : document.createElement("input");
+    input.className = "config-input";
+    if (!options.multiline) input.type = options.inputType || "text";
+    if (options.multiline) input.rows = options.rows || 3;
+    input.value = options.type === "json"
+      ? (current == null ? "" : JSON.stringify(current, null, 2))
+      : options.type === "lines"
+        ? (Array.isArray(current) ? current.join("\n") : "")
+        : String(current ?? "");
+    if (options.placeholder) input.placeholder = options.placeholder;
+    if (options.min != null) input.min = String(options.min);
+    if (options.max != null) input.max = String(options.max);
+    if (options.step != null) input.step = String(options.step);
+    bindConfigInput(input, path, options);
+    return configField(label, input, options.description || "");
+  }
+
+  function selectConfigField(label, path, choices, description = "") {
+    const select = document.createElement("select");
+    select.className = "config-input";
+    const current = String(configValue(path, ""));
+    for (const choice of choices) {
+      const option = document.createElement("option");
+      option.value = typeof choice === "string" ? choice : choice.value;
+      option.textContent = typeof choice === "string" ? choice : choice.label;
+      option.selected = option.value === current;
+      select.appendChild(option);
+    }
+    bindConfigInput(select, path);
+    return configField(label, select, description);
+  }
+
+  // 语音回复开关（localStorage，不走 config.jsonc）
+  function voiceReplyToggleField() {
+    const label = document.createElement("label");
+    label.className = "config-toggle";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = safeStorageGet("gqy.voice_reply") !== "0";
+    input.addEventListener("change", () => {
+      safeStorageSet("gqy.voice_reply", input.checked ? "1" : "0");
+    });
+    const switchTrack = document.createElement("span");
+    switchTrack.className = "toggle-track";
+    const copy = document.createElement("span");
+    copy.className = "config-toggle-copy";
+    const title = document.createElement("strong");
+    title.textContent = "语音回复（顾清影音色朗读）";
+    copy.appendChild(title);
+    const hint = document.createElement("small");
+    hint.textContent = "回复完成后自动朗读（需本地 TTS 服务）";
+    copy.appendChild(hint);
+    label.append(input, switchTrack, copy);
+    return label;
+  }
+
+  function booleanConfigField(labelText, path, description = "") {
+    const label = document.createElement("label");
+    label.className = "config-toggle";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = Boolean(configValue(path));
+    bindConfigInput(input, path, { type: "boolean" });
+    const switchTrack = document.createElement("span");
+    switchTrack.className = "toggle-track";
+    const copy = document.createElement("span");
+    copy.className = "config-toggle-copy";
+    const title = document.createElement("strong");
+    title.textContent = labelText;
+    copy.appendChild(title);
+    if (description) {
+      const hint = document.createElement("small");
+      hint.textContent = description;
+      copy.appendChild(hint);
+    }
+    label.append(input, switchTrack, copy);
+    return label;
+  }
+
+  function configGroup(titleText, fields = [], description = "") {
+    const group = document.createElement("section");
+    group.className = "config-group";
+    const header = document.createElement("header");
+    const title = document.createElement("h3");
+    title.textContent = titleText;
+    header.appendChild(title);
+    if (description) {
+      const copy = document.createElement("p");
+      copy.textContent = description;
+      header.appendChild(copy);
+    }
+    const body = document.createElement("div");
+    body.className = "config-group-body";
+    body.append(...fields);
+    group.append(header, body);
+    return group;
+  }
+
+  function actionButton(label, className = "secondary-button") {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = className;
+    button.textContent = label;
+    return button;
+  }
+
+  function markConfigDirty() {
+    state.configDirty = true;
+    updateSettingsControls();
+  }
+
+  function clearProviderSecretChanges() {
+    for (const key of Object.keys(state.secretChanges)) {
+      if (key.startsWith("providers.")) delete state.secretChanges[key];
+    }
+  }
+
+  function refreshProviderSecretStates() {
+    for (const key of Object.keys(state.secretStates)) {
+      if (key.startsWith("providers.")) delete state.secretStates[key];
+    }
+    state.providerSecretStates.forEach((configured, index) => {
+      state.secretStates[`providers.${index}.api_key`] = Boolean(configured);
+    });
+  }
+
+  function updateSettingsControls() {
+    const busy = state.configLoading || state.configSaving;
+    elements.reloadConfigButton.disabled = busy;
+    elements.saveConfigButton.disabled = busy || !state.configLoaded || !state.configDirty || state.invalidConfigFields.size > 0 || conversationRunning();
+    elements.addProviderButton.disabled = busy || !state.configLoaded;
+    if (state.configLoading) elements.settingsStatus.textContent = "正在载入配置";
+    else if (state.configSaving) elements.settingsStatus.textContent = "正在验证并保存";
+    else if (!state.configLoaded) elements.settingsStatus.textContent = "尚未载入配置";
+    else if (state.invalidConfigFields.size) elements.settingsStatus.textContent = "请修正表单中的错误";
+    else if (conversationRunning() && state.configDirty) elements.settingsStatus.textContent = "回复完成后才能保存";
+    else elements.settingsStatus.textContent = state.configDirty ? "有未保存的修改" : "配置已同步";
+  }
+
+  function updateAdvancedConfigEditor() {
+    if (!state.configDraft || document.activeElement === elements.advancedConfigEditor) return;
+    elements.advancedConfigEditor.value = JSON.stringify(state.configDraft, null, 2);
+  }
+
+  function renderGeneralConfig() {
+    elements.generalConfigForm.replaceChildren(
+      configGroup("工具", [
+        booleanConfigField("启用工具", "tools.enabled"),
+        textConfigField("最大工具轮数", "tools.max_rounds", { type: "number", integer: true, inputType: "number", min: 0 }),
+        selectConfigField("工具加载模式", "tools.loading_mode", ["full", "hybrid"]),
+        booleanConfigField("记住已加载工具", "tools.persist_loaded_tools")
+      ]),
+      configGroup("Skills", [
+        booleanConfigField("启用 Skills", "skills.enabled"),
+        booleanConfigField("允许执行命令", "skills.allow_command_execution")
+      ]),
+      configGroup("显示", [
+        voiceReplyToggleField(),
+        selectConfigField("界面语言", "display.language", [{ value: "auto", label: "自动" }, { value: "zh", label: "简体中文" }, { value: "en", label: "English" }]),
+        selectConfigField("思考过程", "display.reasoning", [{ value: "summary", label: "摘要" }, { value: "full", label: "完整" }, { value: "hidden", label: "隐藏" }]),
+        selectConfigField("工具调用", "display.tool_calls", [{ value: "summary", label: "摘要" }, { value: "full", label: "完整" }, { value: "hidden", label: "隐藏" }]),
+        booleanConfigField("显示可读工具名", "display.readable_tool_names"),
+        selectConfigField("Mixed 模型端点", "display.mixed_model_endpoint_display", [{ value: "off", label: "关闭" }, { value: "interactive", label: "仅交互模式" }, { value: "all", label: "全部模式" }])
+      ]),
+      configGroup("上下文", [
+        selectConfigField("到达上限后", "context.on_overflow", [{ value: "pop", label: "弹出旧消息" }, { value: "compact", label: "压缩上下文" }]),
+        textConfigField("开始裁剪比例", "context.trim_at_ratio", { type: "number", inputType: "number", min: 0.1, max: 1, step: 0.01 }),
+        textConfigField("每批裁剪比例", "context.trim_batch_ratio", { type: "number", inputType: "number", min: 0.01, max: 0.9, step: 0.01 })
+      ]),
+      configGroup("记忆", [
+        booleanConfigField("启用记忆", "memory.enabled"),
+        booleanConfigField("保留弹出上下文", "memory.evicted_context_enabled"),
+        booleanConfigField("启用联想", "memory.association_enabled"),
+        booleanConfigField("自动日记", "memory.auto_diary_enabled"),
+        booleanConfigField("自动事实记忆", "memory.auto_fact_enabled"),
+        textConfigField("联想知识条数", "memory.association_facts", { type: "number", inputType: "number", integer: true, min: 0 }),
+        textConfigField("联想事件条数", "memory.association_episodes", { type: "number", inputType: "number", integer: true, min: 0 }),
+        textConfigField("联想字符上限", "memory.association_max_chars", { type: "number", inputType: "number", integer: true, min: 0 }),
+        textConfigField("片段字符数", "memory.snippet_chars", { type: "number", inputType: "number", integer: true, min: 0 }),
+        textConfigField("遗忘期限（天）", "memory.forget_after_days", { type: "number", inputType: "number", integer: true, min: 1 }),
+        booleanConfigField("启用遗忘", "memory.forgetting_enabled"),
+        textConfigField("遗忘半衰期（天）", "memory.forgetting_half_life_days", { type: "number", inputType: "number", min: 0.1, step: 0.1 }),
+        textConfigField("最低遗忘强度", "memory.forgetting_min_strength", { type: "number", inputType: "number", min: 0, max: 1, step: 0.01 }),
+        textConfigField("回忆增强强度", "memory.forgetting_review_boost", { type: "number", inputType: "number", min: 0, step: 0.01 }),
+        textConfigField("最小任务字数", "memory.learning_min_task_chars", { type: "number", inputType: "number", integer: true, min: 0 }),
+        textConfigField("最小方法字数", "memory.learning_min_method_chars", { type: "number", inputType: "number", integer: true, min: 0 })
+      ]),
+      configGroup("局域网访问", [
+        textConfigField("访问密码", "web_ui.password", {
+          inputType: "password",
+          description: "设置后手机可扫登录页二维码或输入密码访问（电脑与手机需同一网络）。留空则仅本机可访问。保存后重启 App 生效。",
+        }),
+      ]),
+      configGroup("MCP", [
+        booleanConfigField("启用 MCP", "mcp.enabled"),
+        textConfigField("服务器配置", "mcp.servers", { type: "json", multiline: true, rows: 10, description: "JSON 数组，支持 id、command、args、env、timeout_seconds 和 enabled。" })
+      ]),
+      configGroup("QQ 机器人", [
+        booleanConfigField("启用 QQ 监听", "qq.enabled", "开启后 gqy qq 才会启动监听；App 设置里的「QQ 机器人」开关等效。"),
+        textConfigField("反向 WS 端口", "qq.reverse_ws_port", { type: "number", integer: true, inputType: "number", min: 1, max: 65535, description: "NapCat 连接进来的端口（默认 8300）。" }),
+        textConfigField("连接 Token", "qq.access_token", { inputType: "password", description: "与 NapCat 的 Authorization: Bearer 一致；空串仅允许本机连接。" }),
+        textConfigField("主人 QQ", "qq.owner_qq", { type: "number", integer: true, inputType: "number", description: "主人 QQ 号：转告目标 + 恒为管理员（默认 1950930166）。" }),
+        textConfigField("管理员 QQ 列表", "qq.admin_users", { type: "json", multiline: true, rows: 3, description: "JSON 数组，如 [10001, 10002]；主人恒为管理员。" }),
+        textConfigField("回复拆分上限（字符）", "qq.max_reply_chars", { type: "number", integer: true, inputType: "number", min: 0, description: "0 = 不拆分。" }),
+        textConfigField("限流条数 / 窗口秒", "qq.rate_limit_max", { type: "number", integer: true, inputType: "number", min: 0, description: "每个非管理员 QQ 号在窗口内最多几条（0 = 不限）。" }),
+        textConfigField("限流窗口（秒）", "qq.rate_limit_window", { type: "number", integer: true, inputType: "number", min: 1, description: "默认 600 = 10 分钟。" }),
+        booleanConfigField("重要事件转告主人", "qq.forward_events", "磁盘告警等系统事件私信给主人 QQ。"),
+        booleanConfigField("中间消息（流式）", "qq.intermediate_messages", "回复边生成边发（约 60 字一段），长回复不等到底。")
+      ])
+    );
+  }
+
+  function secretEditor(labelText, key, { multiline = false } = {}) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "secret-editor config-field";
+    const label = document.createElement("span");
+    label.className = "config-field-label";
+    label.textContent = labelText;
+    const status = document.createElement("small");
+    status.className = "secret-status";
+    status.textContent = state.secretChanges[key]?.action === "clear"
+      ? "将清空"
+      : state.secretChanges[key]?.action === "set"
+        ? "已输入新值"
+        : state.secretStates[key]
+          ? "已配置"
+          : "未配置";
+    const input = multiline ? document.createElement("textarea") : document.createElement("input");
+    input.className = "config-input";
+    if (!multiline) input.type = "password";
+    if (multiline) input.rows = 3;
+    input.placeholder = state.secretStates[key] ? "留空保留现有值" : "输入新值";
+    input.value = state.secretChanges[key]?.action === "set" ? state.secretChanges[key].value : "";
+    input.autocomplete = "new-password";
+    const actions = document.createElement("div");
+    actions.className = "secret-actions";
+    const clear = actionButton("清空", "text-button danger-text");
+    const preserve = actionButton("保留", "text-button");
+    actions.append(preserve, clear);
+    input.addEventListener("input", () => {
+      if (input.value) state.secretChanges[key] = { action: "set", value: input.value };
+      else delete state.secretChanges[key];
+      markConfigDirty();
+      status.textContent = input.value ? "已输入新值" : state.secretStates[key] ? "已配置" : "未配置";
+    });
+    clear.addEventListener("click", () => {
+      input.value = "";
+      state.secretChanges[key] = { action: "clear" };
+      status.textContent = "将清空";
+      markConfigDirty();
+    });
+    preserve.addEventListener("click", () => {
+      input.value = "";
+      delete state.secretChanges[key];
+      status.textContent = state.secretStates[key] ? "已配置" : "未配置";
+      markConfigDirty();
+    });
+    wrapper.append(label, status, input, actions);
+    return wrapper;
+  }
+
+  function ensureProviderDefaults(provider = {}) {
+    return {
+      id: "",
+      display_name: "",
+      base_url: "",
+      protocol: "auto",
+      api_key: null,
+      models: [],
+      model_context_window: {},
+      model_modalities: {},
+      default_model: "",
+      timeout_seconds: 60,
+      temperature: 0.7,
+      anthropic_max_tokens: 4096,
+      extra_body: null,
+      ...provider
+    };
+  }
+
+  function replaceProviderReferences(previousId, nextId) {
+    if (!previousId || previousId === nextId || !state.configDraft) return;
+    if (state.configDraft.active_provider === previousId) state.configDraft.active_provider = nextId;
+    for (const poolName of ["active_provider_models", "active_multimodal_provider_models"]) {
+      for (const item of state.configDraft[poolName] || []) {
+        if (item.provider_id === previousId) item.provider_id = nextId;
+      }
+    }
+    if (state.configDraft.plugins?.vision?.vision_provider_id === previousId) {
+      state.configDraft.plugins.vision.vision_provider_id = nextId;
+    }
+    if (state.configDraft.plugins?.knowledge_base?.embedding_provider_id === previousId) {
+      state.configDraft.plugins.knowledge_base.embedding_provider_id = nextId;
+    }
+  }
+
+  function removeProviderReferences(providerId) {
+    if (!state.configDraft) return;
+    state.configDraft.active_provider_models = (state.configDraft.active_provider_models || []).filter((item) => item.provider_id !== providerId);
+    state.configDraft.active_multimodal_provider_models = (state.configDraft.active_multimodal_provider_models || []).filter((item) => item.provider_id !== providerId);
+    if (state.configDraft.plugins?.vision?.vision_provider_id === providerId) {
+      state.configDraft.plugins.vision.vision_provider_id = "";
+      state.configDraft.plugins.vision.vision_model = "";
+    }
+    if (state.configDraft.plugins?.knowledge_base?.embedding_provider_id === providerId) {
+      state.configDraft.plugins.knowledge_base.embedding_provider_id = "";
+      state.configDraft.plugins.knowledge_base.embedding_model = "";
+    }
+  }
+
+  function renderProviders() {
+    elements.providerEditor.replaceChildren();
+    const providers = Array.isArray(state.configDraft?.providers) ? state.configDraft.providers : [];
+    providers.forEach((provider, index) => {
+      const card = document.createElement("details");
+      card.className = "provider-card";
+      card.open = index === 0;
+      const summary = document.createElement("summary");
+      const logo = document.createElement("span");
+      logo.className = "provider-card-logo";
+      applyModelMark(logo, provider);
+      const copy = document.createElement("span");
+      const name = document.createElement("strong");
+      name.textContent = provider.display_name || provider.id || `供应商 ${index + 1}`;
+      const id = document.createElement("small");
+      id.textContent = provider.id || "尚未命名";
+      copy.append(name, id);
+      summary.append(logo, copy);
+      const remove = actionButton("删除", "text-button danger-text");
+      remove.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const name = provider.display_name || provider.id || `供应商 ${index + 1}`;
+        const ok = await confirmDialog({
+          title: "删除供应商",
+          message: `删除供应商「${name}」？保存后生效。`,
+          confirmLabel: "删除",
+          danger: true,
+        });
+        if (!ok) return;
+        state.configDraft.providers.splice(index, 1);
+        state.providerSecretStates.splice(index, 1);
+        refreshProviderSecretStates();
+        clearProviderSecretChanges();
+        removeProviderReferences(provider.id);
+        if (state.configDraft.active_provider === provider.id) state.configDraft.active_provider = state.configDraft.providers[0]?.id || "";
+        markConfigDirty();
+        renderConfigEditors();
+      });
+      summary.append(copy, remove);
+      const body = document.createElement("div");
+      body.className = "provider-card-body";
+      const fields = [
+        ["配置 ID", "id"], ["显示名称", "display_name"], ["Base URL", "base_url"],
+        ["默认模型", "default_model"]
+      ];
+      for (const [label, key] of fields) {
+        const input = document.createElement("input");
+        input.className = "config-input";
+        input.value = String(provider[key] || "");
+        input.addEventListener("input", () => {
+          const previousId = key === "id" ? String(provider.id || "") : "";
+          provider[key] = input.value;
+          if (key === "id" && previousId !== provider.id) {
+            replaceProviderReferences(previousId, provider.id);
+            state.providerSecretStates[index] = false;
+            delete state.secretChanges[`providers.${index}.api_key`];
+            refreshProviderSecretStates();
+            renderModelPools();
+          }
+          if (key === "default_model") renderModelPools();
+          if (key === "display_name" || key === "id") {
+            name.textContent = provider.display_name || provider.id || `供应商 ${index + 1}`;
+            id.textContent = provider.id || "尚未命名";
+          }
+          markConfigDirty();
+          updateAdvancedConfigEditor();
+        });
+        if (key === "default_model") {
+          input.addEventListener("change", () => {
+            provider.models = Array.isArray(provider.models) ? provider.models : [];
+            if (provider.default_model && !provider.models.includes(provider.default_model)) {
+              provider.models.push(provider.default_model);
+            }
+            renderModelPools();
+            updateAdvancedConfigEditor();
+          });
+        }
+        body.appendChild(configField(label, input));
+      }
+      const protocol = document.createElement("select");
+      protocol.className = "config-input";
+      for (const value of ["auto", "openai-chat", "openai-responses", "anthropic"]) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        option.selected = provider.protocol === value;
+        protocol.appendChild(option);
+      }
+      protocol.addEventListener("change", () => { provider.protocol = protocol.value; markConfigDirty(); updateAdvancedConfigEditor(); });
+      body.appendChild(configField("协议", protocol));
+      const secretKey = `providers.${index}.api_key`;
+      body.appendChild(secretEditor("API Key", secretKey));
+
+      const numeric = [
+        ["超时秒数", "timeout_seconds", 1, 1], ["Temperature", "temperature", 0, 0.1], ["Anthropic 最大 Token", "anthropic_max_tokens", 1, 1]
+      ];
+      for (const [label, key, min, step] of numeric) {
+        const input = document.createElement("input");
+        input.className = "config-input";
+        input.type = "number";
+        input.min = String(min);
+        input.step = String(step);
+        input.value = String(provider[key] ?? "");
+        input.addEventListener("input", () => {
+          const value = Number(input.value);
+          if (Number.isFinite(value)) {
+            provider[key] = key === "temperature" ? value : Math.trunc(value);
+            markConfigDirty();
+            updateAdvancedConfigEditor();
+          }
+        });
+        body.appendChild(configField(label, input));
+      }
+      const structured = [
+        ["可用模型", "models", "lines", "每行一个模型"],
+        ["模型上下文窗口", "model_context_window", "json", "JSON 对象：模型名到 Token 数"],
+        ["模型输入模态", "model_modalities", "json", "JSON 对象：模型名到 text/image/audio/video/pdf 数组"],
+        ["额外请求体", "extra_body", "json", "JSON 对象，留空表示不设置"]
+      ];
+      for (const [label, key, type, description] of structured) {
+        const input = document.createElement("textarea");
+        input.className = "config-input";
+        input.rows = key === "models" ? 4 : 5;
+        input.value = type === "lines" ? (provider[key] || []).join("\n") : provider[key] == null ? "" : JSON.stringify(provider[key], null, 2);
+        input.addEventListener("input", () => {
+          clearConfigFieldError(input);
+          try {
+            provider[key] = type === "lines"
+              ? input.value.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean)
+              : input.value.trim() ? JSON.parse(input.value) : key === "extra_body" ? null : {};
+            if (key === "models" && provider.default_model && !provider.models.includes(provider.default_model)) {
+              provider.models.push(provider.default_model);
+            }
+            markConfigDirty();
+            updateAdvancedConfigEditor();
+            if (key === "models" || key === "model_modalities") renderModelPools();
+          } catch (_) {
+            setConfigFieldError(input, "请输入有效 JSON");
+            updateSettingsControls();
+          }
+        });
+        body.appendChild(configField(label, input, description));
+      }
+      card.append(summary, body);
+      elements.providerEditor.appendChild(card);
+    });
+    if (!providers.length) {
+      const empty = document.createElement("p");
+      empty.className = "settings-empty";
+      empty.textContent = "至少需要添加一个供应商。";
+      elements.providerEditor.appendChild(empty);
+    }
+  }
+
+  function configuredModelChoices() {
+    const result = [];
+    for (const provider of state.configDraft?.providers || []) {
+      const models = Array.isArray(provider.models) && provider.models.length ? provider.models : provider.default_model ? [provider.default_model] : [];
+      for (const model of models) {
+        if (String(model).trim()) result.push({ provider_id: String(provider.id || ""), provider_name: String(provider.display_name || provider.id || ""), model: String(model) });
+      }
+    }
+    return result;
+  }
+
+  function renderModelPoolList(titleText, path, choices) {
+    const providers = Array.isArray(state.configDraft?.providers) ? state.configDraft.providers : [];
+    const selected = Array.isArray(state.configDraft[path])
+      ? state.configDraft[path]
+      : path === "active_provider_models"
+        ? choices.filter((choice) => choice.provider_id === state.configDraft.active_provider && choice.model === providers.find((provider) => provider.id === state.configDraft.active_provider)?.default_model)
+        : [];
+    const group = configGroup(titleText);
+    const body = group.querySelector(".config-group-body");
+    if (!choices.length) {
+      const empty = document.createElement("p");
+      empty.className = "settings-empty";
+      empty.textContent = "请先在供应商中配置模型。";
+      body.appendChild(empty);
+    }
+    for (const model of choices) {
+      const label = document.createElement("label");
+      label.className = "model-pool-option";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = selected.some((item) => item.provider_id === model.provider_id && item.model === model.model);
+      input.addEventListener("change", () => {
+        let pool = Array.isArray(state.configDraft[path]) ? state.configDraft[path] : [...selected];
+        if (input.checked && !pool.some((item) => item.provider_id === model.provider_id && item.model === model.model)) {
+          pool = [...pool, { provider_id: model.provider_id, model: model.model }];
+        } else if (!input.checked) {
+          pool = pool.filter((item) => item.provider_id !== model.provider_id || item.model !== model.model);
+        }
+        state.configDraft[path] = pool;
+        markConfigDirty();
+        updateAdvancedConfigEditor();
+      });
+      const copy = document.createElement("span");
+      const name = document.createElement("strong");
+      name.textContent = model.model;
+      const provider = document.createElement("small");
+      provider.textContent = model.provider_name;
+      copy.append(name, provider);
+      label.append(input, copy);
+      body.appendChild(label);
+    }
+    return group;
+  }
+
+  function renderModelPools() {
+    const providers = Array.isArray(state.configDraft?.providers) ? state.configDraft.providers : [];
+    const choices = configuredModelChoices();
+    const declaredMultimodal = choices.filter((choice) => {
+      const provider = providers.find((item) => item.id === choice.provider_id);
+      const modalities = provider?.model_modalities?.[choice.model];
+      return Array.isArray(modalities) && modalities.some((item) => ["image", "audio", "video", "pdf"].includes(item));
+    });
+    const multimodalKeys = new Set([
+      ...state.configMultimodalModels.map((model) => modelKey(model)),
+      ...declaredMultimodal.map((model) => modelKey(model))
+    ]);
+    const multimodal = choices.filter((choice) => multimodalKeys.has(modelKey(choice)));
+    const activeProvider = document.createElement("select");
+    activeProvider.className = "config-input";
+    for (const provider of providers) {
+      const option = document.createElement("option");
+      option.value = provider.id || "";
+      option.textContent = provider.display_name || provider.id || "未命名供应商";
+      option.selected = option.value === state.configDraft.active_provider;
+      activeProvider.appendChild(option);
+    }
+    activeProvider.addEventListener("change", () => {
+      state.configDraft.active_provider = activeProvider.value;
+      markConfigDirty();
+      updateAdvancedConfigEditor();
+      renderModelPools();
+    });
+    elements.modelPoolEditor.replaceChildren(
+      configGroup("默认供应商", [configField("未设置文本模型池时使用", activeProvider)]),
+      renderModelPoolList("文本模型池", "active_provider_models", choices),
+      renderModelPoolList("多模态模型池", "active_multimodal_provider_models", multimodal)
+    );
+  }
+
+  const PLUGIN_LABELS = {
+    weather: "天气", web: "网络搜索", web_images: "图片搜索", deep_research: "深度研究", deep_diagnose: "深度诊断",
+    vision: "识图", exchange_rate: "汇率", xuanxue: "玄学", image_generation: "生图", print_image: "打印图片",
+    memes: "表情包", knowledge_base: "知识库", archlinux: "Arch Linux", man: "在线手册", moegirl: "萌娘百科",
+    hash_codec: "哈希与编解码", calculator: "计算器", package_advisor: "AUR 审查",
+    deep_research_linux_game_compatibility: "Linux 游戏兼容", diagnostics: "系统诊断", memory: "记忆"
+  };
+
+  const SECRET_PLUGIN_PATHS = new Map([
+    ["web.tavily_api_keys", "plugins.web.tavily_api_keys"],
+    ["web.firecrawl_api_keys", "plugins.web.firecrawl_api_keys"],
+    ["web.anysearch_api_keys", "plugins.web.anysearch_api_keys"],
+    ["exchange_rate.api_key", "plugins.exchange_rate.api_key"],
+    ["image_generation.api_keys", "plugins.image_generation.api_keys"]
+  ]);
+
+  const WEB_HIDDEN_PLUGIN_FIELDS = new Set([
+    "vision.preview_with_chafa",
+    "image_generation.auto_print",
+    "print_image.width_percent",
+    "print_image.height_percent",
+    "memes.width_percent",
+    "memes.height_percent",
+    "web_images.auto_preview",
+    "web_images.preview_count"
+  ]);
+
+  function humanizeConfigKey(key) {
+    return String(key).replace(/_/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
+  }
+
+  function pluginValueEditor(pluginKey, fieldKey, value) {
+    const path = `plugins.${pluginKey}.${fieldKey}`;
+    const secretKey = SECRET_PLUGIN_PATHS.get(`${pluginKey}.${fieldKey}`);
+    if (secretKey) return secretEditor(humanizeConfigKey(fieldKey), secretKey, { multiline: Array.isArray(value) });
+    if (typeof value === "boolean") return booleanConfigField(humanizeConfigKey(fieldKey), path);
+    if (typeof value === "number") return textConfigField(humanizeConfigKey(fieldKey), path, { type: "number", integer: Number.isInteger(value), inputType: "number", step: Number.isInteger(value) ? 1 : 0.01 });
+    if (typeof value === "string") return textConfigField(humanizeConfigKey(fieldKey), path, { multiline: value.length > 100, rows: 3 });
+    return textConfigField(humanizeConfigKey(fieldKey), path, { type: "json", multiline: true, rows: 5 });
+  }
+
+  function renderPlugins() {
+    elements.pluginEditor.replaceChildren();
+    for (const [pluginKey, plugin] of Object.entries(state.configDraft?.plugins || {})) {
+      if (pluginKey === "memory" || pluginKey === "print_image") continue;
+      const details = document.createElement("details");
+      details.className = "plugin-card";
+      const summary = document.createElement("summary");
+      const copy = document.createElement("span");
+      const title = document.createElement("strong");
+      title.textContent = PLUGIN_LABELS[pluginKey] || humanizeConfigKey(pluginKey);
+      const technical = document.createElement("small");
+      technical.textContent = pluginKey;
+      copy.append(title, technical);
+      const badge = document.createElement("span");
+      badge.className = `plugin-state${plugin?.enabled ? " is-enabled" : ""}`;
+      badge.textContent = plugin?.enabled ? "启用" : "禁用";
+      summary.append(copy, badge);
+      const body = document.createElement("div");
+      body.className = "plugin-card-body";
+      for (const [fieldKey, value] of Object.entries(plugin || {})) {
+        if (WEB_HIDDEN_PLUGIN_FIELDS.has(`${pluginKey}.${fieldKey}`)) continue;
+        body.appendChild(pluginValueEditor(pluginKey, fieldKey, value));
+      }
+      details.append(summary, body);
+      elements.pluginEditor.appendChild(details);
+    }
+  }
+
+  function normalizedDocumentName(name) {
+    const trimmed = String(name || "").trim().replace(/[\\/]/g, "-").replace(/\.md$/i, "");
+    return trimmed ? `${trimmed}.md` : "";
+  }
+
+  function renderPromptCollection(kind, titleText, activePath) {
+    const documents = state.promptDraft[kind];
+    const group = configGroup(titleText);
+    const body = group.querySelector(".config-group-body");
+    const active = document.createElement("select");
+    active.className = "config-input";
+    const defaultOption = document.createElement("option");
+    defaultOption.value = "";
+    defaultOption.textContent = kind === "personas" ? "顾清影 默认人格" : "不使用用户身份";
+    active.appendChild(defaultOption);
+    for (const promptDocument of documents) {
+      const option = document.createElement("option");
+      option.value = promptDocument.name;
+      option.textContent = promptDocument.name.replace(/\.md$/i, "");
+      active.appendChild(option);
+    }
+    active.value = String(configValue(activePath, ""));
+    active.addEventListener("change", () => { setConfigValue(activePath, active.value); updateAdvancedConfigEditor(); });
+    body.appendChild(configField("当前使用", active));
+    for (const [index, promptDocument] of documents.entries()) {
+      const card = document.createElement("section");
+      card.className = "prompt-document";
+      const header = document.createElement("header");
+      const name = document.createElement("input");
+      name.className = "config-input";
+      name.value = promptDocument.name.replace(/\.md$/i, "");
+      name.setAttribute("aria-label", `${titleText}名称`);
+      const remove = actionButton("删除", "text-button danger-text");
+      remove.addEventListener("click", () => {
+        const wasActive = configValue(activePath, "") === promptDocument.name;
+        documents.splice(index, 1);
+        if (wasActive) setConfigValue(activePath, "");
+        markConfigDirty();
+        renderPromptEditor();
+        updateAdvancedConfigEditor();
+      });
+      header.append(name, remove);
+      const content = document.createElement("textarea");
+      content.className = "config-input prompt-content";
+      content.rows = 10;
+      content.value = promptDocument.content;
+      content.setAttribute("aria-label", `${titleText}内容`);
+      name.addEventListener("input", () => {
+        const previous = promptDocument.name;
+        promptDocument.name = normalizedDocumentName(name.value);
+        if (configValue(activePath, "") === previous) setConfigValue(activePath, promptDocument.name);
+        markConfigDirty();
+        updateAdvancedConfigEditor();
+      });
+      content.addEventListener("input", () => { promptDocument.content = content.value; markConfigDirty(); });
+      card.append(header, content);
+      body.appendChild(card);
+    }
+    const add = actionButton("添加", "secondary-button compact-button");
+    add.addEventListener("click", () => {
+      const base = kind === "personas" ? "new-persona" : "new-identity";
+      let name = `${base}.md`;
+      let suffix = 2;
+      while (documents.some((document) => document.name === name)) name = `${base}-${suffix++}.md`;
+      documents.push({ name, content: "", original_name: null });
+      markConfigDirty();
+      renderPromptEditor();
+    });
+    body.appendChild(add);
+    return group;
+  }
+
+  function renderPromptEditor() {
+    elements.promptEditor.replaceChildren(
+      renderPromptCollection("personas", "AI 人格", "prompt.active_persona"),
+      renderPromptCollection("identities", "用户身份", "prompt.active_identity")
+    );
+  }
+
+  function renderConfigEditors() {
+    if (!state.configLoaded || !state.configDraft) return;
+    state.invalidConfigFields.clear();
+    renderGeneralConfig();
+    renderProviders();
+    renderModelPools();
+    renderPlugins();
+    renderPromptEditor();
+    updateAdvancedConfigEditor();
+    updateSettingsControls();
+  }
+
+  function mapServerSecretStates(payload) {
+    const providers = state.configDraft?.providers || [];
+    state.providerSecretStates = providers.map((_, index) => Boolean(payload[`providers.${index}.api_key`]));
+    const states = { ...payload };
+    state.secretStates = states;
+    refreshProviderSecretStates();
+    return states;
+  }
+
+  function applyConfigPayload(payload) {
+    state.configDraft = deepClone(payload?.config || {});
+    state.configOriginal = deepClone(payload?.config || {});
+    state.promptDraft = deepClone(payload?.prompts || { personas: [], identities: [] });
+    state.promptOriginal = deepClone(payload?.prompts || { personas: [], identities: [] });
+    state.secretChanges = {};
+    mapServerSecretStates(payload?.secret_states || {});
+    state.configDirty = false;
+    state.configLoaded = true;
+    state.invalidConfigFields.clear();
+    if (Array.isArray(payload?.models)) state.models = payload.models;
+    state.configMultimodalModels = Array.isArray(payload?.multimodal_models) ? payload.multimodal_models : [];
+    if (payload?.display && typeof payload.display === "object") state.display = payload.display;
+    if (payload?.context && typeof payload.context === "object") state.context = payload.context;
+    refreshPersonaChip();
+    renderConfigEditors();
+    renderModelMenu();
+    updateContext();
+    loadMoods();
+  }
+
+  // 顶栏人格徽标：显示当前激活的人格（active_persona），一眼看出女友人格是否生效
+  function refreshPersonaChip() {
+    const el = document.getElementById("personaChip");
+    if (!el) return;
+    const active = String(state.configDraft?.prompt?.active_persona || "").trim();
+    const personaList = Array.isArray(state.promptDraft?.personas) ? state.promptDraft.personas : [];
+    const known = personaList.find((item) =>
+      item && (item.id === active || item.file === active || item.name === active)
+    );
+    const label = known?.name || (active ? active.replace(/\.md$/i, "") : "");
+    if (!label) {
+      el.hidden = true;
+      return;
+    }
+    el.textContent = `💗 ${label}`;
+    el.title = `当前人格：${label}（闲聊模式叠加 chat.md 女友态提醒）`;
+    el.hidden = false;
+  }
+
+  // 顶栏好感度徽标：分数 + 等级，点击直达设置里的好感度页
+  async function refreshAffectionChip() {
+    const el = document.getElementById("affectionChip");
+    if (!el) return;
+    try {
+      const res = await apiRequest("/api/affection");
+      const data = await res.json();
+      if (!data || typeof data.score !== "number") { el.hidden = true; return; }
+      el.textContent = `❤ ${Math.round(data.score)} · ${String(data.level || "")}`;
+      el.title = `好感度：${Math.round(data.score)}（${data.level || ""}）· 已聊 ${data.message_count ?? 0} 轮`;
+      el.hidden = false;
+    } catch (_) {
+      el.hidden = true;
+    }
+  }
+  function bindAffectionChipClick() {
+    const el = document.getElementById("affectionChip");
+    if (!el || el.dataset.clickBound) return;
+    el.dataset.clickBound = "1";
+    el.style.cursor = "pointer";
+    el.addEventListener("click", () => {
+      openSettings(el);
+      setSettingsView("affection");
+    });
+  }
+  function initAffectionChip() {
+    if (typeof window === "undefined") return;
+    bindAffectionChipClick();
+    refreshAffectionChip();
+  }
+  if (document.readyState !== "loading") {
+    initAffectionChip();
+  } else {
+    document.addEventListener("DOMContentLoaded", initAffectionChip);
+  }
+
+  async function loadConfigDraft() {
+    if (state.configLoading || state.configSaving) return;
+    if (state.configDirty) {
+      const ok = await confirmDialog({
+        title: "重新载入配置",
+        message: "有尚未保存的配置修改，放弃并重新载入？",
+        confirmLabel: "放弃修改",
+      });
+      if (!ok) return;
+    }
+    state.configLoading = true;
+    updateSettingsControls();
+    try {
+      const response = await apiRequest("/api/config");
+      applyConfigPayload(await response.json());
+    } catch (error) {
+      showToast(error.message || "配置载入失败", "error");
+      elements.settingsStatus.textContent = error.message || "配置载入失败";
+    } finally {
+      state.configLoading = false;
+      updateSettingsControls();
+    }
+  }
+
+  function promptStateChanged() {
+    if (!state.configOriginal || !state.promptOriginal) return false;
+    const promptKeys = ["prompt", "system_prompt_file", "system_prompt"];
+    const current = Object.fromEntries(promptKeys.map((key) => [key, state.configDraft?.[key]]));
+    const original = Object.fromEntries(promptKeys.map((key) => [key, state.configOriginal?.[key]]));
+    return JSON.stringify(current) !== JSON.stringify(original) || JSON.stringify(state.promptDraft) !== JSON.stringify(state.promptOriginal);
+  }
+
+  function buildSecretMutations() {
+    return { ...state.secretChanges };
+  }
+
+  async function saveConfigDraft() {
+    if (!state.configLoaded || state.configSaving || state.configLoading || conversationRunning() || state.invalidConfigFields.size) return;
+    const resetsConversation = promptStateChanged();
+    if (resetsConversation) {
+      const ok = await confirmDialog({
+        title: "保存并重建 Agent",
+        message: "人格、身份或提示词文件已修改。保存后会清空当前会话并重建 Agent，继续吗？",
+        confirmLabel: "保存并重建",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    state.configSaving = true;
+    state.adminBusy = true;
+    updateSettingsControls();
+    updateControlState();
+    try {
+      const response = await apiRequest("/api/config", {
+        method: "PUT",
+        body: JSON.stringify({
+          config: state.configDraft,
+          secrets: buildSecretMutations(),
+          prompts: state.promptDraft,
+          reset_conversation: resetsConversation
+        })
+      });
+      applyConfigPayload(await response.json());
+      if (resetsConversation) await loadBootstrap();
+      state.configSavedAt = Date.now();
+      updateLanAccessCard();
+      showToast("配置已保存");
+    } catch (error) {
+      showToast(error.message || "配置保存失败", "error");
+      elements.settingsStatus.textContent = error.message || "配置保存失败";
+    } finally {
+      state.configSaving = false;
+      state.adminBusy = false;
+      updateSettingsControls();
+      updateControlState();
+    }
+  }
+
+  function applyAdvancedConfig() {
+    try {
+      const parsed = JSON.parse(elements.advancedConfigEditor.value);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("配置必须是 JSON 对象");
+      const oldSecretStates = new Map((state.configDraft?.providers || []).map((provider, index) => [String(provider?.id || ""), Boolean(state.providerSecretStates[index])]));
+      state.configDraft = parsed;
+      state.providerSecretStates = (Array.isArray(parsed.providers) ? parsed.providers : []).map((provider) => oldSecretStates.get(String(provider?.id || "")) || false);
+      refreshProviderSecretStates();
+      clearProviderSecretChanges();
+      markConfigDirty();
+      renderConfigEditors();
+      showToast("完整配置已应用到草稿");
+    } catch (error) {
+      showToast(error.message || "JSON 无效", "error");
+    }
+  }
+
+  async function readErrorMessage(response) {
+    try {
+      const payload = await response.json();
+      const message = payload?.error?.message;
+      if (typeof message === "string" && message.trim()) return message.trim();
+    } catch (_) {
+      // Fall through to an HTTP status message.
+    }
+    return `请求失败 (${response.status})`;
+  }
+
+  async function apiRequest(path, options = {}) {
+    const headers = new Headers(options.headers || {});
+    headers.set("Accept", "application/json");
+    if (options.body != null && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+    let response;
+    try {
+      response = await fetch(path, { ...options, headers, credentials: "same-origin" });
+    } catch (_) {
+      throw new ApiError("无法连接顾清影 WebUI", 0);
+    }
+    if (!response.ok) throw new ApiError(await readErrorMessage(response), response.status);
+    return response;
+  }
+
+  // ── 定时任务面板（闹钟/番茄钟可视化）────────────────────────────
+  async function loadAlarms() {
+    const list = document.getElementById("alarmList");
+    if (!list) return;
+    list.innerHTML = "";
+    const placeholder = document.createElement("p");
+    placeholder.className = "settings-description";
+    placeholder.textContent = "正在载入…";
+    list.appendChild(placeholder);
+    let data;
+    try {
+      const response = await apiRequest("/api/alarms");
+      data = await response.json();
+    } catch (_) {
+      placeholder.textContent = "载入定时任务失败";
+      return;
+    }
+    list.innerHTML = "";
+    const alarms = Array.isArray(data?.alarms) ? data.alarms : [];
+    if (alarms.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "settings-description";
+      empty.textContent = "暂无定时任务（说「设置一个 25 分钟后的闹钟」或「开启番茄钟」即可创建）";
+      list.appendChild(empty);
+      return;
+    }
+    for (const alarm of alarms) {
+      const item = document.createElement("div");
+      item.className = "alarm-item";
+      const label = document.createElement("span");
+      label.className = "alarm-label";
+      const repeat = Number(alarm.repeat_seconds || 0) > 0 ? " · 周期" : "";
+      label.textContent = `${alarm.label}${repeat}`;
+      const time = document.createElement("span");
+      time.className = "alarm-time";
+      time.textContent = alarm.due_at_local || "";
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "secondary-button compact-button";
+      cancel.textContent = "取消";
+      cancel.addEventListener("click", async () => {
+        try {
+          await apiRequest(`/api/alarms/${encodeURIComponent(alarm.id)}`, { method: "DELETE" });
+          loadAlarms();
+        } catch (_) { /* 静默 */ }
+      });
+      item.append(label, time, cancel);
+      list.appendChild(item);
+    }
+  }
+
+
+  /* 服务商品牌图标（devicons，web/assets/provider-icons.svg）。
+     优先按 provider_id / display_name 精确匹配，其次按 base_url 域名兜底；
+     未收录的供应商（如 kimi/glm/qwen 等）回退为字母缩写。 */
+  const PROVIDER_ICONS = {
+    deepseek: "deepseek",
+    openai: "openai",
+    anthropic: "anthropic",
+    claude: "claude-code",
+    "claude-code": "claude-code",
+    ollama: "ollama-icon",
+    groq: "groq",
+    gemini: "google-gemini",
+    google: "google-gemini",
+    vertex: "google-gemini",
+    meta: "meta-icon",
+    llama: "meta-icon",
+    nvidia: "nvidia",
+    together: "together",
+    perplexity: "perplexity-icon",
+    cohere: "cohere-icon",
+    xai: "xai",
+    grok: "xai",
+    zai: "zai",
+    fireworks: "fireworks",
+    mistral: "mistral-ai",
+    github: "github-icon",
+    microsoft: "microsoft-azure",
+    azure: "microsoft-azure",
+    ibm: "ibm",
+    oracle: "oracle",
+    cloudflare: "cloudflare-icon",
+    bedrock: "aws-bedrock",
+    aws: "aws-bedrock",
+    pi: "pi",
+    minimax: "minimax",
+    xiaomi: "xiaomi",
+    openrouter: "openrouter",
+    opencode: "opencode",
+    "opencode-go": "opencode",
+    opencodezen: "opencode",
+    "opencode zen": "opencode",
+    gqy: "gqy",
+    "gqy-lora": "gqy",
+    kimi: "kimi",
+    moonshot: "moonshot",
+    lmstudio: "lmstudio",
+    "lm-studio": "lmstudio",
+    baidu: "baidu",
+    qwen: "qwen",
+    alibaba: "qwen"
+  };
+
+  let providerIconsReady = null;
+  function ensureProviderIcons() {
+    if (!providerIconsReady) {
+      providerIconsReady = fetch("/assets/provider-icons.svg")
+        .then((response) => (response.ok ? response.text() : Promise.reject(new Error("sprite unavailable"))))
+        .then((markup) => {
+          const holder = document.createElementNS(SVG_NS, "svg");
+          holder.style.display = "none";
+          holder.setAttribute("aria-hidden", "true");
+          holder.setAttribute("focusable", "false");
+          const template = document.createElement("template");
+          template.innerHTML = markup;
+          for (const symbol of template.content.querySelectorAll("symbol")) holder.appendChild(symbol);
+          document.body.appendChild(holder);
+        })
+        .catch(() => {});
+    }
+    return providerIconsReady;
+  }
+
+  function providerIconSymbol(model) {
+    const sources = [model?.provider_id, model?.provider_name, model?.display_name, model?.base_url];
+    for (const source of sources) {
+      if (!source) continue;
+      const text = String(source).toLowerCase();
+      if (PROVIDER_ICONS[text]) return PROVIDER_ICONS[text];
+      const host = (text.match(/^https?:\/\/([^/]+)/) || [])[1]?.replace(/^www\./, "") || "";
+      for (const [key, symbol] of Object.entries(PROVIDER_ICONS)) {
+        if (host === key || host.endsWith(`.${key}`)) return symbol;
+      }
+    }
+    return null;
+  }
+
+  function applyModelMark(el, model) {
+    const symbol = providerIconSymbol(model);
+    if (symbol) {
+      ensureProviderIcons();
+      el.classList.add("provider-logo");
+      el.textContent = "";
+      const svg = document.createElementNS(SVG_NS, "svg");
+      svg.setAttribute("aria-hidden", "true");
+      svg.setAttribute("focusable", "false");
+      const use = document.createElementNS(SVG_NS, "use");
+      use.setAttribute("href", `#${symbol}`);
+      svg.appendChild(use);
+      el.appendChild(svg);
+    } else {
+      el.classList.remove("provider-logo");
+      el.textContent = modelMark(model);
+    }
+  }
+
+  function modelKey(model) {
+    return JSON.stringify([String(model?.provider_id || ""), String(model?.model || "")]);
+  }
+
+  function effectiveUsageTotal(usage) {
+    if (!usage || typeof usage !== "object") return 0;
+    const explicit = asFiniteNumber(usage.total_tokens, 0);
+    return explicit > 0 ? explicit : asFiniteNumber(usage.prompt_tokens, 0) + asFiniteNumber(usage.completion_tokens, 0);
+  }
+
+  function setConnectionStatus(status) {
+    state.connection = status;
+    const definitions = {
+      online: { sidebar: "在线", className: "" },
+      connecting: { sidebar: "重连中", className: "is-connecting" },
+      offline: { sidebar: "离线", className: "is-offline" },
+      blocked: { sidebar: "未授权", className: "is-blocked" }
+    };
+    const selected = definitions[status] || definitions.connecting;
+    elements.sidebarConnectionStatus.textContent = selected.sidebar;
+    elements.sidebarStatusDot.classList.remove("is-connecting", "is-offline", "is-blocked");
+    if (selected.className) elements.sidebarStatusDot.classList.add(selected.className);
+  }
+
+  function updateContext() {
+    const tokens = Math.max(0, asFiniteNumber(state.context?.tokens));
+    const windowSize = state.context?.window == null ? null : Math.max(0, asFiniteNumber(state.context.window));
+    elements.contextNumbers.textContent = windowSize ? `${formatTokens(tokens)} / ${formatTokens(windowSize)}` : `${formatTokens(tokens)} / --`;
+    const percent = windowSize > 0 ? Math.min(100, Math.max(0, (tokens / windowSize) * 100)) : 0;
+    elements.contextBar.style.width = `${percent}%`;
+    elements.contextTrack.setAttribute("aria-valuenow", String(Math.round(percent)));
+    elements.contextTrack.setAttribute("aria-label", windowSize ? `上下文使用 ${Math.round(percent)}%` : `上下文 ${formatInteger(tokens)} tokens`);
+    elements.contextTrack.title = windowSize
+      ? `已用 ${formatTokens(tokens)} / ${formatTokens(windowSize)} · 剩余 ${formatTokens(Math.max(0, windowSize - tokens))}（${Math.round(percent)}%）`
+      : `已用 ${formatTokens(tokens)} tokens`;
+    elements.contextTrack.classList.toggle("is-high", percent >= 75 && percent < 90);
+    elements.contextTrack.classList.toggle("is-critical", percent >= 90);
+  }
+
+  function updateRuntimeUsage() {}
+
+  // ─────────────────────────── 余额显示（每次对话完成后刷新一次，10s 防抖） ───────────────────────────
+
+  function refreshBalance() {
+    const now = Date.now();
+    if (now - state.balanceLastRefresh < 10_000) return;
+    state.balanceLastRefresh = now;
+    apiRequest("/api/balance")
+      .then((response) => response.json())
+      .then((data) => renderBalance(data?.balance))
+      .catch(() => renderBalance(null));
+  }
+
+  function renderBalance(payload) {
+    const chip = elements.balanceChip;
+    if (!chip) return;
+    const balance = Array.isArray(payload?.balance) ? payload.balance : [];
+    if (!payload || payload?.unsupported || payload?.error || !balance.length) {
+      chip.hidden = true;
+      chip.textContent = "";
+      chip.title = "";
+      return;
+    }
+    const parts = balance.map((info) => {
+      const currency = String(info?.currency || "");
+      const symbol = currency === "CNY" ? "¥" : currency === "USD" ? "$" : `${currency} `;
+      return `${symbol}${info?.total || "0"}`;
+    });
+    chip.textContent = `余额 ${parts.join(" / ")}`;
+    chip.title = balance
+      .map((info) => `${info?.currency} 总 ${info?.total} · 充值 ${info?.topped_up} · 赠送 ${info?.granted}`)
+      .join("\n");
+    chip.hidden = false;
+  }
+
+  function updateCapabilities() {
+    const values = [
+      ["会话", state.capabilities?.multi_conversation ? "多会话" : "当前单一对话"],
+      ["附件", state.capabilities?.attachments ? "可用" : "不可用"],
+      ["消息队列", state.capabilities?.queue ? "可用" : "不可用"]
+    ];
+    elements.capabilityList.replaceChildren();
+    for (const [name, value] of values) {
+      const row = document.createElement("div");
+      const term = document.createElement("dt");
+      const description = document.createElement("dd");
+      term.textContent = name;
+      description.textContent = value;
+      row.append(term, description);
+      elements.capabilityList.appendChild(row);
+    }
+  }
+
+  function activeModels() {
+    return state.models.filter((model) => model?.active);
+  }
+
+  function updateCurrentModelDisplay() {
+    if (state.engine === "pi") {
+      elements.modelMark.classList.remove("provider-logo");
+      elements.modelMark.textContent = "π";
+      elements.modelLabel.textContent = "pi 底座";
+      elements.modelLabel.title = "pi 底座模式：模型由 pi 自己管理";
+      const settingsMark = elements.settingsModelMark;
+      if (settingsMark) settingsMark.classList.remove("provider-logo");
+      if (elements.settingsModelName) elements.settingsModelName.textContent = "pi 底座";
+      if (elements.settingsModelProvider) elements.settingsModelProvider.textContent = "模型由 pi 管理";
+      return;
+    }
+    const active = activeModels();
+    if (active.length === 0) {
+      elements.modelMark.classList.remove("provider-logo");
+      elements.modelMark.textContent = "--";
+      elements.modelLabel.textContent = state.models.length ? "未选择模型" : "未配置模型";
+      elements.modelLabel.title = elements.modelLabel.textContent;
+      elements.settingsModelMark.classList.remove("provider-logo");
+      elements.settingsModelMark.textContent = "--";
+      elements.settingsModelName.textContent = elements.modelLabel.textContent;
+      elements.settingsModelProvider.textContent = "--";
+      return;
+    }
+    if (active.length > 1) {
+      const title = active.map((model) => `${model.provider_name || model.provider_id || ""} · ${model.model || ""}`).join("\n");
+      elements.modelMark.classList.remove("provider-logo");
+      elements.modelMark.textContent = "MX";
+      elements.modelLabel.textContent = `混合模型 · ${active.length}`;
+      elements.modelLabel.title = title;
+      elements.settingsModelMark.classList.remove("provider-logo");
+      elements.settingsModelMark.textContent = "MX";
+      elements.settingsModelName.textContent = "混合模型";
+      elements.settingsModelProvider.textContent = `${active.length} 个活动端点`;
+      return;
+    }
+    const selected = active[0];
+    applyModelMark(elements.modelMark, selected);
+    elements.modelLabel.textContent = String(selected.model || "");
+    elements.modelLabel.title = `${selected.provider_name || selected.provider_id || ""} · ${selected.model || ""}`;
+    applyModelMark(elements.settingsModelMark, selected);
+    elements.settingsModelName.textContent = String(selected.model || "");
+    elements.settingsModelProvider.textContent = String(selected.provider_name || selected.provider_id || "");
+  }
+
+  function refreshLiveEndpointVisibility() {
+    if (!state.live?.endpoint) return;
+    const values = [state.live.providerId, state.live.model].map((value) => String(value || "").trim()).filter(Boolean);
+    state.live.endpoint.hidden = !state.display?.show_mixed_model_endpoint || values.length === 0;
+  }
+
+  function renderModelMenu() {
+    elements.modelMenu.replaceChildren();
+    const staged = state.stagedModelKeys instanceof Set
+      ? state.stagedModelKeys
+      : new Set(activeModels().map(modelKey));
+    const list = document.createElement("div");
+    list.className = "model-menu-list";
+    list.setAttribute("role", "group");
+    list.setAttribute("aria-label", "可用模型");
+    for (const model of state.models) {
+      if (!model || typeof model !== "object") continue;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "model-menu-item";
+      button.setAttribute("role", "menuitemcheckbox");
+      button.dataset.modelKey = modelKey(model);
+      const selected = staged.has(button.dataset.modelKey);
+      button.setAttribute("aria-checked", String(selected));
+      button.classList.toggle("selected", selected);
+
+      const mark = document.createElement("span");
+      mark.className = "model-mark";
+      applyModelMark(mark, model);
+      const copy = document.createElement("span");
+      copy.className = "model-menu-copy";
+      const name = document.createElement("strong");
+      name.textContent = String(model.model || "");
+      const provider = document.createElement("small");
+      provider.textContent = String(model.provider_name || model.provider_id || "");
+      copy.append(name, provider);
+      const check = document.createElement("span");
+      check.className = "icon-slot check-slot";
+      check.setAttribute("aria-hidden", "true");
+      if (selected) check.appendChild(createIcon("check"));
+      button.append(mark, copy, check);
+      button.addEventListener("click", () => toggleStagedModel(button.dataset.modelKey));
+      list.appendChild(button);
+    }
+
+    const footer = document.createElement("footer");
+    footer.className = "model-menu-footer";
+    footer.setAttribute("role", "none");
+    const feedback = document.createElement("span");
+    feedback.className = "model-menu-feedback";
+    feedback.setAttribute("role", "status");
+    feedback.setAttribute("aria-live", "polite");
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "model-cancel";
+    cancel.setAttribute("role", "menuitem");
+    cancel.textContent = "取消";
+    cancel.addEventListener("click", () => closeModelMenu({ restoreFocus: true }));
+    const refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.className = "model-refresh";
+    refresh.setAttribute("role", "menuitem");
+    refresh.textContent = "🔄 刷新模型列表";
+    refresh.title = "重新 GET /models 发现当前供应商的模型（远程关闭/换模型后用它同步）";
+    refresh.addEventListener("click", refreshModelList);
+    const confirm = document.createElement("button");
+    confirm.type = "button";
+    confirm.className = "model-confirm";
+    confirm.setAttribute("role", "menuitem");
+    confirm.textContent = "确认";
+    confirm.addEventListener("click", confirmModelSelection);
+    footer.append(feedback, refresh, cancel, confirm);
+    elements.modelMenu.append(list, footer);
+    updateModelMenuState();
+    updateCurrentModelDisplay();
+    refreshLiveEndpointVisibility();
+    updateControlState();
+  }
+
+  // 刷新当前激活供应商的模型列表：重新 GET /models 发现，写回配置后 watcher 自动 reload
+  async function refreshModelList() {
+    const activeModelsList = activeModels();
+    const providerId = activeModelsList[0]?.provider_id
+      || state.configDraft?.active_provider
+      || "";
+    if (!providerId) {
+      showToast("没有可刷新的供应商", "error");
+      return;
+    }
+    const feedback = elements.modelMenu.querySelector(".model-menu-feedback");
+    const old = feedback?.textContent || "";
+    if (feedback) feedback.textContent = `正在刷新 ${providerId} 的模型…`;
+    try {
+      const response = await apiRequest("/api/models/refresh", {
+        method: "POST",
+        body: JSON.stringify({ provider_id: providerId }),
+      });
+      const data = await response.json();
+      showToast(`已发现 ${data.models?.length || 0} 个模型`, "info");
+      // 配置已写回，watcher 会广播 config.reloaded → loadBootstrap 刷新 state.models
+      if (!state.configLoaded) await loadConfigDraft();
+      openModelMenu();
+    } catch (error) {
+      showToast(error.message || "刷新失败", "error");
+      if (feedback) feedback.textContent = old;
+    }
+  }
+
+  function updateModelMenuState() {
+    const staged = state.stagedModelKeys instanceof Set
+      ? state.stagedModelKeys
+      : new Set(activeModels().map(modelKey));
+    elements.modelMenu.querySelectorAll(".model-menu-item").forEach((button) => {
+      const selected = staged.has(button.dataset.modelKey || "");
+      button.classList.toggle("selected", selected);
+      button.setAttribute("aria-checked", String(selected));
+      const check = button.querySelector(".check-slot");
+      if (check) check.replaceChildren(...(selected ? [createIcon("check")] : []));
+    });
+    const feedback = elements.modelMenu.querySelector(".model-menu-feedback");
+    if (feedback) {
+      const empty = staged.size === 0;
+      feedback.textContent = state.modelMenuError || (empty ? "至少选择一个模型" : `已选择 ${formatInteger(staged.size)} 个模型`);
+      feedback.classList.toggle("is-error", Boolean(state.modelMenuError) || empty);
+    }
+    const confirm = elements.modelMenu.querySelector(".model-confirm");
+    if (confirm) {
+      confirm.textContent = state.modelSelectionSubmitting
+        ? (state.modelCompacting ? "正在压缩上下文…" : "正在应用")
+        : "确认";
+      confirm.disabled = state.modelSelectionSubmitting || state.adminBusy || state.blocked || conversationRunning() || state.submitting || staged.size === 0;
+    }
+    if (feedback && state.modelCompacting) {
+      feedback.textContent = "切换供应商中，先压缩旧上下文（需一点时间）…";
+      feedback.classList.remove("is-error");
+    }
+    const cancel = elements.modelMenu.querySelector(".model-cancel");
+    if (cancel) cancel.disabled = state.modelSelectionSubmitting || (state.adminBusy && !state.modelSelectionSubmitting);
+  }
+
+  function toggleStagedModel(key) {
+    if (!(state.stagedModelKeys instanceof Set) || state.modelSelectionSubmitting) return;
+    if (state.stagedModelKeys.has(key)) state.stagedModelKeys.delete(key);
+    else state.stagedModelKeys.add(key);
+    state.modelMenuError = state.stagedModelKeys.size === 0 ? "至少选择一个模型" : "";
+    updateModelMenuState();
+  }
+
+  function deriveConversationDetails() {
+    if (state.turns.length === 0) {
+      const liveUser = state.live?.userText || state.pendingSubmission?.content || "";
+      if (!liveUser) return { title: "新对话", snippet: "尚未开始", timestamp: null };
+      return { title: firstLine(liveUser) || "新对话", snippet: firstLine(liveUser), timestamp: new Date() };
+    }
+    const firstTurn = state.turns[0];
+    const lastTurn = state.turns[state.turns.length - 1];
+    const followups = Array.isArray(lastTurn?.followups) ? lastTurn.followups : [];
+    const lastFollowup = followups[followups.length - 1];
+    const assistant = String(lastTurn?.assistant_content || "").trim();
+    const liveContent = state.activeRunId ? String(state.live?.userText || "").trim() : "";
+    const snippet = firstLine(liveContent || assistant || lastFollowup?.content || lastTurn?.user_content || "");
+    const timestamp = liveContent ? state.live?.startedAt : lastTurn?.assistant_timestamp || lastFollowup?.submitted_at || lastTurn?.user_timestamp;
+    return {
+      title: firstLine(firstTurn?.user_content) || "当前对话",
+      snippet: snippet || (lastTurn?.status === "running" ? "正在回复" : "对话已开始"),
+      timestamp
+    };
+  }
+
+  function updateConversationChrome() {
+    if (state.viewingChannel || state.viewingConversation) {
+      const title = state.viewingConversation
+        ? "历史对话"
+        : `${channelLabel(state.viewingChannel)} 通道`;
+      elements.conversationTitle.textContent = title;
+      elements.conversationTitle.title = state.viewingConversation
+        ? "继续该历史对话，新消息将归入此会话"
+        : "只读浏览历史记录";
+      elements.sidebarConversationTitle.textContent = "返回当前对话";
+      elements.sidebarConversationTitle.title = "返回当前对话";
+      elements.sidebarConversationSnippet.textContent = "点击返回当前对话";
+      elements.sidebarConversationTime.textContent = "";
+      elements.conversationMeta.textContent = state.viewingConversation ? "继续对话" : "只读浏览";
+      return;
+    }
+    const details = deriveConversationDetails();
+    elements.conversationTitle.textContent = details.title;
+    elements.conversationTitle.title = details.title;
+    elements.sidebarConversationTitle.textContent = details.title;
+    elements.sidebarConversationTitle.title = details.title;
+    elements.sidebarConversationSnippet.textContent = details.snippet;
+    elements.sidebarConversationSnippet.title = details.snippet;
+    elements.sidebarConversationTime.textContent = details.timestamp ? formatRelativeTime(details.timestamp) : "";
+    if (conversationRunning()) elements.conversationMeta.textContent = state.cancellationRequested ? "正在停止" : "正在回复";
+    else elements.conversationMeta.textContent = details.timestamp ? formatRelativeTime(details.timestamp) : "尚未开始";
+  }
+
+  function conversationRunning() {
+    return Boolean(state.activeRunId || state.externalRunningTurnId);
+  }
+
+  // ─────────────────────────── 多通道会话（终端/网页/QQ/Telegram） ───────────────────────────
+
+  function channelLabel(id) {
+    const labels = { terminal: "终端", webui: "网页", qq: "QQ", tg: "Telegram" };
+    return labels[String(id || "")] || String(id || "");
+  }
+
+  function channelIconName(id) {
+    const icons = { terminal: "terminal", webui: "globe", qq: "message-circle", tg: "send" };
+    return icons[String(id || "")] || "message-circle";
+  }
+
+  function renderChannelList() {
+    const channels = Array.isArray(state.channels) ? state.channels : [];
+    elements.channelList.replaceChildren();
+    const currentId = String(state.channel || "webui");
+    const viewing = String(state.viewingChannel || "");
+    for (const channel of channels) {
+      const id = String(channel?.id || "");
+      // 终端通道不在 WebUI 展示（CLI 有自己的界面）；数据保留，终端里仍可看
+      if (id === "terminal") continue;
+      if (!id || id === currentId) continue; // 当前通道由「当前对话」入口展示
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `channel-item${viewing === id ? " active" : ""}`;
+      button.title = `${channelLabel(id)} 通道对话记录`;
+      button.setAttribute("aria-label", `${channelLabel(id)} 通道`);
+      const icon = document.createElement("span");
+      icon.className = "icon-slot";
+      icon.setAttribute("aria-hidden", "true");
+      icon.appendChild(createIcon(channelIconName(id)));
+      const copy = document.createElement("span");
+      copy.className = "session-copy";
+      const title = document.createElement("strong");
+      title.textContent = channelLabel(id);
+      const snippet = document.createElement("small");
+      snippet.textContent = String(channel?.snippet || "");
+      snippet.title = snippet.textContent;
+      copy.append(title, snippet);
+      const meta = document.createElement("span");
+      meta.className = "session-time";
+      if (channel?.running) meta.textContent = "回复中";
+      else if (channel?.timestamp) meta.textContent = formatRelativeTime(channel.timestamp);
+      button.append(icon, copy, meta);
+      button.addEventListener("click", () => switchToChannel(id));
+      elements.channelList.appendChild(button);
+    }
+  }
+
+  async function switchToChannel(channelId) {
+    if (state.blocked || conversationRunning()) return;
+    if (String(channelId) === String(state.channel || "webui")) {
+      exitChannelView();
+      return;
+    }
+    state.viewingChannel = String(channelId);
+    renderChannelList();
+    updateConversationChrome();
+    updateControlState();
+    try {
+      const mode = ["normal", "plan", "chat"].includes(state.mode) ? state.mode : null;
+      const response = await apiRequest(
+        `/api/channels/${encodeURIComponent(channelId)}/turns${mode ? `?mode=${mode}` : ""}`
+      );
+      const data = await response.json();
+      if (state.viewingChannel !== String(channelId)) return;
+      state.viewedTurns = Array.isArray(data?.turns)
+        ? data.turns.sort((a, b) => asFiniteNumber(a?.seq) - asFiniteNumber(b?.seq))
+        : [];
+      state.conversations = Array.isArray(data?.conversations) ? data.conversations : [];
+      renderConversationList();
+      renderConversation();
+    } catch (error) {
+      showToast(error.message || "通道记录加载失败", "error");
+      exitChannelView();
+    }
+  }
+
+  function exitChannelView() {
+    state.viewingChannel = null;
+    state.viewedTurns = [];
+    renderChannelList();
+    loadBootstrap();
+  }
+
+  // ─────────────────────────── 历史对话列表（会话分组） ───────────────────────────
+
+  function renderConversationList() {
+    const conversations = Array.isArray(state.conversations) ? state.conversations : [];
+    const history = conversations.filter((conversation) => !conversation?.active);
+    elements.conversationList.replaceChildren();
+    if (!history.length) {
+      const empty = document.createElement("p");
+      empty.className = "sidebar-empty";
+      empty.textContent = "暂无历史对话";
+      elements.conversationList.appendChild(empty);
+      return;
+    }
+    // 会话分组：今天 / 昨天 / 更早，按时间归组，找历史不用再一路扫
+    const todayKey = dayKey(new Date().toISOString());
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayKey = dayKey(yesterday.toISOString());
+    const groups = new Map();
+    for (const conversation of history) {
+      const key = dayKey(conversation?.timestamp);
+      const group = key === todayKey ? "今天" : key === yesterdayKey ? "昨天" : "更早";
+      if (!groups.has(group)) groups.set(group, []);
+      groups.get(group).push(conversation);
+    }
+    const groupOrder = ["今天", "昨天", "更早"];
+    const viewing = String(state.viewingConversation || "");
+    for (const group of groupOrder) {
+      const items = groups.get(group);
+      if (!items?.length) continue;
+      const heading = document.createElement("div");
+      heading.className = "conversation-list-heading";
+      heading.textContent = group;
+      elements.conversationList.appendChild(heading);
+      for (const conversation of items) {
+      const id = String(conversation?.id || "");
+      if (!id) continue;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `conversation-item${viewing === id ? " active" : ""}`;
+      button.title = conversation?.title || "";
+      const copy = document.createElement("span");
+      copy.className = "session-copy";
+      const title = document.createElement("strong");
+      title.textContent = String(conversation?.title || "");
+      title.title = title.textContent;
+      const snippet = document.createElement("small");
+      snippet.textContent = String(conversation?.snippet || "");
+      snippet.title = snippet.textContent;
+      copy.append(title, snippet);
+      const meta = document.createElement("span");
+      meta.className = "session-time";
+      const count = asFiniteNumber(conversation?.turn_count, 0);
+      meta.textContent = count > 0
+        ? `${formatRelativeTime(conversation?.timestamp)} · ${count}条`
+        : formatRelativeTime(conversation?.timestamp);
+      button.append(copy, meta);
+      // hover 删除会话（stopPropagation 避免误触进入会话）
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "conversation-delete";
+      deleteButton.title = "删除此会话";
+      deleteButton.setAttribute("aria-label", "删除此会话");
+      deleteButton.textContent = "×";
+      deleteButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        deleteConversation(id, button);
+      });
+      button.append(deleteButton);
+      button.addEventListener("click", () => switchToConversation(id));
+      elements.conversationList.appendChild(button);
+    }
+    }
+  }
+
+  async function runConversationSearch() {
+    const query = elements.sidebarSearchInput.value.trim();
+    if (!query || state.blocked) return;
+    state.searchQuery = query;
+    elements.searchResults.hidden = false;
+    elements.searchResults.textContent = "搜索中…";
+    try {
+      const response = await apiRequest(`/api/search?q=${encodeURIComponent(query)}&limit=50`);
+      const data = await response.json();
+      const results = Array.isArray(data?.results) ? data.results : [];
+      state.searchResults = results;
+      renderSearchResults();
+      if (state.sidebarOpen === false && window.innerWidth <= 900) elements.sidebarScrim?.click();
+    } catch (error) {
+      elements.searchResults.textContent = `搜索失败：${error.message || error}`;
+    }
+  }
+
+  function clearConversationSearch() {
+    state.searchQuery = "";
+    state.searchResults = [];
+    elements.searchResults.hidden = true;
+    elements.searchResults.replaceChildren();
+  }
+
+  function renderSearchResults() {
+    const container = elements.searchResults;
+    container.replaceChildren();
+    if (!state.searchQuery) {
+      container.hidden = true;
+      return;
+    }
+    container.hidden = false;
+    const heading = document.createElement("div");
+    heading.className = "search-results-heading";
+    const count = state.searchResults.length;
+    heading.textContent = `“${state.searchQuery}” · ${count} 条`;
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "search-results-clear";
+    clear.textContent = "清除";
+    clear.addEventListener("click", () => {
+      elements.sidebarSearchInput.value = "";
+      clearConversationSearch();
+      renderChannelList();
+      renderConversationList();
+    });
+    heading.appendChild(clear);
+    container.appendChild(heading);
+    if (!count) {
+      const empty = document.createElement("p");
+      empty.className = "search-results-empty";
+      empty.textContent = "没有匹配的对话";
+      container.appendChild(empty);
+      return;
+    }
+    for (const result of state.searchResults) {
+      const item = document.createElement("article");
+      item.className = "search-result";
+      const user = String(result.user_content || "").trim();
+      const assistant = String(result.assistant_content || "").trim();
+      const time = document.createElement("time");
+      time.textContent = formatTime(result.assistant_timestamp || result.user_timestamp);
+      const snippet = document.createElement("p");
+      snippet.className = "search-result-snippet";
+      snippet.textContent = (user || assistant || "").slice(0, 80) || "（空）";
+      snippet.appendChild(document.createElement("br"));
+      const detail = document.createElement("div");
+      detail.className = "search-result-detail";
+      detail.hidden = true;
+      if (user) {
+        const u = document.createElement("p");
+        u.className = "search-result-user";
+        u.textContent = `你：${user}`;
+        detail.appendChild(u);
+      }
+      if (assistant) {
+        const a = document.createElement("p");
+        a.className = "search-result-assistant";
+        a.textContent = `顾清影：${assistant}`;
+        detail.appendChild(a);
+      }
+      item.append(time, snippet, detail);
+      item.addEventListener("click", () => {
+        detail.hidden = !detail.hidden;
+      });
+      container.appendChild(item);
+    }
+  }
+
+  async function switchToConversation(conversationId) {
+    if (state.blocked || conversationRunning()) return;
+    state.viewingConversation = String(conversationId);
+    renderConversationList();
+    updateConversationChrome();
+    updateControlState();
+    try {
+      const response = await apiRequest(`/api/conversations/${encodeURIComponent(conversationId)}/turns`);
+      const data = await response.json();
+      if (state.viewingConversation !== String(conversationId)) return;
+      state.viewedTurns = Array.isArray(data?.turns)
+        ? data.turns.sort((a, b) => asFiniteNumber(a?.seq) - asFiniteNumber(b?.seq))
+        : [];
+      renderConversation();
+    } catch (error) {
+      showToast(error.message || "历史对话加载失败", "error");
+      exitConversationView();
+    }
+  }
+
+  function exitConversationView() {
+    state.viewingConversation = null;
+    state.viewedTurns = [];
+    renderConversationList();
+    loadBootstrap();
+  }
+
+  // 删除历史会话：确认 → DELETE → 本地移除；正在浏览该会话则退回当前对话。
+  async function deleteConversation(conversationId, itemButton) {
+    if (state.blocked || conversationRunning()) return;
+    const name = String(itemButton?.querySelector("strong")?.textContent || "此会话").trim() || "此会话";
+    const ok = await confirmDialog({
+      title: "删除会话",
+      message: `删除会话「${name}」？该会话的全部对话记录将被移除，无法恢复。`,
+      confirmLabel: "删除",
+      danger: true,
+    });
+    if (!ok) return;
+    itemButton?.classList.add("is-deleting");
+    try {
+      const response = await apiRequest(
+        `/api/conversations/${encodeURIComponent(conversationId)}`,
+        { method: "DELETE" }
+      );
+      const data = await response.json();
+      if (data?.ok !== true) {
+        showToast(data?.error || "删除失败", "error");
+        return;
+      }
+      // 正在浏览被删会话 → 退回当前对话
+      if (String(state.viewingConversation) === String(conversationId)) {
+        state.viewingConversation = null;
+        state.viewedTurns = [];
+        loadBootstrap();
+      } else {
+        removeLocalConversation(conversationId);
+        renderConversationList();
+      }
+      showToast(`已删除会话（${data.deleted ?? 0} 轮）`, "info");
+    } catch (error) {
+      showToast(error.message || "删除失败", "error");
+    } finally {
+      itemButton?.classList.remove("is-deleting");
+    }
+  }
+
+  // 从本地会话列表移除一条（SSE 同步与删除后共用）。
+  function removeLocalConversation(conversationId) {
+    state.conversations = (Array.isArray(state.conversations) ? state.conversations : [])
+      .filter((conversation) => String(conversation?.id) !== String(conversationId));
+  }
+
+  function hasPendingQuestion() {
+    if (!state.live) return false;
+    return Array.from(state.live.questions.values()).some((question) => question.pending);
+  }
+
+  function countCharacters(value) {
+    return Array.from(String(value || "")).length;
+  }
+
+  function resizeComposer() {
+    const input = elements.composerInput;
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, window.innerWidth <= 760 ? 120 : 146)}px`;
+    const count = countCharacters(input.value);
+    elements.characterCount.textContent = `${formatInteger(count)} / 20,000`;
+    elements.characterCount.hidden = count < 18_000;
+    elements.characterCount.classList.toggle("is-error", count > MAX_CONTENT_CHARS);
+    updateControlState();
+    window.requestAnimationFrame(updateJumpButtonOffset);
+  }
+
+  function updateJumpButtonOffset() {
+    elements.jumpBottomButton.style.bottom = `${elements.composerDock.offsetHeight + 10}px`;
+  }
+
+  function updateControlState() {
+    const running = conversationRunning();
+    const cancellable = Boolean(state.activeRunId);
+    const queueAvailable = !state.externalRunningTurnId || state.externalQueueAvailable;
+    const busy = state.adminBusy || state.submitting;
+    const locked = state.blocked || state.adminBusy;
+    // 历史对话可继续（OpenAI 式）：viewingConversation 时输入可用，消息归入该会话
+    const readonly = Boolean(state.viewingChannel);
+    const inputCount = countCharacters(elements.composerInput.value.trim());
+
+    elements.composerInput.disabled = locked || readonly;
+    elements.composerForm.classList.toggle("is-disabled", locked || readonly);
+    // Panel 模式（悬浮卡片）：输入解锁且页面可见时自动聚焦，免点一下才能打字
+    if (IS_PANEL && !elements.composerInput.disabled && document.hasFocus()) {
+      elements.composerInput.focus();
+    }
+    elements.newChatButton.disabled = state.blocked || running || busy || readonly;
+    elements.modelButton.disabled = state.blocked || running || busy || state.models.length === 0;
+    elements.modeSwitch.querySelectorAll("button").forEach((button) => {
+      button.disabled = state.blocked || running || busy || readonly;
+    });
+    elements.promptGrid.querySelectorAll("button").forEach((button) => {
+      button.disabled = state.blocked || running || busy || readonly;
+    });
+    elements.modelMenu.querySelectorAll(".model-menu-item").forEach((button) => {
+      button.disabled = state.blocked || running || busy;
+    });
+    updateModelMenuState();
+
+    elements.sendButton.classList.remove("is-cancel");
+    elements.sendButton.querySelector(".icon-slot").replaceChildren(createIcon("arrow-up"));
+    elements.sendButton.title = running ? "加入队列" : "发送消息";
+    elements.sendButton.setAttribute("aria-label", elements.sendButton.title);
+    elements.sendButton.disabled = state.blocked || state.adminBusy || state.submitting || readonly || hasPendingQuestion() || (running && !queueAvailable) || inputCount === 0 || inputCount > MAX_CONTENT_CHARS;
+    elements.stopButton.hidden = !cancellable;
+    elements.stopButton.disabled = !cancellable || state.cancellationRequested || state.adminBusy;
+    elements.stopButton.title = state.cancellationRequested ? "正在停止" : "停止回复";
+    elements.stopButton.setAttribute("aria-label", elements.stopButton.title);
+
+    if (readonly) elements.composerState.textContent = `只读浏览 ${channelLabel(state.viewingChannel)} 通道，返回后即可继续对话`;
+    else if (state.viewingConversation) elements.composerState.textContent = "正在继续该历史对话，新消息将归入此会话";
+    else if (state.blocked) elements.composerState.textContent = "未授权";
+    else if (state.cancellationRequested) elements.composerState.textContent = "正在停止";
+    else if (hasPendingQuestion()) elements.composerState.textContent = "等待回答";
+    else if (busy) elements.composerState.textContent = state.submitting ? (running ? "正在加入队列" : "正在发送") : "正在处理";
+    else if (inputCount > MAX_CONTENT_CHARS) elements.composerState.textContent = "消息不能超过 20,000 个字符";
+    else if (running && !queueAvailable) elements.composerState.textContent = "另一会话正在运行";
+    else if (running) elements.composerState.textContent = state.queuedPrompts.length
+      ? `顾清影正在回复 · ${state.queuedPrompts.length} 条排队`
+      : "顾清影正在回复";
+    else elements.composerState.textContent = "";
+    elements.composerState.classList.toggle("is-error", inputCount > MAX_CONTENT_CHARS);
+    updateSettingsControls();
+  }
+
+  function isNearBottom() {
+    const distance = elements.chatScroll.scrollHeight - elements.chatScroll.scrollTop - elements.chatScroll.clientHeight;
+    return distance <= NEAR_BOTTOM_PX;
+  }
+
+  function scrollToBottom({ force = false, smooth = false } = {}) {
+    if (!force && !state.followOutput) {
+      elements.jumpBottomButton.hidden = false;
+      return;
+    }
+    if (force) state.followOutput = true;
+    window.requestAnimationFrame(() => {
+      state.programmaticScroll = true;
+      elements.chatScroll.scrollTo({ top: elements.chatScroll.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+      state.nearBottom = true;
+      elements.jumpBottomButton.hidden = true;
+      window.setTimeout(() => {
+        state.programmaticScroll = false;
+      }, smooth ? 300 : 0);
+    });
+  }
+
+  function contentAdded() {
+    if (state.followOutput) scrollToBottom();
+    else elements.jumpBottomButton.hidden = false;
+  }
+
+  async function copyText(text) {
+    const value = String(text || "");
+    if (!value) return false;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        showToast("已复制");
+        return true;
+      }
+    } catch (_) {
+      // Use the selection fallback below.
+    }
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch (_) {
+      copied = false;
+    }
+    textarea.remove();
+    showToast(copied ? "已复制" : "复制失败", copied ? "info" : "error");
+    return copied;
+  }
+
+  // 朗读按钮（浏览器 SpeechSynthesis，零后端）
+  function makeSpeakButton(textProvider, label = "朗读") {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "message-action-button";
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    let speaking = false;
+    button.addEventListener("click", () => {
+      if (speaking) {
+        window.speechSynthesis?.cancel();
+        speaking = false;
+        button.textContent = "";
+        return;
+      }
+      const text = String(typeof textProvider === "function" ? textProvider() : textProvider || "").trim();
+      if (!text || !("speechSynthesis" in window)) {
+        showToast("当前浏览器不支持朗读", "error");
+        return;
+      }
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = "zh-CN";
+      utterance.onend = () => { speaking = false; button.textContent = ""; };
+      utterance.onerror = () => { speaking = false; button.textContent = ""; };
+      speaking = true;
+      button.textContent = "■";
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
+    });
+    return button;
+  }
+
+  function makeCopyButton(textProvider, label = "复制") {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.appendChild(makeIconSlot("copy"));
+    button.addEventListener("click", () => copyText(typeof textProvider === "function" ? textProvider() : textProvider));
+    return button;
+  }
+
+  function validHttpUrl(value) {
+    const raw = String(value || "").trim();
+    if (!/^https?:\/\//i.test(raw)) return null;
+    try {
+      const url = new URL(raw);
+      return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // 纯文本段里的图片 → 内嵌缩略图（点击灯箱预览）。
+  // 匹配两种：本地绝对路径（/Users/…）、http(s) 图片链接；排除常见标点避免吞字符。
+  const PATH_IMAGE_RE =
+    /(?:\/[^\s"'<>()[\]，。、；：！？]*\.(?:png|jpe?g|gif|webp)|https?:\/\/[^\s"'<>()[\]，。、；：！？]*\.(?:png|jpe?g|gif|webp))/gi;
+
+  function appendPlainWithPathPreviews(parent, segment) {
+    if (!segment.includes("/")) {
+      parent.appendChild(document.createTextNode(segment));
+      return;
+    }
+    let last = 0;
+    let match;
+    PATH_IMAGE_RE.lastIndex = 0;
+    while ((match = PATH_IMAGE_RE.exec(segment)) !== null) {
+      if (match.index > last) {
+        parent.appendChild(document.createTextNode(segment.slice(last, match.index)));
+      }
+      const matchText = match[1];
+      const isRemote = /^https?:\/\//i.test(matchText);
+      const previewUrl = isRemote
+        ? matchText
+        : `/api/files/preview?path=${encodeURIComponent(matchText)}`;
+      const image = document.createElement("img");
+      image.className = "path-preview";
+      image.src = previewUrl;
+      image.alt = matchText;
+      image.title = `预览：${matchText}`;
+      image.loading = "lazy";
+      image.addEventListener("error", () => {
+        // 远端图片加载失败时回退为普通链接文本，不破坏消息
+        const link = document.createElement("a");
+        link.href = matchText;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = matchText;
+        image.replaceWith(link);
+      });
+      image.addEventListener("click", () => openLightbox(previewUrl, matchText));
+      parent.appendChild(image);
+      last = match.index + match[0].length;
+    }
+    if (last < segment.length) parent.appendChild(document.createTextNode(segment.slice(last)));
+  }
+
+  function appendInline(parent, source, depth = 0) {
+    const text = String(source || "");
+    if (depth > 8) {
+      parent.appendChild(document.createTextNode(text));
+      return;
+    }
+    let index = 0;
+    let plainStart = 0;
+    const flushPlain = (end) => {
+      if (end > plainStart) appendPlainWithPathPreviews(parent, text.slice(plainStart, end));
+    };
+    while (index < text.length) {
+      if (text[index] === "\\" && index + 1 < text.length && "\\`*_[]|~".includes(text[index + 1])) {
+        flushPlain(index);
+        parent.appendChild(document.createTextNode(text[index + 1]));
+        index += 2;
+        plainStart = index;
+        continue;
+      }
+      if (text[index] === "\n") {
+        flushPlain(index);
+        parent.appendChild(document.createElement("br"));
+        index += 1;
+        plainStart = index;
+        continue;
+      }
+      if (text[index] === "`") {
+        const end = text.indexOf("`", index + 1);
+        if (end > index + 1) {
+          flushPlain(index);
+          const code = document.createElement("code");
+          code.textContent = text.slice(index + 1, end);
+          parent.appendChild(code);
+          index = end + 1;
+          plainStart = index;
+          continue;
+        }
+      }
+      if (text[index] === "[") {
+        const labelEnd = text.indexOf("](", index + 1);
+        const urlEnd = labelEnd >= 0 ? text.indexOf(")", labelEnd + 2) : -1;
+        if (labelEnd > index + 1 && urlEnd > labelEnd + 2) {
+          const href = validHttpUrl(text.slice(labelEnd + 2, urlEnd));
+          if (href) {
+            flushPlain(index);
+            const link = document.createElement("a");
+            link.href = href;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            appendInline(link, text.slice(index + 1, labelEnd), depth + 1);
+            parent.appendChild(link);
+            index = urlEnd + 1;
+            plainStart = index;
+            continue;
+          }
+        }
+      }
+      if (text.startsWith("~~", index)) {
+        const end = text.indexOf("~~", index + 2);
+        if (end > index + 2 && text.slice(index + 2, end).trim()) {
+          flushPlain(index);
+          const deletion = document.createElement("del");
+          appendInline(deletion, text.slice(index + 2, end), depth + 1);
+          parent.appendChild(deletion);
+          index = end + 2;
+          plainStart = index;
+          continue;
+        }
+      }
+      const strongMarker = text.startsWith("**", index) ? "**" : text.startsWith("__", index) ? "__" : null;
+      if (strongMarker) {
+        const end = text.indexOf(strongMarker, index + 2);
+        if (end > index + 2 && text.slice(index + 2, end).trim()) {
+          flushPlain(index);
+          const strong = document.createElement("strong");
+          appendInline(strong, text.slice(index + 2, end), depth + 1);
+          parent.appendChild(strong);
+          index = end + 2;
+          plainStart = index;
+          continue;
+        }
+      }
+      if (text[index] === "*" || text[index] === "_") {
+        const marker = text[index];
+        const end = text.indexOf(marker, index + 1);
+        if (end > index + 1 && text.slice(index + 1, end).trim()) {
+          flushPlain(index);
+          const emphasis = document.createElement("em");
+          appendInline(emphasis, text.slice(index + 1, end), depth + 1);
+          parent.appendChild(emphasis);
+          index = end + 1;
+          plainStart = index;
+          continue;
+        }
+      }
+      index += 1;
+    }
+    flushPlain(text.length);
+  }
+
+  // ---- 轻量语法高亮（零依赖） ----
+  const HL_CONFIG = {
+    _default: { keywords: "", comment: null, strings: true, numbers: true },
+    bash: {
+      keywords: "if then else elif fi for while do done case esac function in return local export readonly unset set echo printf source exit break continue cd ls pwd mkdir rm cp mv touch cat grep sed awk find curl wget sudo",
+      comment: "#",
+      strings: true,
+      numbers: false,
+    },
+    sh: null,
+    shell: null,
+    json: { keywords: "true false null", comment: null, strings: true, numbers: true },
+    rust: {
+      keywords: "fn let mut pub struct enum impl trait mod use crate super self Self as where match if else for while loop return break continue async await move ref const static type dyn in out unsafe",
+      comment: "//",
+      strings: true,
+      numbers: true,
+    },
+    js: {
+      keywords: "function const let var return if else for while do switch case break continue new class extends super this async await try catch finally throw typeof instanceof import export default null undefined true false",
+      comment: "//",
+      strings: true,
+      numbers: true,
+    },
+    typescript: "js",
+    ts: "js",
+    javascript: "js",
+    python: {
+      keywords: "def class return if elif else for while try except finally with as import from lambda pass break continue yield global nonlocal raise assert del in is not and or None True False self",
+      comment: "#",
+      strings: true,
+      numbers: true,
+    },
+    py: "python",
+    sql: {
+      keywords: "select insert update delete from where join left right inner outer on group by order having limit offset create alter drop table index view values set and or not like in between case when then else end as distinct count sum avg min max",
+      comment: "--",
+      strings: true,
+      numbers: true,
+    },
+    diff: { keywords: "", comment: null, strings: false, numbers: false, diff: true },
+    yaml: { keywords: "true false null yes no", comment: "#", strings: true, numbers: false },
+    yml: "yaml",
+    markdown: { keywords: "", comment: null, strings: false, numbers: false },
+    md: "markdown",
+  };
+
+  function escapeHtmlText(value) {
+    return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function highlightCode(codeText, language) {
+    const key = String(language || "").toLowerCase().replace(/^language-/, "");
+    let cfg = HL_CONFIG[key];
+    if (typeof cfg === "string") cfg = HL_CONFIG[cfg];
+    if (!cfg) cfg = HL_CONFIG._default;
+    const keywords = new Set(String(cfg.keywords || "").split(/\s+/).filter(Boolean));
+
+    if (cfg.diff) {
+      return codeText.split("\n").map((line) => {
+        const cls = line.startsWith("+") ? "hl-add" : line.startsWith("-") ? "hl-del" : "";
+        return cls ? `<span class="${cls}">${escapeHtmlText(line)}</span>` : escapeHtmlText(line);
+      }).join("\n");
+    }
+
+    const patterns = [];
+    if (cfg.comment === "#") patterns.push(["comment", /^#[^\n]*/]);
+    else if (cfg.comment === "//") patterns.push(["comment", /^\/\/[^\n]*|^\/\*[\s\S]*?\*\//]);
+    else if (cfg.comment === "--") patterns.push(["comment", /^--[^\n]*/]);
+    if (cfg.strings) patterns.push(["string", /^"(?:[^"\\\n]|\\.)*"|^'(?:[^'\\\n]|\\.)*'|^`(?:[^`\\]|\\.)*`/]);
+    if (cfg.numbers) patterns.push(["number", /^\b(?:\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\b/]);
+    if (keywords.size) patterns.push(["keyword", new RegExp("^(?:" + [...keywords].join("|") + ")\\b")]);
+
+    let rest = String(codeText);
+    const pieces = [];
+    while (rest.length) {
+      let matched = false;
+      for (const [type, re] of patterns) {
+        const m = rest.match(re);
+        if (m) {
+          const raw = m[0];
+          pieces.push(type === "plain" ? escapeHtmlText(raw) : `<span class="hl-${type}">${escapeHtmlText(raw)}</span>`);
+          rest = rest.slice(raw.length);
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        // 按字符前进，避免无限循环
+        const ch = rest[0];
+        pieces.push(escapeHtmlText(ch));
+        rest = rest.slice(1);
+      }
+    }
+    return pieces.join("");
+  }
+
+  function codeBlock(language, codeText) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "code-block";
+    const toolbar = document.createElement("div");
+    toolbar.className = "code-toolbar";
+    const label = document.createElement("span");
+    label.textContent = language || "代码";
+    const copy = makeCopyButton(codeText, "复制代码");
+    copy.className = "code-copy-button";
+    toolbar.append(label, copy);
+    const pre = document.createElement("pre");
+    const code = document.createElement("code");
+    if (language) code.className = `language-${language}`;
+    code.innerHTML = highlightCode(codeText, language);
+    pre.appendChild(code);
+    wrapper.append(toolbar, pre);
+    return wrapper;
+  }
+
+  function parseTableRow(line) {
+    const text = String(line || "").trim();
+    const cells = [];
+    let cell = "";
+    let codeFenceLength = 0;
+    let hasSeparator = false;
+    let endedWithSeparator = false;
+    for (let index = 0; index < text.length;) {
+      if (text[index] === "\\" && index + 1 < text.length) {
+        cell += text.slice(index, index + 2);
+        index += 2;
+        endedWithSeparator = false;
+        continue;
+      }
+      if (text[index] === "`") {
+        let end = index + 1;
+        while (end < text.length && text[end] === "`") end += 1;
+        const runLength = end - index;
+        if (!codeFenceLength) codeFenceLength = runLength;
+        else if (codeFenceLength === runLength) codeFenceLength = 0;
+        cell += text.slice(index, end);
+        index = end;
+        endedWithSeparator = false;
+        continue;
+      }
+      if (text[index] === "|" && !codeFenceLength) {
+        cells.push(cell.trim());
+        cell = "";
+        hasSeparator = true;
+        endedWithSeparator = true;
+        index += 1;
+        continue;
+      }
+      cell += text[index];
+      endedWithSeparator = false;
+      index += 1;
+    }
+    cells.push(cell.trim());
+    if (text.startsWith("|")) cells.shift();
+    if (endedWithSeparator) cells.pop();
+    return { cells, hasSeparator };
+  }
+
+  function tableAlignments(line) {
+    const row = parseTableRow(line);
+    if (!row.hasSeparator || !row.cells.length) return null;
+    const alignments = [];
+    for (const cell of row.cells) {
+      const marker = cell.match(/^(:)?-{3,}(:)?$/);
+      if (!marker) return null;
+      alignments.push(marker[1] && marker[2] ? "center" : marker[2] ? "right" : marker[1] ? "left" : "");
+    }
+    return alignments;
+  }
+
+  function isTableStart(lines, index) {
+    if (index + 1 >= lines.length) return false;
+    const header = parseTableRow(lines[index]);
+    const alignments = tableAlignments(lines[index + 1]);
+    return Boolean(alignments && header.hasSeparator && header.cells.length === alignments.length);
+  }
+
+  function isHorizontalRule(line) {
+    const text = String(line || "").trim();
+    return /^(?:\*\s*){3,}$/.test(text) || /^(?:-\s*){3,}$/.test(text) || /^(?:_\s*){3,}$/.test(text);
+  }
+
+  function markdownTable(lines, startIndex) {
+    const headers = parseTableRow(lines[startIndex]).cells;
+    const alignments = tableAlignments(lines[startIndex + 1]);
+    const wrapper = document.createElement("div");
+    wrapper.className = "markdown-table-scroll";
+    const table = document.createElement("table");
+    const head = document.createElement("thead");
+    const headRow = document.createElement("tr");
+    headers.forEach((content, column) => {
+      const cell = document.createElement("th");
+      cell.scope = "col";
+      if (alignments[column]) cell.className = `align-${alignments[column]}`;
+      appendInline(cell, content);
+      headRow.appendChild(cell);
+    });
+    head.appendChild(headRow);
+    table.appendChild(head);
+
+    const body = document.createElement("tbody");
+    let index = startIndex + 2;
+    while (index < lines.length && lines[index].trim()) {
+      const row = parseTableRow(lines[index]);
+      if (!row.hasSeparator) break;
+      const tableRow = document.createElement("tr");
+      for (let column = 0; column < headers.length; column += 1) {
+        const cell = document.createElement("td");
+        if (alignments[column]) cell.className = `align-${alignments[column]}`;
+        appendInline(cell, row.cells[column] || "");
+        tableRow.appendChild(cell);
+      }
+      body.appendChild(tableRow);
+      index += 1;
+    }
+    if (body.children.length) table.appendChild(body);
+    wrapper.appendChild(table);
+    return { node: wrapper, nextIndex: index };
+  }
+
+  function isMarkdownBlockStart(lines, index) {
+    const line = lines[index];
+    return /^\s*```/.test(line) || /^#{1,6}\s+/.test(line) || /^\s*[-*+]\s+/.test(line) || /^\s*\d+[.)]\s+/.test(line) || /^\s*>/.test(line) || isHorizontalRule(line) || isTableStart(lines, index);
+  }
+
+  function renderMarkdown(container, source) {
+    const lines = String(source || "").replace(/\r\n?/g, "\n").split("\n");
+    const fragment = document.createDocumentFragment();
+    let index = 0;
+    while (index < lines.length) {
+      const line = lines[index];
+      if (!line.trim()) {
+        index += 1;
+        continue;
+      }
+      const fence = line.match(/^\s*```\s*([\w.+-]*)\s*$/);
+      if (fence) {
+        const codeLines = [];
+        index += 1;
+        while (index < lines.length && !/^\s*```\s*$/.test(lines[index])) {
+          codeLines.push(lines[index]);
+          index += 1;
+        }
+        if (index < lines.length) index += 1;
+        const language = /^[\w.+-]{1,40}$/.test(fence[1] || "") ? fence[1] : "";
+        fragment.appendChild(codeBlock(language, codeLines.join("\n")));
+        continue;
+      }
+      if (isTableStart(lines, index)) {
+        const rendered = markdownTable(lines, index);
+        fragment.appendChild(rendered.node);
+        index = rendered.nextIndex;
+        continue;
+      }
+      if (isHorizontalRule(line)) {
+        fragment.appendChild(document.createElement("hr"));
+        index += 1;
+        continue;
+      }
+      const heading = line.match(/^(#{1,6})\s+(.+)$/);
+      if (heading) {
+        const level = Math.min(6, heading[1].length + 1);
+        const node = document.createElement(`h${level}`);
+        appendInline(node, heading[2]);
+        fragment.appendChild(node);
+        index += 1;
+        continue;
+      }
+      const unordered = line.match(/^\s*[-*+]\s+(.+)$/);
+      if (unordered) {
+        const list = document.createElement("ul");
+        let hasTask = false;
+        while (index < lines.length) {
+          const itemMatch = lines[index].match(/^\s*[-*+]\s+(.+)$/);
+          if (!itemMatch) break;
+          const item = document.createElement("li");
+          const task = itemMatch[1].match(/^\[([ xX])\]\s+(.*)$/);
+          if (task) {
+            hasTask = true;
+            item.className = "task-list-item";
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.checked = task[1].toLowerCase() === "x";
+            checkbox.disabled = true;
+            const content = document.createElement("span");
+            appendInline(content, task[2]);
+            item.append(checkbox, content);
+          } else {
+            appendInline(item, itemMatch[1]);
+          }
+          list.appendChild(item);
+          index += 1;
+        }
+        if (hasTask) list.classList.add("task-list");
+        fragment.appendChild(list);
+        continue;
+      }
+      const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+      if (ordered) {
+        const list = document.createElement("ol");
+        while (index < lines.length) {
+          const itemMatch = lines[index].match(/^\s*\d+[.)]\s+(.+)$/);
+          if (!itemMatch) break;
+          const item = document.createElement("li");
+          appendInline(item, itemMatch[1]);
+          list.appendChild(item);
+          index += 1;
+        }
+        fragment.appendChild(list);
+        continue;
+      }
+      if (/^\s*>/.test(line)) {
+        const quoteLines = [];
+        while (index < lines.length) {
+          const quote = lines[index].match(/^\s*>\s?(.*)$/);
+          if (!quote) break;
+          quoteLines.push(quote[1]);
+          index += 1;
+        }
+        const blockquote = document.createElement("blockquote");
+        appendInline(blockquote, quoteLines.join("\n"));
+        fragment.appendChild(blockquote);
+        continue;
+      }
+      const paragraphLines = [line];
+      index += 1;
+      while (index < lines.length && lines[index].trim() && !isMarkdownBlockStart(lines, index)) {
+        paragraphLines.push(lines[index]);
+        index += 1;
+      }
+      const paragraph = document.createElement("p");
+      appendInline(paragraph, paragraphLines.join("\n"));
+      fragment.appendChild(paragraph);
+    }
+    container.replaceChildren(fragment);
+  }
+
+  function createDayDivider(timestamp) {
+    const divider = document.createElement("div");
+    divider.className = "day-divider";
+    divider.dataset.dayKey = dayKey(timestamp);
+    const label = document.createElement("span");
+    label.textContent = formatDayLabel(timestamp);
+    divider.appendChild(label);
+    return divider;
+  }
+
+  function appendDayDividerIfNeeded(timestamp) {
+    const dividers = elements.timeline.querySelectorAll(".day-divider");
+    const lastDivider = dividers[dividers.length - 1];
+    if (!lastDivider || lastDivider.dataset.dayKey !== dayKey(timestamp)) elements.timeline.appendChild(createDayDivider(timestamp));
+  }
+
+  // 超长消息折叠渲染：历史消息超过阈值时先渲染预览 + 展开按钮，
+  // 点击才渲染全文（避免巨型 markdown 解析阻塞主线程/首屏）。
+  // 流式消息不走这里（live 渲染另有节流路径）。
+  const COLLAPSE_PREVIEW_CHARS = 800;
+  const COLLAPSE_TRIGGER_CHARS = 1600;
+
+  function createCollapsibleMarkdown(source, collapsible) {
+    const markdown = document.createElement("div");
+    markdown.className = "markdown-body";
+    const text = String(source || "");
+    if (!collapsible || text.length <= COLLAPSE_TRIGGER_CHARS) {
+      renderMarkdown(markdown, text);
+      return markdown;
+    }
+    const preview = document.createElement("div");
+    renderMarkdown(preview, text.slice(0, COLLAPSE_PREVIEW_CHARS) + "\n\n…（内容过长已折叠）");
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "collapse-toggle";
+    const remaining = text.length - COLLAPSE_PREVIEW_CHARS;
+    toggle.textContent = `展开全文（剩余 ${formatInteger(remaining)} 字符）`;
+    toggle.addEventListener("click", () => {
+      markdown.replaceChildren();
+      renderMarkdown(markdown, text);
+    });
+    markdown.append(preview, toggle);
+    return markdown;
+  }
+
+  function createUserMessage(content, timestamp, attributes = {}) {
+    const article = document.createElement("article");
+    article.className = "message user-message";
+    article.dataset.role = "user";
+    if (attributes.turnId) article.dataset.turnId = attributes.turnId;
+    if (attributes.runId) article.dataset.runId = attributes.runId;
+    if (attributes.followupId) article.dataset.followupId = attributes.followupId;
+    const userAvatar = getAvatar("user");
+    let userAvatarEl = null;
+    if (userAvatar) {
+      const avatar = document.createElement("img");
+      avatar.className = "user-avatar";
+      avatar.src = userAvatar;
+      avatar.alt = "我";
+      userAvatarEl = avatar;
+    }
+    const bubble = document.createElement("div");
+    bubble.className = "user-bubble";
+    const paragraph = document.createElement("p");
+    paragraph.textContent = String(content || "");
+    bubble.appendChild(paragraph);
+    const mediaImages = [];
+    if (Array.isArray(attributes.images)) {
+      for (const image of attributes.images) {
+        if (image && image.dataUrl) mediaImages.push({ src: image.dataUrl, alt: image.name || "图片" });
+      }
+    }
+    if (Array.isArray(attributes.assets)) {
+      for (const asset of attributes.assets) {
+        const url = safeAssetUrl(asset?.url);
+        if (url) mediaImages.push({ src: url, alt: asset?.alt || "图片" });
+      }
+    }
+    if (mediaImages.length) {
+      const media = document.createElement("div");
+      media.className = "user-media";
+      for (const image of mediaImages) {
+        const img = document.createElement("img");
+        img.src = image.src;
+        img.alt = image.alt;
+        img.loading = "lazy";
+        media.appendChild(img);
+      }
+      bubble.appendChild(media);
+    }
+    const actions = document.createElement("div");
+    actions.className = "message-actions";
+    const time = document.createElement("span");
+    time.textContent = formatTime(timestamp) || "刚刚";
+    time.title = formatDateTime(timestamp);
+    actions.append(time, makeCopyButton(String(content || ""), "复制消息"));
+    // 重试按钮：有文本或图片即可（修复：纯图/思考无输出场景此前被 content 非空条件挡住）
+    if (attributes.retryable && (String(content || "").trim() || mediaImages.length)) {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "message-action-button";
+      retry.title = "重新生成回复";
+      retry.setAttribute("aria-label", "重新生成回复");
+      retry.addEventListener("click", () => retryTurn(String(content || ""), retry));
+      actions.appendChild(retry);
+    }
+    // 用户消息靠右：气泡在左、头像贴最右（avatar 最后 append，flex-end 下在最右侧）
+    article.append(bubble, actions);
+    if (userAvatarEl) article.appendChild(userAvatarEl);
+    return article;
+  }
+
+  // 重试/重新生成：剥离注入的 [Image N 的描述] 块后重发该轮内容
+  async function retryTurn(content, button) {
+    const clean = String(content || "").replace(/\n?\[Image \d+ 的描述\][\s\S]*?(?=\n\[Image \d+ 的描述\]|$)/g, "").trim() || String(content || "").trim();
+    if (button) {
+      button.disabled = true;
+      button.textContent = "…";
+    }
+    const ok = await sendTurnContent(clean, "normal", []);
+    if (button) {
+      button.disabled = false;
+      button.textContent = "";
+    }
+    if (!ok) showToast("重试未能受理，请稍后再试", "error");
+  }
+
+  function safeAssetUrl(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return null;
+    try {
+      const url = new URL(raw, window.location.origin);
+      if (url.origin !== window.location.origin || !url.pathname.startsWith("/api/assets/") || url.pathname === "/api/assets/") return null;
+      return url.href;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function validAssetDimension(value) {
+    const number = Number(value);
+    return Number.isInteger(number) && number > 0 && number <= 100_000 ? number : null;
+  }
+
+  function createAssetAction(iconName, label, href, download = false) {
+    const link = document.createElement("a");
+    link.href = href;
+    link.title = label;
+    link.setAttribute("aria-label", label);
+    link.rel = "noopener noreferrer";
+    if (download) link.setAttribute("download", "");
+    else link.target = "_blank";
+    link.appendChild(makeIconSlot(iconName));
+    return link;
+  }
+
+  const EMOTION_BADGES = {
+    neutral: { icon: "🙂", label: "平静" },
+    happy: { icon: "😊", label: "开心" },
+    sad: { icon: "😢", label: "难过" },
+    angry: { icon: "😠", label: "生气" },
+    shy: { icon: "😳", label: "害羞" },
+    surprised: { icon: "😲", label: "惊讶" },
+    tired: { icon: "😪", label: "疲惫" },
+    thinking: { icon: "🤔", label: "思考" },
+  };
+
+  // ── 应用内确认对话框 ──
+  // 替代 window.confirm：WKWebView（App 内嵌）里原生 confirm 被禁用、
+  // 静默返回，危险操作会失去二次确认。自绘弹窗在一切环境可靠，且贴合主题。
+  function confirmDialog({ title, message, confirmLabel = "确认", cancelLabel = "取消", danger = false }) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement("div");
+      overlay.className = "confirm-overlay";
+      const box = document.createElement("div");
+      box.className = "confirm-box";
+      box.setAttribute("role", "dialog");
+      box.setAttribute("aria-modal", "true");
+      const heading = document.createElement("h2");
+      heading.className = "confirm-title";
+      heading.textContent = title;
+      const text = document.createElement("p");
+      text.className = "confirm-message";
+      text.textContent = message;
+      const actions = document.createElement("div");
+      actions.className = "confirm-actions";
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "secondary-button";
+      cancel.textContent = cancelLabel;
+      const confirm = document.createElement("button");
+      confirm.type = "button";
+      confirm.className = danger ? "danger-button" : "primary-button";
+      confirm.textContent = confirmLabel;
+      const finish = (result) => {
+        overlay.remove();
+        document.removeEventListener("keydown", onKey, true);
+        resolve(result);
+      };
+      const onKey = (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          finish(false);
+        }
+        if (event.key === "Enter" && event.target === confirm) {
+          event.preventDefault();
+          finish(true);
+        }
+      };
+      cancel.addEventListener("click", () => finish(false));
+      confirm.addEventListener("click", () => finish(true));
+      overlay.addEventListener("click", (event) => {
+        if (event.target === overlay) finish(false);
+      });
+      document.addEventListener("keydown", onKey, true);
+      actions.append(cancel, confirm);
+      box.append(heading, text, actions);
+      overlay.append(box);
+      document.body.append(overlay);
+      window.requestAnimationFrame(() => confirm.focus());
+    });
+  }
+
+  // ── 图片灯箱：点击消息内图片/路径缩略图 → 全屏预览（遮罩 + 关闭 + 下载）──
+  let lightbox = null;
+
+  function openLightbox(url, alt) {
+    closeLightbox();
+    const overlay = document.createElement("div");
+    overlay.className = "media-lightbox";
+    const stage = document.createElement("div");
+    stage.className = "media-lightbox-stage";
+    const image = document.createElement("img");
+    image.src = url;
+    image.alt = alt || "图片预览";
+    const caption = document.createElement("div");
+    caption.className = "media-lightbox-caption";
+    caption.textContent = alt || "";
+    stage.append(image, caption);
+    const actions = document.createElement("div");
+    actions.className = "media-lightbox-actions";
+    const download = document.createElement("a");
+    download.href = url;
+    download.download = (alt || "preview").replace(/[\\/:*?"<>|]/g, "_") || "preview";
+    download.textContent = "下载";
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "media-lightbox-close";
+    close.setAttribute("aria-label", "关闭预览");
+    close.textContent = "×";
+    close.addEventListener("click", closeLightbox);
+    actions.append(download, close);
+    overlay.append(stage, actions);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) closeLightbox();
+    });
+    document.addEventListener("keydown", lightboxEscape, { once: true });
+    document.body.append(overlay);
+    lightbox = overlay;
+  }
+
+  function closeLightbox() {
+    if (lightbox) {
+      lightbox.remove();
+      lightbox = null;
+    }
+  }
+
+  function lightboxEscape(event) {
+    if (event.key === "Escape") closeLightbox();
+  }
+
+  function createConversationMedia(asset, { eager = false, emotion = null, action = null } = {}) {
+    const source = asset && typeof asset === "object" ? asset : {};
+    const url = safeAssetUrl(source.url);
+    const mime = String(source.mime || "").trim().toLowerCase();
+    const imageMime = !mime || mime.startsWith("image/");
+    const width = validAssetDimension(source.width);
+    const height = validAssetDimension(source.height);
+    const alt = String(source.alt || "").trim() || "顾清影生成的图片";
+    const hideCaption = Boolean(source.hide_caption);
+
+    const figure = document.createElement("figure");
+    figure.className = "conversation-media";
+    if (source.id != null) figure.dataset.assetId = String(source.id);
+    if (emotion) figure.dataset.emotion = String(emotion);
+    if (action) figure.dataset.action = String(action);
+    const visual = document.createElement("div");
+    visual.className = "conversation-media-visual";
+    if (width && height) {
+      const ratio = width / height;
+      if (ratio >= 0.05 && ratio <= 20) {
+        visual.classList.add("has-aspect");
+        visual.style.aspectRatio = `${width} / ${height}`;
+      }
+    }
+    const fallback = document.createElement("div");
+    fallback.className = "conversation-media-fallback";
+    fallback.appendChild(makeIconSlot("circle-alert"));
+    const fallbackText = document.createElement("span");
+    fallbackText.textContent = url && imageMime ? "图片载入失败" : "图片地址不可用";
+    fallback.appendChild(fallbackText);
+
+    if (url && imageMime) {
+      const image = document.createElement("img");
+      image.alt = alt;
+      image.loading = eager ? "eager" : "lazy";
+      image.decoding = "async";
+      if (width) image.width = width;
+      if (height) image.height = height;
+      fallback.hidden = true;
+      image.addEventListener("error", () => {
+        image.remove();
+        fallback.hidden = false;
+        figure.classList.add("is-error");
+        contentAdded();
+      }, { once: true });
+      image.addEventListener("load", contentAdded, { once: true });
+      image.addEventListener("click", () => openLightbox(url, alt));
+      image.classList.add("is-zoomable");
+      image.src = url;
+      visual.append(image, fallback);
+    } else {
+      visual.appendChild(fallback);
+    }
+
+    const caption = document.createElement("figcaption");
+    caption.className = "conversation-media-caption";
+    if (!hideCaption) {
+      const captionText = document.createElement("span");
+      captionText.textContent = alt;
+      captionText.title = alt;
+      caption.appendChild(captionText);
+    } else {
+      caption.classList.add("is-actions-only");
+    }
+    if (url) {
+      const actions = document.createElement("span");
+      actions.className = "conversation-media-actions";
+      actions.append(
+        createAssetAction("external-link", "在新窗口打开图片", url),
+        createAssetAction("download", "下载图片", url, true)
+      );
+      caption.appendChild(actions);
+    }
+    figure.appendChild(visual);
+    if (caption.childElementCount) figure.appendChild(caption);
+    // 情感徽标：模型通过 show_meme 带 emotion 时，叠加在图片右上角（Live2D/悬浮窗同类语义）
+    const emo = emotion ? EMOTION_BADGES[String(emotion)] || null : null;
+    if (emo) {
+      const badge = document.createElement("span");
+      badge.className = "conversation-media-emotion";
+      badge.textContent = `${emo.icon} ${emo.label}`;
+      badge.title = action ? `${emo.label} · ${String(action)}` : emo.label;
+      visual.appendChild(badge);
+    }
+    return figure;
+  }
+
+  function reasoningDisplayMode() {
+    return ["hidden", "summary", "full"].includes(state.display?.reasoning) ? state.display.reasoning : "summary";
+  }
+
+  function toolCallDisplayMode() {
+    return ["hidden", "summary", "full"].includes(state.display?.tool_calls) ? state.display.tool_calls : "summary";
+  }
+
+  function normalizeReasoningTitle(value) {
+    const title = String(value || "").trim().replace(/^[*#\s]+|[*#\s]+$/g, "");
+    if (!title || /^正在(?:思考)?(?:\.{3}|…+)?$/u.test(title)) return "";
+    return title;
+  }
+
+  function splitReasoningText(value) {
+    const raw = String(value || "").trim();
+    const bold = raw.match(/^\*\*([^\n*]{1,160})\*\*(?:\r?\n){0,2}([\s\S]*)$/);
+    if (bold) return { title: normalizeReasoningTitle(bold[1]), body: bold[2].trim() };
+    const heading = raw.match(/^#{1,6}\s+([^\n]{1,160})(?:\r?\n)+([\s\S]*)$/);
+    if (heading) return { title: normalizeReasoningTitle(heading[1]), body: heading[2].trim() };
+    return { title: "", body: raw };
+  }
+
+  function createReasoningBlock(text, title = "已思考", live = false, summaryOnly = false) {
+    const details = document.createElement("details");
+    details.className = "reasoning-block";
+    details.classList.toggle("is-summary", summaryOnly);
+    details.open = true;
+    const summary = document.createElement("summary");
+    const atom = makeIconSlot("atom", "reasoning-icon");
+    const titleNode = document.createElement("span");
+    titleNode.className = "reasoning-title";
+    titleNode.textContent = title || (live ? "正在思考" : "已思考");
+    const chevron = makeIconSlot("chevron-right", "reasoning-chevron");
+    summary.append(atom, titleNode);
+    let liveStatus = null;
+    let progress = null;
+    if (live) {
+      liveStatus = document.createElement("span");
+      liveStatus.className = "reasoning-live-status";
+      liveStatus.textContent = "正在思考 · 0s";
+      summary.appendChild(liveStatus);
+      progress = document.createElement("div");
+      progress.className = "reasoning-progress";
+      progress.setAttribute("role", "progressbar");
+      progress.setAttribute("aria-label", "思考进度");
+      progress.setAttribute("aria-valuetext", "正在思考");
+      const progressFill = document.createElement("i");
+      progressFill.setAttribute("aria-hidden", "true");
+      progress.appendChild(progressFill);
+    }
+    summary.appendChild(chevron);
+    const body = document.createElement("div");
+    body.className = "reasoning-text";
+    body.textContent = String(text || "");
+    details.append(summary);
+    if (progress) details.appendChild(progress);
+    details.appendChild(body);
+    const block = {
+      element: details,
+      title: titleNode,
+      liveStatus,
+      progress,
+      body,
+      raw: String(text || ""),
+      pendingTitle: "",
+      summaryOnly,
+      partOpen: false,
+      startedAt: live ? performance.now() : null,
+      finished: !live,
+      userToggled: false,
+      ignoreNextToggle: false
+    };
+    details.addEventListener("toggle", () => {
+      if (block.ignoreNextToggle) {
+        block.ignoreNextToggle = false;
+        return;
+      }
+      block.userToggled = true;
+    });
+    return block;
+  }
+
+  function createAssistantMessage({
+    content = "",
+    reasoning = "",
+    reasoningTitle = "已思考",
+    assets = [],
+    timestamp = null,
+    tokenTotal = 0,
+    tokenEstimated = false,
+    providerId = "",
+    model = "",
+    activeContext = true,
+    turnId = null,
+    muted = false,
+    collapsible = false,
+    userTimestamp = null,
+    promptTokens = 0,
+    completionTokens = 0,
+    cacheReadTokens = 0
+  } = {}) {
+    const article = document.createElement("article");
+    article.className = `message assistant-message${muted ? " is-muted" : ""}`;
+    article.dataset.role = "assistant";
+    if (turnId) article.dataset.turnId = turnId;
+    const header = document.createElement("header");
+    header.className = "assistant-label";
+    const avatar = document.createElement("img");
+    avatar.src = getAvatar("assistant") || "/assets/gqy-logo.png";
+    avatar.alt = "";
+    avatar.setAttribute("aria-hidden", "true");
+    const identity = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = "顾清影";
+    const time = document.createElement("span");
+    time.textContent = formatTime(timestamp) || "";
+    time.title = formatDateTime(timestamp);
+    identity.append(name, time);
+    header.append(avatar, identity);
+    const assistantContent = document.createElement("div");
+    assistantContent.className = "assistant-content";
+    const blocks = document.createElement("div");
+    blocks.className = "assistant-blocks";
+    if (String(reasoning || "").trim() && reasoningDisplayMode() !== "hidden") {
+      const parsed = splitReasoningText(reasoning);
+      const summaryOnly = reasoningDisplayMode() === "summary";
+      // 修复：此前 reasoningTitle 参数从未使用（硬编码「已思考」），
+      // 调用方传的标题（如 followup 的推理标题）会丢失；现在真正生效。
+      blocks.appendChild(createReasoningBlock(parsed.body, reasoningTitle, false, summaryOnly).element);
+    }
+    if (String(content || "").trim()) {
+      blocks.appendChild(createCollapsibleMarkdown(content, collapsible));
+    } else if (String(reasoning || "").trim()) {
+      // 兜底：模型只输出思考没有正文时给出轻提示，避免「只有思考无文字」
+      const note = document.createElement("p");
+      note.className = "reasoning-only-note";
+      note.textContent = "（本轮思考完成，没有额外的文字回复。）";
+      blocks.appendChild(note);
+    }
+    for (const asset of Array.isArray(assets) ? assets : []) blocks.appendChild(createConversationMedia(asset));
+    assistantContent.appendChild(blocks);
+    article.append(header, assistantContent);
+
+    const meta = document.createElement("div");
+    meta.className = "assistant-meta";
+    // 模型名：默认显示（此前受 show_mixed_model_endpoint 配置限制，默认不可见）
+    const endpointName = [providerId, model].map((value) => String(value || "").trim()).filter(Boolean).join(" / ");
+    if (endpointName && state.display?.show_mixed_model_endpoint !== false) {
+      const endpoint = document.createElement("span");
+      endpoint.className = "assistant-endpoint";
+      endpoint.textContent = endpointName;
+      meta.appendChild(endpoint);
+    }
+    // 耗时（仅持久化轮次有用户时间戳时）：assistant_timestamp - user_timestamp
+    if (userTimestamp) {
+      const startTime = new Date(userTimestamp);
+      const endTime = new Date(timestamp || "");
+      if (!Number.isNaN(startTime.getTime()) && !Number.isNaN(endTime.getTime()) && endTime > startTime) {
+        const seconds = Math.round((endTime.getTime() - startTime.getTime()) / 1000);
+        const duration = document.createElement("span");
+        duration.textContent = `耗时 ${seconds}s`;
+        meta.appendChild(duration);
+      }
+    }
+    const promptTokensValue = asFiniteNumber(promptTokens, 0);
+    const completionTokensValue = asFiniteNumber(completionTokens, 0);
+    const cacheTokensValue = asFiniteNumber(cacheReadTokens, 0);
+    if (asFiniteNumber(tokenTotal) > 0) {
+      const token = document.createElement("span");
+      const parts = [
+        `${formatTokens(tokenTotal)} tokens`,
+        promptTokensValue > 0 ? `入 ${formatTokens(promptTokensValue)}` : "",
+        completionTokensValue > 0 ? `出 ${formatTokens(completionTokensValue)}` : "",
+        cacheTokensValue > 0 ? `缓存 ${formatTokens(cacheTokensValue)}` : "",
+      ].filter(Boolean);
+      token.textContent = `${tokenEstimated ? "约 " : ""}${parts.join(" · ")}`;
+      meta.appendChild(token);
+      // 本次调用的费用估算（按用量页单价表；无配置时按默认价）
+      if (!tokenEstimated && (promptTokensValue > 0 || completionTokensValue > 0)) {
+        const rate = billingRate(providerId || "");
+        const callCost =
+          (promptTokensValue * asFiniteNumber(rate.input, 0) +
+            completionTokensValue * asFiniteNumber(rate.output, 0) +
+            cacheTokensValue * asFiniteNumber(rate.cache_read, 0)) / 1e6;
+        if (callCost > 0) {
+          const cost = document.createElement("span");
+          cost.className = "assistant-meta-cost";
+          cost.textContent = fmtCost(callCost);
+          cost.title = "本次调用的估算费用";
+          meta.appendChild(cost);
+        }
+      }
+    }
+    if (!activeContext) {
+      const contextBadge = document.createElement("span");
+      contextBadge.className = "context-state-badge";
+      contextBadge.textContent = "已移出当前上下文";
+      meta.appendChild(contextBadge);
+    }
+    const copyValue = String(content || "").trim() || String(reasoning || "");
+    if (copyValue) {
+      const spacer = document.createElement("span");
+      spacer.className = "meta-spacer";
+      meta.append(spacer, makeCopyButton(copyValue, "复制回复"));
+      meta.appendChild(makeSpeakButton(copyValue));
+    }
+    if (meta.childNodes.length) article.appendChild(meta);
+    return article;
+  }
+
+  function createAnsweredQuestionCard(exchange, compact = true) {
+    const card = document.createElement("section");
+    card.className = "answered-question-card";
+    if (compact) card.classList.add("is-compact");
+    const header = document.createElement("header");
+    const icon = document.createElement("span");
+    icon.className = "question-icon";
+    icon.appendChild(makeIconSlot("check"));
+    const copy = document.createElement("div");
+    const status = document.createElement("small");
+    status.textContent = "已回答";
+    const title = document.createElement("strong");
+    const questions = Array.isArray(exchange?.questions) ? exchange.questions : [];
+    title.textContent = questions.length === 1 ? String(questions[0]?.header || "补充确认") : `${questions.length} 项补充确认`;
+    copy.append(status, title);
+    header.append(icon, copy);
+    const list = document.createElement("dl");
+    list.className = "answered-question-list";
+    const answers = Array.isArray(exchange?.answers) ? exchange.answers : [];
+    questions.forEach((question, index) => {
+      const row = document.createElement("div");
+      const term = document.createElement("dt");
+      term.textContent = String(question?.question || question?.header || `问题 ${index + 1}`);
+      const description = document.createElement("dd");
+      const selected = Array.isArray(answers[index]) ? answers[index] : [];
+      description.textContent = selected.map(String).join("、") || "未记录";
+      row.append(term, description);
+      list.appendChild(row);
+    });
+    card.append(header, list);
+    return card;
+  }
+
+  function createPersistedQuestion(exchange, turnId) {
+    const wrapper = document.createElement("article");
+    wrapper.className = "persisted-question-wrap";
+    if (turnId) wrapper.dataset.turnId = turnId;
+    wrapper.appendChild(createAnsweredQuestionCard(exchange));
+    return wrapper;
+  }
+
+  function createTurnStatus(turn) {
+    const status = document.createElement("div");
+    status.className = "turn-status-line";
+    status.dataset.turnStatus = String(turn?.id || "");
+    const isInterrupted = turn?.status === "interrupted";
+    status.classList.toggle("is-interrupted", isInterrupted);
+    status.appendChild(makeIconSlot(isInterrupted ? "circle-alert" : "loader-circle"));
+    const text = document.createElement("span");
+    text.textContent = isInterrupted ? "本轮已中断" : "本轮正在运行";
+    status.appendChild(text);
+    if (asFiniteNumber(turn?.token_total) > 0) {
+      const usage = document.createElement("span");
+      usage.textContent = `${turn.token_usage_estimated ? "约 " : ""}${formatTokens(turn.token_total)} tokens`;
+      status.appendChild(usage);
+    }
+    if (turn?.active_context === false) {
+      const context = document.createElement("span");
+      context.className = "context-state-badge";
+      context.textContent = "已移出当前上下文";
+      status.appendChild(context);
+    }
+    return status;
+  }
+
+  function renderPersistedTurn(turn, isLast = false) {
+    const turnId = String(turn?.id || "");
+    const userAssets = Array.isArray(turn?.assets)
+      ? turn.assets.filter((asset) => String(asset?.source || "tool") === "user")
+      : [];
+    const status = String(turn?.status || "");
+    // 可重试：最新轮 / 失败 / 中断 / 完成但无实质输出（思考后无正文的占位回复）
+    const assistantOut = String(turn?.assistant_content || "").trim();
+    const reasoningOnly = status === "completed" && !assistantOut;
+    const retryable = isLast || status === "interrupted" || status === "failed" || reasoningOnly;
+    elements.timeline.appendChild(createUserMessage(turn?.user_content || "", turn?.user_timestamp, { turnId, assets: userAssets, retryable }));
+
+    const exchanges = Array.isArray(turn?.question_exchanges) ? turn.question_exchanges : [];
+    for (const exchange of exchanges) elements.timeline.appendChild(createPersistedQuestion(exchange, turnId));
+
+    const followups = Array.isArray(turn?.followups) ? turn.followups : [];
+    for (const followup of followups) {
+      const precedingContent = String(followup?.preceding_assistant_content || "");
+      const precedingReasoning = String(followup?.preceding_assistant_reasoning || "");
+      if (precedingContent.trim() || precedingReasoning.trim()) {
+        elements.timeline.appendChild(createAssistantMessage({
+          content: precedingContent,
+          reasoning: precedingReasoning,
+          providerId: followup?.provider_id,
+          model: followup?.model,
+          timestamp: followup?.submitted_at,
+          turnId,
+          activeContext: turn?.active_context !== false,
+          collapsible: true
+        }));
+      }
+      elements.timeline.appendChild(createUserMessage(followup?.content || "", followup?.submitted_at, {
+        turnId,
+        followupId: String(followup?.id || "")
+      }));
+    }
+
+    const assistantContent = String(turn?.assistant_content || "");
+    const assistantReasoning = String(turn?.assistant_reasoning || "");
+    const assets = turn?.status === "running" ? [] : (Array.isArray(turn?.assets) ? turn.assets : []);
+    if (assistantContent.trim() || assistantReasoning.trim() || assets.length) {
+      elements.timeline.appendChild(createAssistantMessage({
+        content: assistantContent,
+        reasoning: assistantReasoning,
+        providerId: turn?.provider_id,
+        model: turn?.model,
+        assets,
+        timestamp: turn?.assistant_timestamp,
+        tokenTotal: turn?.token_total,
+        tokenEstimated: Boolean(turn?.token_usage_estimated),
+        activeContext: turn?.active_context !== false,
+        turnId,
+        muted: turn?.active_context === false,
+        collapsible: true,
+        userTimestamp: turn?.user_timestamp,
+        promptTokens: turn?.prompt_tokens,
+        completionTokens: turn?.completion_tokens,
+        cacheReadTokens: turn?.cache_read_tokens
+      }));
+    }
+    if (turn?.status === "running" || turn?.status === "interrupted") elements.timeline.appendChild(createTurnStatus(turn));
+    else if (!assistantContent.trim() && !assistantReasoning.trim() && (asFiniteNumber(turn?.token_total) > 0 || turn?.active_context === false)) {
+      const metadata = createTurnStatus({ ...turn, status: "completed" });
+      metadata.querySelector("span:nth-child(2)").textContent = "本轮已完成";
+      metadata.querySelector(".icon-slot").replaceChildren(createIcon("check"));
+      elements.timeline.appendChild(metadata);
+    }
+  }
+
+  function renderConversation() {
+    elements.loadingState.hidden = true;
+    elements.blockedState.hidden = true;
+    clearQuestionDock();
+    elements.timeline.replaceChildren();
+    const viewing = state.viewingChannel || state.viewingConversation;
+    const turnsSource = viewing ? state.viewedTurns : state.turns;
+    const turns = [...turnsSource].sort((left, right) => asFiniteNumber(left?.seq) - asFiniteNumber(right?.seq));
+    if (viewing) state.viewedTurns = turns;
+    else state.turns = turns;
+    if (turns.length === 0) {
+      elements.timeline.hidden = true;
+      elements.emptyState.hidden = false;
+      if (viewing) {
+        const note = elements.emptyState.querySelector("p");
+        if (note) note.textContent = viewingLabel(viewing) + "还没有消息";
+      }
+    } else {
+      elements.emptyState.hidden = true;
+      elements.timeline.hidden = false;
+      // 分批渲染：几百轮历史一次全量渲染会阻塞主线程（长任务），
+      // 每帧一批（rAF 分帧），首帧立即可见，长对话切换不再卡顿。
+      const BATCH = 15;
+      let index = 0;
+      let previousDay = null;
+      let lastDividerDay = null;
+      // 渲染令牌：重载/切会话会再次调用 renderConversation（timeline 被清空），
+      // 旧批次排队的 rAF 回调必须自我废弃，不能往新 timeline 续写旧数据。
+      const renderToken = (state.renderToken = (state.renderToken || 0) + 1);
+      const renderBatch = () => {
+        if (state.renderToken !== renderToken) return;
+        const end = Math.min(index + BATCH, turns.length);
+        for (let i = index; i < end; i += 1) {
+          const turn = turns[i];
+          const currentDay = dayKey(turn?.user_timestamp);
+          if (currentDay !== previousDay) {
+            if (lastDividerDay !== currentDay) {
+              elements.timeline.appendChild(createDayDivider(turn?.user_timestamp));
+              lastDividerDay = currentDay;
+            }
+            previousDay = currentDay;
+          }
+          renderPersistedTurn(turn, i === turns.length - 1);
+        }
+        index = end;
+        if (index < turns.length) {
+          window.requestAnimationFrame(renderBatch);
+          return;
+        }
+        updateConversationChrome();
+        // 浏览历史会话/通道：保持当前滚动位置（从头看）；
+        // 当前对话重载：滚到底部。
+        if (viewing) {
+          state.nearBottom = false;
+          state.followOutput = false;
+          elements.jumpBottomButton.hidden = false;
+        } else {
+          state.nearBottom = true;
+          state.followOutput = true;
+          elements.jumpBottomButton.hidden = true;
+          window.requestAnimationFrame(() => {
+            elements.chatScroll.scrollTop = elements.chatScroll.scrollHeight;
+          });
+        }
+      };
+      renderBatch();
+      return;
+    }
+    state.nearBottom = true;
+    state.followOutput = true;
+    elements.jumpBottomButton.hidden = true;
+    updateConversationChrome();
+  }
+
+  function viewingLabel(viewing) {
+    if (viewing === state.viewingChannel && state.viewingChannel) return `${channelLabel(state.viewingChannel)} 通道`;
+    if (viewing === state.viewingConversation && state.viewingConversation) return "该历史对话";
+    return "";
+  }
+
+  // 原 createChannelViewBanner 已移除：历史会话/通道的状态与退出入口移到顶栏
+  // （conversationTitle/Meta + exitViewButton），消息流保持干净。
+
+  function createLiveState(runId, options = {}) {
+    return {
+      runId,
+      turnId: options.turnId || null,
+      userText: options.userText || "",
+      startedAt: options.startedAt || new Date(),
+      userRendered: Boolean(options.userRendered),
+      article: null,
+      blocks: null,
+      headerStatus: null,
+      meta: null,
+      endpoint: null,
+      copyButton: null,
+      currentText: null,
+      assistantText: "",
+      assistantReasoning: "",
+      assets: [],
+      reasoning: null,
+      reasoningParts: [],
+      reasoningStarted: false,
+      reasoningTitle: "",
+      reasoningTimer: null,
+      providerId: "",
+      model: "",
+      tools: new Map(),
+      questions: new Map(),
+      contextOperation: null,
+      ended: false
+    };
+  }
+
+  function renderQueueTray() {
+    const prompts = Array.isArray(state.queuedPrompts) ? state.queuedPrompts : [];
+    elements.queueTray.replaceChildren();
+    elements.queueTray.hidden = prompts.length === 0;
+    for (const prompt of prompts) {
+      const row = document.createElement("div");
+      row.className = "queue-item";
+      const text = document.createElement("span");
+      text.textContent = String(prompt?.content || "");
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "queue-remove";
+      remove.title = "移除排队消息";
+      remove.setAttribute("aria-label", "移除排队消息");
+      remove.appendChild(makeIconSlot("x"));
+      remove.addEventListener("click", () => removeQueuedPrompt(prompt.id));
+      row.append(text, remove);
+      elements.queueTray.appendChild(row);
+    }
+    updateControlState();
+  }
+
+  async function removeQueuedPrompt(promptId) {
+    if (!promptId) return;
+    try {
+      await apiRequest(`/api/queue/${encodeURIComponent(promptId)}`, { method: "DELETE" });
+      state.queuedPrompts = state.queuedPrompts.filter((prompt) => String(prompt?.id) !== String(promptId));
+      renderQueueTray();
+    } catch (error) {
+      showToast(error.message || "排队消息移除失败", "error");
+      if (error.status === 404) await loadBootstrap();
+    }
+  }
+
+  function disposeLiveState(live) {
+    if (!live) return;
+    if (live.reasoningTimer) {
+      window.clearInterval(live.reasoningTimer);
+      live.reasoningTimer = null;
+    }
+    if (live.currentText?.renderFrame) {
+      window.cancelAnimationFrame(live.currentText.renderFrame);
+      live.currentText.renderFrame = null;
+    }
+    for (const tool of live.tools?.values?.() || []) {
+      if (tool.collapseTimer) window.clearTimeout(tool.collapseTimer);
+      tool.collapseTimer = null;
+    }
+  }
+
+  function establishRun(runId) {
+    if (!runId) return null;
+    if (state.live?.runId === runId) return state.live;
+    if (state.activeRunId && state.activeRunId !== runId) return null;
+    state.activeRunId = runId;
+    state.cancellationRequested = false;
+    const runningTurn = [...state.turns].reverse().find((turn) => turn?.status === "running");
+    state.live = createLiveState(runId, {
+      turnId: runningTurn?.id || null,
+      userText: runningTurn?.user_content || "",
+      startedAt: runningTurn?.user_timestamp || new Date(),
+      userRendered: Boolean(runningTurn)
+    });
+    updateConversationChrome();
+    updateRuntimeUsage();
+    updateControlState();
+    return state.live;
+  }
+
+  function ensureTimelineVisible() {
+    elements.loadingState.hidden = true;
+    elements.blockedState.hidden = true;
+    elements.emptyState.hidden = true;
+    elements.timeline.hidden = false;
+  }
+
+  function ensureLiveUser(content, runId, images = []) {
+    const live = establishRun(runId);
+    if (!live || live.userRendered) return;
+    const text = String(content || live.userText || "");
+    if (!text.trim() && images.length === 0) return;
+    live.userText = text;
+    ensureTimelineVisible();
+    appendDayDividerIfNeeded(new Date());
+    const message = createUserMessage(text, new Date(), { runId, images });
+    if (live.article?.isConnected) elements.timeline.insertBefore(message, live.article);
+    else elements.timeline.appendChild(message);
+    live.userArticle = message;
+    live.userRendered = true;
+    updateConversationChrome();
+    contentAdded();
+  }
+
+  function removeRunningStatus(turnId) {
+    if (!turnId) return;
+    const status = Array.from(elements.timeline.querySelectorAll("[data-turn-status]"))
+      .find((node) => node.dataset.turnStatus === String(turnId));
+    status?.remove();
+  }
+
+  function ensureLiveArticle(live) {
+    if (live.article) return live.article;
+    ensureTimelineVisible();
+    ensureLiveUser(live.userText, live.runId);
+    removeRunningStatus(live.turnId);
+    const article = document.createElement("article");
+    article.className = "message assistant-message live-assistant";
+    article.dataset.role = "assistant";
+    article.dataset.runId = live.runId;
+    article.classList.add("is-thinking");  // 流式回复期间头像呼吸
+    const header = document.createElement("header");
+    header.className = "assistant-label";
+    const avatar = document.createElement("img");
+    avatar.src = getAvatar("assistant") || "/assets/gqy-logo.png";
+    avatar.alt = "";
+    avatar.setAttribute("aria-hidden", "true");
+    const identity = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = "顾清影";
+    const status = document.createElement("span");
+    status.className = "live-indicator";
+    status.textContent = "正在回复";
+    identity.append(name, status);
+    header.append(avatar, identity);
+    const assistantContent = document.createElement("div");
+    assistantContent.className = "assistant-content";
+    const blocks = document.createElement("div");
+    blocks.className = "assistant-blocks";
+    assistantContent.appendChild(blocks);
+    const meta = document.createElement("div");
+    meta.className = "assistant-meta";
+    const endpoint = document.createElement("span");
+    endpoint.className = "assistant-endpoint";
+    endpoint.hidden = true;
+    const metaText = document.createElement("span");
+    metaText.textContent = "正在生成";
+    const spacer = document.createElement("span");
+    spacer.className = "meta-spacer";
+    const copy = makeCopyButton(() => live.assistantText, "复制回复");
+    copy.hidden = true;
+    meta.append(endpoint, metaText, spacer, copy);
+    article.append(header, assistantContent, meta);
+    elements.timeline.appendChild(article);
+    live.article = article;
+    live.blocks = blocks;
+    live.headerStatus = status;
+    live.meta = metaText;
+    live.endpoint = endpoint;
+    live.copyButton = copy;
+    contentAdded();
+    return article;
+  }
+
+  function breakLiveText(live) {
+    if (live.currentText) {
+      live.currentText.element.classList.remove("streaming");
+    }
+    live.currentText = null;
+    const finishedArticle = live.blocks?.closest(".assistant-message");
+    if (finishedArticle) finishedArticle.classList.remove("is-thinking");
+  }
+
+  function scheduleMarkdownRender(block) {
+    if (block.renderFrame) return;
+    block.renderFrame = window.requestAnimationFrame(() => {
+      block.renderFrame = null;
+      renderMarkdown(block.element, block.raw);
+      contentAdded();
+    });
+  }
+
+  function appendAssistantDelta(live, delta) {
+    const text = String(delta || "");
+    if (!text) return;
+    ensureLiveArticle(live);
+    if (!live.currentText) {
+      finalizeLiveReasoning(live);
+      if (live.meta) live.meta.textContent = "正在生成";
+      const element = document.createElement("div");
+      element.className = "markdown-body live-text-block";
+      const block = { element, raw: "", renderFrame: null };
+      live.blocks.appendChild(element);
+      live.currentText = block;
+      live.contextOperation = null;
+      if (live.assistantText && !/\s$/.test(live.assistantText)) live.assistantText += "\n\n";
+    }
+    live.currentText.element.classList.add("streaming");
+    live.currentText.raw += text;
+    live.assistantText += text;
+    live.copyButton.hidden = !live.assistantText.trim();
+    scheduleMarkdownRender(live.currentText);
+    updateContextFromLive(live);
+    contentAdded();
+  }
+
+  function updateContextFromLive(live) {
+    if (!live) return;
+    const baseline = asFiniteNumber(state.context?.tokens, 0);
+    let liveTokens = 0;
+    if (live.assistantText) liveTokens += Math.ceil(live.assistantText.length / 3);
+    const reasoningText = live.assistantReasoning || collectLiveReasoning(live);
+    if (reasoningText) liveTokens += Math.ceil(reasoningText.length / 2);
+    for (const tool of (live.tools || new Map()).values()) {
+      if (tool.stdoutDetail?.raw) liveTokens += Math.ceil(tool.stdoutDetail.raw.length / 3);
+      if (tool.stderrDetail?.raw) liveTokens += Math.ceil(tool.stderrDetail.raw.length / 3);
+      if (tool.progressDetail?.raw) liveTokens += Math.ceil(tool.progressDetail.raw.length / 4);
+    }
+    const windowSize = state.context?.window;
+    elements.contextNumbers.textContent = windowSize
+      ? `${formatTokens(baseline + liveTokens)} / ${formatTokens(windowSize)}`
+      : `${formatTokens(baseline + liveTokens)} / --`;
+    const percent = windowSize > 0 ? Math.min(100, Math.max(0, ((baseline + liveTokens) / windowSize) * 100)) : 0;
+    elements.contextBar.style.width = `${percent}%`;
+    elements.contextTrack.classList.toggle("is-high", percent >= 75 && percent < 90);
+    elements.contextTrack.classList.toggle("is-critical", percent >= 90);
+    elements.contextTrack.title = windowSize
+      ? `已用 ${formatTokens(baseline + liveTokens)} / ${formatTokens(windowSize)} · 剩余 ${formatTokens(Math.max(0, windowSize - baseline - liveTokens))}（${Math.round(percent)}%）${liveTokens > 0 ? ` · 本轮约 ${formatTokens(liveTokens)}` : ""}`
+      : `已用 ${formatTokens(baseline + liveTokens)} tokens${liveTokens > 0 ? ` · 本轮约 ${formatTokens(liveTokens)}` : ""}`;
+  }
+
+  function ensureLiveReasoning(live) {
+    ensureLiveArticle(live);
+    if (live.reasoning) return live.reasoning;
+    breakLiveText(live);
+    live.contextOperation = null;
+    const mode = reasoningDisplayMode();
+    const reasoning = createReasoningBlock("", "正在思考", true, mode === "summary");
+    reasoning.pendingTitle = normalizeReasoningTitle(live.reasoningTitle);
+    if (mode !== "hidden") {
+      live.blocks.appendChild(reasoning.element);
+      // 思考中：头像呼吸动画（顾清影「带着头像思考」）
+      const article = live.blocks.closest(".assistant-message");
+      if (article) article.classList.add("is-thinking");
+    }
+    live.reasoning = reasoning;
+    live.reasoningParts.push(reasoning);
+  if (live.reasoningTimer) window.clearInterval(live.reasoningTimer);
+  const updateProgress = () => {
+    if (!reasoning.liveStatus || reasoning.startedAt == null) return;
+    const elapsed = Math.max(0, Math.floor((performance.now() - reasoning.startedAt) / 1000));
+    const chars = reasoning.raw ? formatInteger(reasoning.raw.length) : "0";
+    if (reasoning.liveStatus.querySelector(".reasoning-chars")) {
+      reasoning.liveStatus.querySelector(".reasoning-chars").textContent = `${chars} 字`;
+    } else {
+      const charsNode = document.createElement("span");
+      charsNode.className = "reasoning-chars";
+      charsNode.textContent = `${chars} 字`;
+      reasoning.liveStatus.appendChild(charsNode);
+    }
+    reasoning.liveStatus.childNodes[0].textContent = `正在思考 · ${elapsed}s `;
+  };
+    updateProgress();
+    live.reasoningTimer = window.setInterval(updateProgress, 1000);
+    return reasoning;
+  }
+
+  function collectLiveReasoning(live) {
+    return (live.reasoningParts || [])
+      .map((part) => String(part.raw || "").trim())
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  function finalizeLiveReasoning(live) {
+    const reasoning = live.reasoning;
+    if (!reasoning) return;
+    const article = live.blocks?.closest(".assistant-message");
+    if (article) article.classList.remove("is-thinking");
+    if (live.reasoningTimer) {
+      window.clearInterval(live.reasoningTimer);
+      live.reasoningTimer = null;
+    }
+    const parsed = splitReasoningText(reasoning.raw);
+    const title = "已思考";
+    reasoning.raw = parsed.body;
+    reasoning.finished = true;
+    if (!reasoning.raw.trim() && title === "已思考") {
+      reasoning.element.remove();
+    } else {
+      reasoning.title.textContent = title;
+      reasoning.body.textContent = reasoning.raw;
+      if (reasoning.progress) reasoning.progress.remove();
+      if (reasoning.liveStatus) reasoning.liveStatus.remove();
+      if (!reasoning.userToggled) reasoning.element.open = true;
+    }
+    live.reasoning = null;
+    live.reasoningTitle = "";
+    live.reasoningStarted = false;
+    live.assistantReasoning = collectLiveReasoning(live);
+  }
+
+  function handleReasoningEvent(name, live, data) {
+    if (name === "reasoning.start") {
+      finalizeLiveReasoning(live);
+      live.reasoningStarted = true;
+      breakLiveText(live);
+      ensureLiveReasoning(live);
+      if (live.meta) live.meta.textContent = "正在思考";
+      return;
+    }
+    if (name === "reasoning.part_start") {
+      finalizeLiveReasoning(live);
+      live.reasoningStarted = true;
+      breakLiveText(live);
+      ensureLiveReasoning(live);
+      if (live.meta) live.meta.textContent = "正在思考";
+      return;
+    }
+    if (name === "reasoning.reset") {
+      if (live.reasoning) {
+        live.reasoning.raw = "";
+        live.reasoning.body.textContent = "";
+        live.reasoning.pendingTitle = "";
+      }
+      return;
+    }
+    if (name === "reasoning.title") {
+      live.reasoningTitle = String(data?.title || "").trim();
+      const reasoning = ensureLiveReasoning(live);
+      reasoning.pendingTitle = normalizeReasoningTitle(live.reasoningTitle);
+      return;
+    }
+    if (name === "reasoning.delta") {
+      const delta = String(data?.delta || "");
+      if (!delta) return;
+      const reasoning = ensureLiveReasoning(live);
+      reasoning.raw += delta;
+      reasoning.body.textContent = reasoning.raw;
+      live.assistantReasoning = collectLiveReasoning(live);
+      updateContextFromLive(live);
+      contentAdded();
+      return;
+    }
+    if (name === "reasoning.part_end") {
+      finalizeLiveReasoning(live);
+    }
+  }
+
+  function prettyArguments(value) {
+    if (value == null) return "";
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!trimmed) return "";
+      try {
+        return JSON.stringify(JSON.parse(trimmed), null, 2);
+      } catch (_) {
+        return value;
+      }
+    }
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch (_) {
+      return String(value);
+    }
+  }
+
+  function parsedToolArguments(value) {
+    if (value && typeof value === "object" && !Array.isArray(value)) return value;
+    if (typeof value !== "string" || !value.trim()) return {};
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function compactLine(value, limit = 92) {
+    const line = String(value || "").replace(/\s+/g, " ").trim();
+    if (line.length <= limit) return line;
+    return `${line.slice(0, Math.max(1, limit - 1))}…`;
+  }
+
+  function compactPath(value) {
+    const path = String(value || "").trim();
+    if (!path) return "";
+    return path.split(/[\\/]/).filter(Boolean).pop() || path;
+  }
+
+  function toolSubject(name, value) {
+    const args = parsedToolArguments(value);
+    const toolName = String(name || "");
+    if (toolName === "run_command") return compactLine(args.command || args.cmd);
+    if (["read", "write", "edit", "apply_patch", "print_image", "vision_analyze"].includes(toolName)) {
+      return compactPath(args.filePath || args.file_path || args.path || args.image);
+    }
+    if (toolName === "grep") {
+      const target = compactPath(args.path);
+      return compactLine(`${args.pattern || ""}${target ? ` · ${target}` : ""}`);
+    }
+    if (toolName === "glob") return compactLine(`${args.pattern || ""}${args.path ? ` · ${compactPath(args.path)}` : ""}`);
+    if (["webfetch", "web_fetch"].includes(toolName)) return compactLine(args.url);
+    if (["web_search", "search_web", "search_web_images"].includes(toolName)) return compactLine(args.query || args.q);
+    if (toolName === "generate_image") return compactLine(args.prompt);
+    if (toolName === "task") return compactLine(args.description || args.prompt);
+    if (toolName === "load_skill") return compactLine(args.name);
+    const preferred = ["query", "command", "path", "filePath", "url", "name", "id", "target"];
+    for (const key of preferred) {
+      if (typeof args[key] === "string" && args[key].trim()) return compactLine(args[key]);
+    }
+    return "";
+  }
+
+  function countToolOutputLines(tool) {
+    const streamed = `${tool.stdoutDetail.raw || ""}${tool.stderrDetail.raw || ""}`;
+    const output = streamed.trim() ? streamed : tool.resultDetail.raw || "";
+    const normalized = output.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n+$/, "");
+    return normalized ? normalized.split("\n").length : 0;
+  }
+
+  function formatToolDuration(milliseconds) {
+    if (!Number.isFinite(milliseconds) || milliseconds < 0) return "";
+    if (milliseconds < 1_000) return `${Math.max(1, Math.round(milliseconds))} ms`;
+    if (milliseconds < 10_000) return `${(milliseconds / 1_000).toFixed(1)} s`;
+    return `${Math.round(milliseconds / 1_000)} s`;
+  }
+
+  function updateToolSummary(tool) {
+    const details = [];
+    if (tool.subject) details.push(tool.subject);
+    if (tool.imageCount) details.push(`${tool.imageCount} 张图片`);
+    const lines = countToolOutputLines(tool);
+    if (lines) details.push(`${lines} 行输出`);
+    if (tool.finishedAt != null) details.push(formatToolDuration(tool.finishedAt - tool.startedAt));
+    tool.summary.textContent = details.filter(Boolean).join(" · ") || (tool.finished ? "无输出" : "等待输出");
+  }
+
+  function scrollToolOutputToEnd(tool) {
+    for (const detail of [tool.stdoutDetail, tool.stderrDetail, tool.resultDetail]) {
+      if (!detail.wrapper.hidden) detail.content.scrollTop = detail.content.scrollHeight;
+    }
+  }
+
+  function boundedAppend(current, addition) {
+    const combined = `${current || ""}${addition || ""}`;
+    if (combined.length <= MAX_TOOL_OUTPUT_CHARS) return combined;
+    return `[较早输出已省略]\n${combined.slice(combined.length - MAX_TOOL_OUTPUT_CHARS)}`;
+  }
+
+  function createToolDetail(labelText, preformatted = false) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "tool-detail";
+    wrapper.hidden = true;
+    const label = document.createElement("span");
+    label.className = "tool-detail-label";
+    label.textContent = labelText;
+    const content = document.createElement(preformatted ? "pre" : "p");
+    wrapper.append(label, content);
+    return { wrapper, content, raw: "" };
+  }
+
+  function updateToolStatus(tool, status, iconName, statusClass = "") {
+    tool.statusText.textContent = status;
+    tool.statusIcon.replaceChildren(createIcon(iconName));
+    tool.statusIcon.classList.toggle("is-spinning", iconName === "loader-circle");
+    tool.card.classList.remove("is-success", "is-failure");
+    if (statusClass) tool.card.classList.add(statusClass);
+  }
+
+  function createTool(live, data) {
+    ensureLiveArticle(live);
+    breakLiveText(live);
+    finalizeLiveReasoning(live);
+    live.contextOperation = null;
+    const toolId = String(data?.tool_id || `${live.runId}_tool_unknown_${live.tools.size + 1}`);
+    if (live.tools.has(toolId)) return live.tools.get(toolId);
+    const card = document.createElement("section");
+    card.className = "tool-card collapsed";
+    card.dataset.toolId = toolId;
+    const head = document.createElement("button");
+    head.className = "tool-head";
+    head.type = "button";
+    head.setAttribute("aria-expanded", "false");
+    const icon = document.createElement("span");
+    icon.className = "tool-icon";
+    icon.appendChild(makeIconSlot("wrench"));
+    const title = document.createElement("span");
+    title.className = "tool-title";
+    // 视觉识别包装成工具事件（后端 describe 阶段发出），给它一个可读显示名
+    const rawToolName = String(data?.name || "");
+    const humanToolLabel = rawToolName === "vision_analyze"
+      ? "识图"
+      : (data?.display_name || rawToolName || "工具");
+    const displayName = document.createElement("strong");
+    displayName.textContent = humanToolLabel;
+    const realName = document.createElement("small");
+    realName.className = "tool-technical-name";
+    realName.textContent = rawToolName;
+    // readable_tool_names=false：主标题改技术名，去掉小字（曾长期不消费此配置）
+    if (state.display?.readable_tool_names === false) {
+      displayName.textContent = rawToolName || "工具";
+      realName.hidden = true;
+    }
+    const summary = document.createElement("small");
+    summary.className = "tool-summary";
+    title.append(displayName, realName, summary);
+    const status = document.createElement("span");
+    status.className = "tool-status";
+    const statusIcon = makeIconSlot("loader-circle", "is-spinning");
+    const statusText = document.createElement("span");
+    statusText.textContent = "运行中";
+    status.append(statusIcon, statusText);
+    const chevron = makeIconSlot("chevron-down", "tool-chevron");
+    head.append(icon, title, status, chevron);
+    const body = document.createElement("div");
+    body.className = "tool-body";
+    const argumentsDetail = createToolDetail("参数", true);
+  const progressDetail = createToolDetail("进度");
+  const progressBar = document.createElement("div");
+  progressBar.className = "tool-progress-bar";
+  progressBar.hidden = true;
+  const progressBarFill = document.createElement("i");
+  progressBar.appendChild(progressBarFill);
+  const stdoutDetail = createToolDetail("命令输出", true);
+    const stderrDetail = createToolDetail("错误输出", true);
+    stderrDetail.wrapper.classList.add("is-stderr");
+    const resultDetail = createToolDetail("结果", true);
+    const argumentText = prettyArguments(data?.arguments);
+    if (argumentText) {
+      argumentsDetail.raw = argumentText;
+      argumentsDetail.content.textContent = argumentText;
+      argumentsDetail.wrapper.hidden = false;
+    }
+    const rerunButton = document.createElement("button");
+    rerunButton.type = "button";
+    rerunButton.className = "tool-rerun-button";
+    rerunButton.textContent = "重跑";
+    rerunButton.hidden = true;
+    rerunButton.title = "重新执行这个工具";
+  body.append(
+    argumentsDetail.wrapper,
+    progressBar,
+    progressDetail.wrapper,
+    stdoutDetail.wrapper,
+    stderrDetail.wrapper,
+      resultDetail.wrapper,
+      rerunButton
+    );
+    card.append(head, body);
+    const tool = {
+      id: toolId,
+      name: String(data?.name || ""),
+      rawName: String(data?.name || ""),
+      toolArgs: data?.arguments || "",
+      rerunButton,
+      card,
+      head,
+      body,
+      status,
+      statusIcon,
+      statusText,
+      summary,
+      argumentsDetail,
+      progressDetail,
+      progressBar,
+      stdoutDetail,
+      stderrDetail,
+      resultDetail,
+      subject: toolSubject(data?.name, data?.arguments),
+      startedAt: performance.now(),
+      finishedAt: null,
+      imageCount: 0,
+      finished: false,
+      collapseTimer: null
+    };
+    head.addEventListener("click", () => {
+      const collapsed = card.classList.toggle("collapsed");
+      head.setAttribute("aria-expanded", String(!collapsed));
+      if (!collapsed) {
+        window.requestAnimationFrame(() => {
+          scrollToolOutputToEnd(tool);
+          contentAdded();
+        });
+      }
+    });
+    updateToolSummary(tool);
+    live.tools.set(toolId, tool);
+    // 隐藏模式：卡片对象照常构建/注册（进度、结果、图生图资产等状态完整），
+    // 只是不挂进 DOM —— 工具照跑，界面像人直接说话，不露后台过程。
+    if (toolCallDisplayMode() !== "hidden") {
+      live.blocks.appendChild(card);
+      contentAdded();
+    }
+    return tool;
+  }
+
+  function ensureTool(live, data) {
+    const toolId = String(data?.tool_id || "");
+    return (toolId && live.tools.get(toolId)) || createTool(live, data);
+  }
+
+  function handleToolEvent(name, live, data) {
+    if (name === "tool.started") {
+      createTool(live, data);
+      return;
+    }
+    const tool = ensureTool(live, data);
+    if (name === "tool.image") {
+      const asset = data?.asset && typeof data.asset === "object" ? data.asset : null;
+      if (asset && safeAssetUrl(asset.url)) {
+        const assetId = String(asset.id || asset.url);
+        if (!live.assets.some((item) => String(item?.id || item?.url) === assetId)) {
+          ensureLiveArticle(live);
+          breakLiveText(live);
+          finalizeLiveReasoning(live);
+          live.contextOperation = null;
+          live.assets.push(asset);
+          live.blocks.appendChild(createConversationMedia(asset, { eager: true, emotion: data?.emotion, action: data?.action }));
+          tool.imageCount += 1;
+        }
+      } else if (data?.error) {
+        const message = String(data.error);
+        tool.progressDetail.raw = message;
+        tool.progressDetail.content.textContent = message;
+        tool.progressDetail.wrapper.hidden = false;
+      }
+      updateToolSummary(tool);
+    } else if (name === "tool.progress") {
+      const message = String(data?.message || "");
+      if (message) {
+        tool.progressDetail.raw = tool.progressDetail.raw
+          ? boundedAppend(tool.progressDetail.raw, `\n${message}`)
+          : message;
+        tool.progressDetail.content.textContent = tool.progressDetail.raw;
+        tool.progressDetail.wrapper.hidden = false;
+        if (tool.progressDetail.wrapper.scrollTop > 0) {
+          tool.progressDetail.wrapper.scrollTop = tool.progressDetail.wrapper.scrollHeight;
+        }
+      }
+      if (tool.progressBar) {
+        tool.progressBar.hidden = false;
+        const pct = data?.progress != null ? Math.min(100, Math.max(0, Number(data.progress) || 0)) : null;
+        if (pct != null) {
+          tool.progressBar.querySelector("i").style.width = `${pct}%`;
+        }
+      }
+      if (!tool.subject && message) tool.subject = compactLine(message);
+      updateToolStatus(tool, "运行中", "loader-circle");
+      updateToolSummary(tool);
+    } else if (name === "tool.output") {
+      const detail = data?.stream === "stderr" ? tool.stderrDetail : tool.stdoutDetail;
+      detail.raw = boundedAppend(detail.raw, String(data?.output || ""));
+      detail.content.textContent = detail.raw;
+      detail.wrapper.hidden = !detail.raw;
+      if (!tool.card.classList.contains("collapsed")) detail.content.scrollTop = detail.content.scrollHeight;
+      updateToolSummary(tool);
+    } else if (name === "tool.finished") {
+      tool.finished = true;
+      tool.finishedAt = performance.now();
+      const output = String(data?.output || "");
+      const truncated = output.length > MAX_TOOL_OUTPUT_CHARS;
+      tool.resultDetail.raw = truncated ? `[较早输出已省略]\n${output.slice(-MAX_TOOL_OUTPUT_CHARS)}` : output;
+      tool.resultDetail.content.textContent = tool.resultDetail.raw;
+      tool.resultDetail.wrapper.hidden = !tool.resultDetail.raw;
+      if (truncated && tool.resultDetail.wrapper) {
+        let badge = tool.resultDetail.wrapper.querySelector(".tool-truncation-badge");
+        if (!badge) {
+          badge = document.createElement("div");
+          badge.className = "tool-truncation-badge";
+          badge.textContent = `输出过长，仅显示末尾 ${formatTokens(MAX_TOOL_OUTPUT_CHARS)} 字符`;
+          tool.resultDetail.wrapper.insertBefore(badge, tool.resultDetail.wrapper.firstChild);
+        }
+      }
+      const ok = Boolean(data?.ok);
+      if (tool.progressBar) tool.progressBar.hidden = true;
+      // 平滑图标切换：spinner 淡出 → check 淡入
+      if (tool.statusIcon) {
+        const iconEl = tool.statusIcon.querySelector(".icon-slot");
+        if (iconEl) {
+          iconEl.classList.add("is-swapping-out");
+          setTimeout(() => {
+            updateToolStatus(tool, ok ? "完成" : "失败", ok ? "check" : "circle-alert",
+                            ok ? "is-success" : "is-failure");
+          }, 120);
+        } else {
+          updateToolStatus(tool, ok ? "完成" : "失败", ok ? "check" : "circle-alert",
+                          ok ? "is-success" : "is-failure");
+        }
+      } else {
+        updateToolStatus(tool, ok ? "完成" : "失败", ok ? "check" : "circle-alert",
+                        ok ? "is-success" : "is-failure");
+      }
+      updateToolSummary(tool);
+      // 绿闪动画
+      tool.card.classList.add(ok ? "flash-complete" : "flash-fail");
+      setTimeout(() => {
+        tool.card.classList.remove("flash-complete", "flash-fail");
+        tool.card.classList.add("collapsed");
+        tool.head.setAttribute("aria-expanded", "false");
+      }, ok ? 600 : 700);
+      if (tool.rawName.startsWith("gqy_") && tool.toolArgs && tool.rerunButton) {
+        tool.rerunButton.hidden = false;
+        tool.rerunButton.onclick = () => rerunTool(tool, tool.rerunButton);
+      }
+    }
+    updateContextFromLive(live);
+    contentAdded();
+  }
+
+  // 一键重跑工具：gqy_ 前缀剥掉，经 /api/tools/call 走 GQY 注册表执行
+  async function rerunTool(tool, button) {
+    const gqyName = tool.rawName.replace(/^gqy_/, "");
+    if (!gqyName) return;
+    let args = {};
+    try {
+      args = tool.toolArgs ? JSON.parse(tool.toolArgs) : {};
+    } catch (_) {
+      args = {};
+    }
+    button.disabled = true;
+    button.textContent = "重跑中…";
+    tool.card.classList.remove("collapsed");
+    tool.head.setAttribute("aria-expanded", "true");
+    tool.resultDetail.raw = "";
+    tool.resultDetail.content.textContent = "重跑中…";
+    tool.resultDetail.wrapper.hidden = false;
+    updateToolStatus(tool, "重跑中", "loader-circle");
+    try {
+      const response = await apiRequest("/api/tools/call", {
+        method: "POST",
+        body: JSON.stringify({ name: gqyName, arguments: args }),
+      });
+      const data = await response.json();
+      const output = String(data?.output || (data?.ok ? "" : data?.error || "执行失败"));
+      tool.resultDetail.raw = output.length > MAX_TOOL_OUTPUT_CHARS ? `[较早输出已省略]\n${output.slice(-MAX_TOOL_OUTPUT_CHARS)}` : output;
+      tool.resultDetail.content.textContent = tool.resultDetail.raw;
+      tool.resultDetail.wrapper.hidden = !tool.resultDetail.raw;
+      updateToolStatus(tool, data?.ok ? "重跑完成" : "重跑失败", data?.ok ? "check" : "circle-alert", data?.ok ? "is-success" : "is-failure");
+    } catch (error) {
+      tool.resultDetail.raw = `重跑失败：${error.message || error}`;
+      tool.resultDetail.content.textContent = tool.resultDetail.raw;
+      tool.resultDetail.wrapper.hidden = false;
+      updateToolStatus(tool, "重跑失败", "circle-alert", "is-failure");
+    } finally {
+      button.disabled = false;
+      button.textContent = "重跑";
+    }
+  }
+
+  function updateQuestionOptionClasses(questionState) {
+    for (const control of questionState.controls) {
+      for (const option of control.options) option.label.classList.toggle("selected", option.input.checked);
+      if (control.custom) control.custom.wrapper.classList.toggle("selected", control.custom.toggle.checked);
+    }
+    questionState.pageTabs?.forEach((tab, index) => {
+      const control = questionState.controls[index];
+      const answered = control.options.some((option) => option.input.checked)
+        || Boolean(control.custom?.toggle.checked && control.custom.textarea.value.trim());
+      tab.classList.toggle("is-complete", answered);
+    });
+  }
+
+  function updateQuestionDock() {
+    elements.questionDock.hidden = elements.questionDock.childElementCount === 0;
+    window.requestAnimationFrame(updateJumpButtonOffset);
+  }
+
+  function clearQuestionDock() {
+    elements.questionDock.replaceChildren();
+    updateQuestionDock();
+  }
+
+  function moveQuestionToTimeline(questionState) {
+    if (questionState.card.parentElement !== elements.questionDock) return;
+    if (questionState.timelineParent?.isConnected) questionState.timelineParent.appendChild(questionState.card);
+    else questionState.card.remove();
+    updateQuestionDock();
+  }
+
+  function removeQuestionFromDock(questionState) {
+    if (questionState.card.parentElement === elements.questionDock) questionState.card.remove();
+    updateQuestionDock();
+  }
+
+  function setQuestionPage(questionState, index, { focus = false } = {}) {
+    if (!questionState?.pages?.length) return;
+    const lastIndex = questionState.pages.length - 1;
+    const nextIndex = Math.max(0, Math.min(lastIndex, Number(index) || 0));
+    questionState.pageIndex = nextIndex;
+    questionState.pages.forEach((page, pageIndex) => {
+      page.hidden = pageIndex !== nextIndex;
+    });
+    questionState.pageTabs.forEach((tab, pageIndex) => {
+      const active = pageIndex === nextIndex;
+      tab.classList.toggle("active", active);
+      tab.setAttribute("aria-selected", String(active));
+      tab.tabIndex = active ? 0 : -1;
+    });
+    const multiple = Boolean(questionState.questions[nextIndex]?.multiple);
+    questionState.pageLabel.textContent = `第 ${nextIndex + 1} / ${questionState.pages.length} 项`;
+    questionState.hint.textContent = multiple ? "可多选" : "请选择一项";
+    questionState.previous.hidden = nextIndex === 0;
+    questionState.next.hidden = nextIndex === lastIndex;
+    questionState.submit.hidden = nextIndex !== lastIndex;
+    elements.questionDock.scrollTop = 0;
+    window.requestAnimationFrame(() => {
+      updateJumpButtonOffset();
+      if (focus) questionState.pages[nextIndex].querySelector("input:not(:disabled), textarea:not(:disabled)")?.focus();
+    });
+  }
+
+  function selectedQuestionAnswers(questionState) {
+    const answers = [];
+    for (let index = 0; index < questionState.controls.length; index += 1) {
+      const control = questionState.controls[index];
+      const selected = control.options.filter((option) => option.input.checked).map((option) => option.value);
+      if (control.custom?.toggle.checked) {
+        const custom = control.custom.textarea.value.trim();
+        if (!custom) throw new Error(`请填写第 ${index + 1} 项的自定义回答`);
+        if (countCharacters(custom) > MAX_CUSTOM_ANSWER_CHARS) throw new Error(`第 ${index + 1} 项的自定义回答不能超过 4,000 个字符`);
+        // eslint-disable-next-line no-control-regex -- 有意校验控制字符
+        if (/[\u0000-\u001f\u007f-\u009f]/.test(custom)) throw new Error(`第 ${index + 1} 项的自定义回答不能包含控制字符或换行`);
+        if (selected.includes(custom)) throw new Error(`第 ${index + 1} 项包含重复回答`);
+        selected.push(custom);
+      }
+      if (selected.length === 0) throw new Error(`请回答第 ${index + 1} 项`);
+      if (!control.multiple && selected.length !== 1) throw new Error(`第 ${index + 1} 项只能选择一个回答`);
+      answers.push(selected);
+    }
+    return answers;
+  }
+
+  function setQuestionControlsDisabled(questionState, disabled) {
+    questionState.form.querySelectorAll("input, textarea, button").forEach((control) => {
+      control.disabled = disabled;
+    });
+  }
+
+  function renderQuestionAnswerSummary(questionState, answers) {
+    questionState.summary.replaceChildren();
+    const normalized = Array.isArray(answers) ? answers : [];
+    questionState.questions.forEach((question, index) => {
+      const row = document.createElement("div");
+      const term = document.createElement("dt");
+      term.textContent = String(question?.question || question?.header || `问题 ${index + 1}`);
+      const value = document.createElement("dd");
+      value.textContent = (Array.isArray(normalized[index]) ? normalized[index] : []).map(String).join("、") || "未记录";
+      row.append(term, value);
+      questionState.summary.appendChild(row);
+    });
+    questionState.summary.hidden = false;
+  }
+
+  function markQuestionAnswered(questionState, answers) {
+    if (!questionState || !questionState.pending) return;
+    questionState.pending = false;
+    questionState.submitting = false;
+    questionState.answers = answers;
+    questionState.card.classList.remove("is-error");
+    questionState.card.classList.add("is-answered");
+    questionState.status.textContent = "已回答";
+    questionState.icon.replaceChildren(makeIconSlot("check"));
+    questionState.error.hidden = true;
+    setQuestionControlsDisabled(questionState, true);
+    renderQuestionAnswerSummary(questionState, answers);
+    moveQuestionToTimeline(questionState);
+    updateControlState();
+    contentAdded();
+  }
+
+  async function submitQuestion(questionState) {
+    if (!questionState.pending || questionState.submitting) return;
+    let answers;
+    try {
+      answers = selectedQuestionAnswers(questionState);
+    } catch (error) {
+      const page = String(error.message || "").match(/第 (\d+) 项/);
+      if (page) setQuestionPage(questionState, Number(page[1]) - 1);
+      questionState.error.textContent = error.message;
+      questionState.error.hidden = false;
+      questionState.card.classList.add("is-error");
+      return;
+    }
+    questionState.submitting = true;
+    questionState.error.hidden = true;
+    questionState.card.classList.remove("is-error");
+    questionState.submit.textContent = "提交中";
+    setQuestionControlsDisabled(questionState, true);
+    try {
+      await apiRequest(`/api/questions/${encodeURIComponent(questionState.id)}/answer`, {
+        method: "POST",
+        body: JSON.stringify({ answers })
+      });
+      if (questionState.pending) markQuestionAnswered(questionState, answers);
+    } catch (error) {
+      if (!questionState.pending) return;
+      questionState.submitting = false;
+      questionState.error.textContent = error.message || "回答提交失败";
+      questionState.error.hidden = false;
+      questionState.card.classList.add("is-error");
+      questionState.submit.textContent = "提交回答";
+      setQuestionControlsDisabled(questionState, false);
+      showToast(error.message || "回答提交失败", "error");
+      if (error.status === 404 || error.status === 409) window.setTimeout(() => loadBootstrap(), 300);
+    }
+  }
+
+  function createQuestion(live, data) {
+    const questionId = String(data?.question_id || "");
+    if (!questionId) return null;
+    if (live.questions.has(questionId)) return live.questions.get(questionId);
+    ensureLiveArticle(live);
+    breakLiveText(live);
+    finalizeLiveReasoning(live);
+    live.contextOperation = null;
+    const questions = Array.isArray(data?.questions) ? data.questions : [];
+    const card = document.createElement("section");
+    card.className = "question-card";
+    card.dataset.questionId = questionId;
+    const titleId = `live-question-title-${live.questions.size + 1}`;
+    card.setAttribute("aria-labelledby", titleId);
+    const header = document.createElement("header");
+    const icon = document.createElement("span");
+    icon.className = "question-icon";
+    icon.appendChild(makeIconSlot("circle-help"));
+    const headerCopy = document.createElement("div");
+    const status = document.createElement("small");
+    status.textContent = "等待回答";
+    const title = document.createElement("strong");
+    title.id = titleId;
+    title.textContent = questions.length === 1 ? String(questions[0]?.header || "补充确认") : `${questions.length} 项补充确认`;
+    headerCopy.append(status, title);
+    header.append(icon, headerCopy);
+    const form = document.createElement("form");
+    form.className = "question-form";
+    const pagination = document.createElement("div");
+    pagination.className = "question-pagination";
+    const pageLabel = document.createElement("span");
+    pageLabel.className = "question-page-label";
+    const pageTabsWrap = document.createElement("div");
+    pageTabsWrap.className = "question-page-tabs";
+    pageTabsWrap.setAttribute("role", "tablist");
+    pageTabsWrap.setAttribute("aria-label", "问题页");
+    pagination.append(pageLabel, pageTabsWrap);
+    form.appendChild(pagination);
+    const controls = [];
+    const pages = [];
+    const pageTabs = [];
+    questions.forEach((question, questionIndex) => {
+      const fieldset = document.createElement("fieldset");
+      fieldset.className = "question-fieldset";
+      fieldset.id = `question-${questionId}-page-${questionIndex + 1}`;
+      fieldset.setAttribute("role", "tabpanel");
+      fieldset.hidden = questionIndex !== 0;
+      const pageTab = document.createElement("button");
+      pageTab.type = "button";
+      pageTab.className = "question-page-tab";
+      pageTab.id = `question-${questionId}-tab-${questionIndex + 1}`;
+      pageTab.textContent = String(questionIndex + 1);
+      pageTab.title = String(question?.header || `问题 ${questionIndex + 1}`);
+      pageTab.setAttribute("role", "tab");
+      pageTab.setAttribute("aria-controls", fieldset.id);
+      pageTab.setAttribute("aria-selected", String(questionIndex === 0));
+      fieldset.setAttribute("aria-labelledby", pageTab.id);
+      pageTabsWrap.appendChild(pageTab);
+      pageTabs.push(pageTab);
+      const legend = document.createElement("legend");
+      const headerLabel = document.createElement("span");
+      headerLabel.className = "question-header-label";
+      headerLabel.textContent = String(question?.header || `问题 ${questionIndex + 1}`);
+      legend.append(headerLabel, document.createTextNode(String(question?.question || "")));
+      fieldset.appendChild(legend);
+      const optionList = document.createElement("div");
+      optionList.className = "question-options";
+      const multiple = Boolean(question?.multiple);
+      const inputType = multiple ? "checkbox" : "radio";
+      const inputName = `question-${questionId}-${questionIndex}`;
+      const options = [];
+      for (const option of Array.isArray(question?.options) ? question.options : []) {
+        const label = document.createElement("label");
+        label.className = "question-option";
+        const input = document.createElement("input");
+        input.type = inputType;
+        input.name = inputName;
+        input.value = String(option?.label || "");
+        const optionCopy = document.createElement("span");
+        optionCopy.className = "question-option-copy";
+        const optionLabel = document.createElement("strong");
+        optionLabel.textContent = String(option?.label || "");
+        optionCopy.appendChild(optionLabel);
+        if (String(option?.description || "")) {
+          const description = document.createElement("small");
+          description.textContent = String(option.description);
+          optionCopy.appendChild(description);
+        }
+        label.append(input, optionCopy);
+        optionList.appendChild(label);
+        options.push({ input, label, value: String(option?.label || "") });
+      }
+      fieldset.appendChild(optionList);
+      let custom = null;
+      if (question?.custom !== false) {
+        const wrapper = document.createElement("label");
+        wrapper.className = "custom-answer";
+        const toggle = document.createElement("input");
+        toggle.type = inputType;
+        toggle.name = inputName;
+        toggle.value = "__custom__";
+        const textarea = document.createElement("textarea");
+        textarea.rows = 1;
+        textarea.placeholder = "自定义回答";
+        textarea.setAttribute("aria-label", `${question?.header || `问题 ${questionIndex + 1}`}的自定义回答`);
+        textarea.addEventListener("focus", () => {
+          toggle.checked = true;
+          updateQuestionOptionClasses(questionState);
+        });
+        textarea.addEventListener("input", () => {
+          if (textarea.value) toggle.checked = true;
+          updateQuestionOptionClasses(questionState);
+        });
+        wrapper.append(toggle, textarea);
+        fieldset.appendChild(wrapper);
+        custom = { wrapper, toggle, textarea };
+      }
+      form.appendChild(fieldset);
+      pages.push(fieldset);
+      controls.push({ multiple, options, custom });
+    });
+    pagination.hidden = questions.length <= 1;
+    const error = document.createElement("p");
+    error.className = "question-error";
+    error.hidden = true;
+    const actions = document.createElement("footer");
+    actions.className = "question-actions";
+    const hint = document.createElement("span");
+    const pageActions = document.createElement("div");
+    pageActions.className = "question-page-actions";
+    const previous = document.createElement("button");
+    previous.type = "button";
+    previous.className = "question-page-button is-previous";
+    previous.title = "上一题";
+    previous.setAttribute("aria-label", "上一题");
+    previous.appendChild(makeIconSlot("chevron-right"));
+    const next = document.createElement("button");
+    next.type = "button";
+    next.className = "question-page-button";
+    next.title = "下一题";
+    next.setAttribute("aria-label", "下一题");
+    next.appendChild(makeIconSlot("chevron-right"));
+    const submit = document.createElement("button");
+    submit.className = "question-submit";
+    submit.type = "submit";
+    submit.textContent = "提交回答";
+    pageActions.append(previous, next, submit);
+    actions.append(hint, pageActions);
+    form.append(error, actions);
+    const summary = document.createElement("dl");
+    summary.className = "question-answer-summary";
+    summary.hidden = true;
+    card.append(header, form, summary);
+    const questionState = {
+      id: questionId,
+      runId: live.runId,
+      questions,
+      card,
+      form,
+      controls,
+      pages,
+      pageTabs,
+      pageIndex: 0,
+      pageLabel,
+      hint,
+      previous,
+      next,
+      icon,
+      status,
+      submit,
+      error,
+      summary,
+      timelineParent: live.blocks,
+      pending: true,
+      submitting: false,
+      answers: null
+    };
+    form.querySelectorAll("input").forEach((input) => input.addEventListener("change", () => updateQuestionOptionClasses(questionState)));
+    pageTabs.forEach((tab, index) => tab.addEventListener("click", () => setQuestionPage(questionState, index, { focus: true })));
+    pageTabsWrap.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      let index = questionState.pageIndex;
+      if (event.key === "ArrowLeft") index -= 1;
+      else if (event.key === "ArrowRight") index += 1;
+      else index = event.key === "Home" ? 0 : pageTabs.length - 1;
+      setQuestionPage(questionState, index);
+      pageTabs[questionState.pageIndex]?.focus();
+    });
+    previous.addEventListener("click", () => setQuestionPage(questionState, questionState.pageIndex - 1, { focus: true }));
+    next.addEventListener("click", () => setQuestionPage(questionState, questionState.pageIndex + 1, { focus: true }));
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitQuestion(questionState);
+    });
+    live.questions.set(questionId, questionState);
+    elements.questionDock.replaceChildren(card);
+    updateQuestionDock();
+    setQuestionPage(questionState, 0);
+    updateQuestionOptionClasses(questionState);
+    updateControlState();
+    contentAdded();
+    return questionState;
+  }
+
+  function endPendingQuestions(live, message) {
+    for (const question of live.questions.values()) {
+      if (!question.pending) continue;
+      question.pending = false;
+      question.submitting = false;
+      question.card.classList.add("is-error");
+      question.status.textContent = "本轮已结束";
+      question.error.textContent = message;
+      question.error.hidden = false;
+      setQuestionControlsDisabled(question, true);
+      removeQuestionFromDock(question);
+    }
+  }
+
+  function createContextOperation(live, kind) {
+    ensureLiveArticle(live);
+    breakLiveText(live);
+    finalizeLiveReasoning(live);
+    const block = document.createElement("section");
+    block.className = "context-operation";
+    const title = document.createElement("strong");
+    title.append(makeIconSlot("refresh-cw"), document.createElement("span"));
+    title.lastChild.textContent = kind === "compact" ? "正在整理上下文" : "正在释放旧上下文";
+    const output = document.createElement("pre");
+    output.hidden = true;
+    block.append(title, output);
+    const operation = { kind, block, title: title.lastChild, output, raw: "" };
+    live.blocks.appendChild(block);
+    live.contextOperation = operation;
+    contentAdded();
+    return operation;
+  }
+
+  function handleContextEvent(name, live, data) {
+    if (name === "context.compact_start") createContextOperation(live, "compact");
+    else if (name === "context.compact_delta") {
+      const operation = live.contextOperation?.kind === "compact" ? live.contextOperation : createContextOperation(live, "compact");
+      operation.raw = boundedAppend(operation.raw, String(data?.delta || ""));
+      operation.output.textContent = operation.raw;
+      operation.output.hidden = !operation.raw;
+    } else if (name === "context.compact_end") {
+      if (live.contextOperation?.kind === "compact") live.contextOperation.title.textContent = "上下文已整理";
+      live.contextOperation = null;
+    } else if (name === "context.pop_start") createContextOperation(live, "pop");
+    else if (name === "context.pop_end") {
+      if (live.contextOperation?.kind === "pop") live.contextOperation.title.textContent = "旧上下文已释放";
+      live.contextOperation = null;
+    } else if (name === "context.error") {
+      const operation = live.contextOperation || createContextOperation(live, "compact");
+      operation.block.classList.add("is-error");
+      operation.title.textContent = "上下文整理未完成";
+      operation.raw = String(data?.message || "上下文维护失败");
+      operation.output.textContent = operation.raw;
+      operation.output.hidden = false;
+      live.contextOperation = null;
+    }
+    contentAdded();
+  }
+
+  function appendRunNotice(live, message, error = false) {
+    ensureLiveArticle(live);
+    breakLiveText(live);
+    const notice = document.createElement("div");
+    notice.className = `run-notice${error ? " is-error" : ""}`;
+    notice.append(makeIconSlot(error ? "circle-alert" : "circle-stop"));
+    const text = document.createElement("span");
+    text.textContent = String(message || "");
+    notice.appendChild(text);
+    live.blocks.appendChild(notice);
+  }
+
+  function markUnfinishedTools(live) {
+    for (const tool of live.tools.values()) {
+      if (tool.finished) continue;
+      tool.finished = true;
+      tool.finishedAt = performance.now();
+      updateToolStatus(tool, "已中断", "circle-alert", "is-failure");
+      updateToolSummary(tool);
+      tool.card.classList.add("collapsed");
+      tool.head.setAttribute("aria-expanded", "false");
+    }
+  }
+
+  function setLiveEndpoint(live, providerId, model) {
+    const values = [providerId, model].map((value) => String(value || "").trim()).filter(Boolean);
+    live.providerId = String(providerId || "");
+    live.model = String(model || "");
+    if (!live.endpoint) return;
+    live.endpoint.textContent = values.join(" / ");
+    live.endpoint.hidden = !state.display?.show_mixed_model_endpoint || values.length === 0;
+  }
+
+  function consumeLiveQueue(live, data) {
+    finalizeLiveReasoning(live);
+    setLiveEndpoint(live, data?.provider_id, data?.model);
+    if (live.headerStatus) live.headerStatus.textContent = "刚刚";
+    if (live.meta) live.meta.textContent = "已完成";
+
+    const ids = new Set((Array.isArray(data?.prompt_ids) ? data.prompt_ids : []).map(String));
+    const consumed = state.queuedPrompts.filter((prompt) => ids.has(String(prompt?.id)));
+    state.queuedPrompts = state.queuedPrompts.filter((prompt) => !ids.has(String(prompt?.id)));
+    for (const prompt of consumed) {
+      elements.timeline.appendChild(createUserMessage(prompt?.content || "", prompt?.submitted_at || new Date(), {
+        turnId: live.turnId,
+        runId: live.runId,
+        followupId: prompt?.id
+      }));
+    }
+    renderQueueTray();
+
+    live.article = null;
+    live.blocks = null;
+    live.headerStatus = null;
+    live.meta = null;
+    live.endpoint = null;
+    live.copyButton = null;
+    if (live.currentText) {
+      live.currentText.element.classList.remove("streaming");
+    }
+    live.currentText = null;
+    const finishedArticle = live.blocks?.closest(".assistant-message");
+    if (finishedArticle) finishedArticle.classList.remove("is-thinking");
+    live.assistantText = "";
+    live.assistantReasoning = "";
+    live.reasoning = null;
+    live.reasoningParts = [];
+    live.reasoningStarted = false;
+    live.reasoningTitle = "";
+    live.tools = new Map();
+    live.questions = new Map();
+    live.contextOperation = null;
+    if (["normal", "plan", "chat"].includes(data?.mode)) setMode(data.mode, false);
+    contentAdded();
+  }
+
+  function updateLocalTurnFromLive(live, terminalStatus, data) {
+    const status = terminalStatus === "completed" ? "completed" : "interrupted";
+    let turn = live.turnId ? state.turns.find((item) => String(item?.id) === String(live.turnId)) : null;
+    if (!turn && live.userText) {
+      turn = {
+        id: live.turnId || `local-${live.runId}`,
+        seq: state.turns.length ? Math.max(...state.turns.map((item) => asFiniteNumber(item?.seq))) + 1 : 1,
+        status,
+        active_context: true,
+        user_content: live.userText,
+        assistant_content: live.assistantText,
+        assistant_reasoning: live.assistantReasoning || null,
+        provider_id: data?.provider_id || live.providerId || null,
+        model: data?.model || live.model || null,
+        user_timestamp: new Date().toISOString(),
+        assistant_timestamp: new Date().toISOString(),
+        token_total: effectiveUsageTotal(data?.usage),
+        token_usage_estimated: Boolean(data?.usage_estimated),
+        question_exchanges: [],
+        followups: [],
+        assets: [...live.assets]
+      };
+      state.turns.push(turn);
+    } else if (turn) {
+      turn.status = status;
+      if (live.assistantText.trim()) turn.assistant_content = live.assistantText;
+      if (live.assistantReasoning.trim()) turn.assistant_reasoning = live.assistantReasoning;
+      if (data?.provider_id || live.providerId) turn.provider_id = data?.provider_id || live.providerId;
+      if (data?.model || live.model) turn.model = data?.model || live.model;
+      if (live.assets.length) turn.assets = [...live.assets];
+      turn.assistant_timestamp = new Date().toISOString();
+      if (terminalStatus === "completed") {
+        turn.token_total = effectiveUsageTotal(data?.usage);
+        turn.token_usage_estimated = Boolean(data?.usage_estimated);
+      }
+    }
+  }
+
+  function requestNotificationPermission() {
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "default") {
+      try { Notification.requestPermission().catch(() => {}); } catch (_) { /* 权限请求失败可静默 */ }
+    }
+  }
+
+  // WebUI 语音回复：回复完成后用顾清影克隆音色朗读（/api/tts → 8091 Qwen3-TTS）
+  // 开关：localStorage gqy.voice_reply（默认开）；TTS 服务未启动时静默降级
+  let voiceReplyAudio = null;
+  function speakReply(live) {
+    if (safeStorageGet("gqy.voice_reply") === "0") return;
+    if (document.visibilityState !== "visible") return; // 后台不自动朗读
+    const text = String(live?.assistantText || "").trim();
+    if (!text) return;
+    const MAX_TTS_CHARS = 300;
+    const clip = text.length > MAX_TTS_CHARS ? text.slice(0, MAX_TTS_CHARS) : text;
+    fetch(`/api/tts?text=${encodeURIComponent(clip)}`)
+      .then((res) => {
+        if (!res.ok) throw new Error("tts unavailable");
+        return res.blob();
+      })
+      .then((blob) => {
+        if (voiceReplyAudio) { voiceReplyAudio.pause(); voiceReplyAudio = null; }
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.onended = () => URL.revokeObjectURL(url);
+        voiceReplyAudio = audio;
+        audio.play().catch(() => {});
+      })
+      .catch(() => { /* TTS 服务未启动，静默 */ });
+  }
+
+  function notifyRunCompleted(live) {
+    if (!("Notification" in window)) return;
+    if (document.visibilityState !== "hidden") return;
+    if (Notification.permission !== "granted") return;
+    try {
+      const text = String(live?.assistantText || "").trim();
+      new Notification("顾清影", {
+        body: text ? (text.length > 120 ? `${text.slice(0, 120)}…` : text) : "回复完成",
+        tag: `gqy-run-${live?.runId || ""}`,
+      });
+    } catch (_) { /* 系统通知不可用（无权限/环境）时静默 */ }
+  }
+
+  // 流式对话失败/停止：给实时创建的用户消息补上重试按钮（刷新后才有的东西，现在就有）
+  function attachLiveRetry(live) {
+    const article = live?.userArticle;
+    if (!article || article.dataset.retryAttached) return;
+    article.dataset.retryAttached = "1";
+    const actions = article.querySelector(".message-actions");
+    if (!actions) return;
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "message-action-button";
+    retry.title = "重新生成回复";
+    retry.setAttribute("aria-label", "重新生成回复");
+    retry.textContent = "重新生成";
+    const content = String(live?.userText || "");
+    retry.addEventListener("click", () => retryTurn(content, retry));
+    actions.appendChild(retry);
+  }
+
+  function finishLiveRun(kind, data) {
+    const runId = String(data?.run_id || "");
+    const live = state.live?.runId === runId ? state.live : establishRun(runId);
+    if (!live || live.ended) return;
+    live.ended = true;
+    finalizeLiveReasoning(live);
+    setLiveEndpoint(live, data?.provider_id, data?.model);
+    state.terminalRunIds.add(runId);
+    if (state.terminalRunIds.size > 30) state.terminalRunIds.delete(state.terminalRunIds.values().next().value);
+
+    if (kind === "completed") {
+      // 回复完成仪式感：头像完成光晕（一次性呼吸收尾）
+      live.article?.classList.add("is-complete");
+      notifyRunCompleted(live);
+      speakReply(live);
+      if (live.headerStatus) live.headerStatus.textContent = "刚刚";
+      if (live.meta) {
+        const total = effectiveUsageTotal(data?.usage);
+        live.meta.textContent = total > 0 ? `${data?.usage_estimated ? "约 " : ""}${formatTokens(total)} tokens` : "已完成";
+      }
+    } else if (kind === "cancelled") {
+      markUnfinishedTools(live);
+      endPendingQuestions(live, "本轮已停止，无法再提交回答");
+      appendRunNotice(live, "回复已停止");
+      if (live.headerStatus) live.headerStatus.textContent = "已停止";
+      if (live.meta) live.meta.textContent = "已停止";
+      attachLiveRetry(live);
+    } else {
+      markUnfinishedTools(live);
+      endPendingQuestions(live, "本轮已结束，无法再提交回答");
+      appendRunNotice(live, String(data?.message || "本轮运行失败"), true);
+      if (live.headerStatus) live.headerStatus.textContent = "运行失败";
+      if (live.meta) live.meta.textContent = "运行失败";
+      attachLiveRetry(live);
+    }
+
+    updateLocalTurnFromLive(live, kind, data);
+    if (kind === "completed") {
+      if (data?.context_tokens != null) state.context.tokens = Math.max(0, asFiniteNumber(data.context_tokens));
+      state.context.window = data?.context_window == null ? state.context.window : Math.max(0, asFiniteNumber(data.context_window));
+      const usage = data?.usage && typeof data.usage === "object" ? data.usage : null;
+      if (usage) {
+        state.usage.last_usage = usage;
+        state.usage.last_conversation_usage = usage;
+        state.usage.requests = asFiniteNumber(state.usage.requests) + 1;
+        state.usage.prompt_tokens = asFiniteNumber(state.usage.prompt_tokens) + asFiniteNumber(usage.prompt_tokens);
+        state.usage.completion_tokens = asFiniteNumber(state.usage.completion_tokens) + asFiniteNumber(usage.completion_tokens);
+        state.usage.total_tokens = asFiniteNumber(state.usage.total_tokens) + effectiveUsageTotal(usage);
+      }
+    }
+    state.activeRunId = null;
+    state.replayRunId = null;
+    state.replayCutoff = 0;
+    state.cancellationRequested = false;
+    state.pendingSubmission = null;
+    state.live = null;
+    updateContext();
+    updateRuntimeUsage(data?.usage || null, Boolean(data?.usage_estimated));
+    if (kind === "completed") refreshBalance();
+    updateConversationChrome();
+    updateControlState();
+    contentAdded();
+    window.requestAnimationFrame(() => {
+      if (!state.blocked && !elements.settingsDrawer.classList.contains("open")) elements.composerInput.focus();
+    });
+    // 运行结束后强制用服务端数据对账重渲染：
+    // 直播期间若有事件丢失（如思考后正文未显示），这里补齐为完整记录
+    window.setTimeout(() => syncBootstrapSnapshot(true), 120);
+  }
+
+  function clearExternalSyncTimer() {
+    if (!state.externalSyncTimer) return;
+    window.clearTimeout(state.externalSyncTimer);
+    state.externalSyncTimer = null;
+  }
+
+  function scheduleExternalSync() {
+    clearExternalSyncTimer();
+    if (!state.externalRunningTurnId || state.blocked) return;
+    state.externalSyncTimer = window.setTimeout(() => {
+      state.externalSyncTimer = null;
+      syncBootstrapSnapshot();
+    }, 1_000);
+  }
+
+  async function syncBootstrapSnapshot(forceRender = false) {
+    if (state.blocked) return;
+    if (state.resyncing) {
+      scheduleExternalSync();
+      return;
+    }
+    try {
+      const response = await apiRequest("/api/bootstrap");
+      const snapshot = await response.json();
+      if (state.bootId && snapshot?.boot_id && snapshot.boot_id !== state.bootId) {
+        await loadBootstrap();
+        return;
+      }
+      const snapshotActiveRunId = typeof snapshot?.active_run_id === "string" && snapshot.active_run_id ? snapshot.active_run_id : null;
+      if (snapshotActiveRunId && snapshotActiveRunId !== state.activeRunId) {
+        await loadBootstrap();
+        return;
+      }
+      const previousExternalTurnId = state.externalRunningTurnId;
+      const nextExternalTurnId = snapshotActiveRunId
+        ? null
+        : typeof snapshot?.running_turn_id === "string" && snapshot.running_turn_id
+          ? snapshot.running_turn_id
+          : null;
+      const nextTurns = Array.isArray(snapshot?.turns)
+        ? snapshot.turns.sort((a, b) => asFiniteNumber(a?.seq) - asFiniteNumber(b?.seq))
+        : state.turns;
+      const turnsChanged = JSON.stringify(nextTurns) !== JSON.stringify(state.turns);
+      state.turns = nextTurns;
+      state.channel = String(snapshot?.channel || state.channel || "webui");
+      state.channels = Array.isArray(snapshot?.channels) ? snapshot.channels : state.channels;
+      state.conversations = Array.isArray(snapshot?.conversations) ? snapshot.conversations : state.conversations;
+      state.queuedPrompts = Array.isArray(snapshot?.queued_prompts) ? snapshot.queued_prompts : state.queuedPrompts;
+      state.models = Array.isArray(snapshot?.models) ? snapshot.models : state.models;
+      state.display = snapshot?.display && typeof snapshot.display === "object" ? snapshot.display : state.display;
+      state.context = snapshot?.context && typeof snapshot.context === "object" ? snapshot.context : state.context;
+      state.usage = snapshot?.usage && typeof snapshot.usage === "object" ? snapshot.usage : state.usage;
+      state.capabilities = snapshot?.capabilities && typeof snapshot.capabilities === "object" ? snapshot.capabilities : state.capabilities;
+      state.engine = String(snapshot?.engine || "");
+      state.version = snapshot?.version ?? state.version;
+      state.externalRunningTurnId = nextExternalTurnId;
+      state.externalQueueAvailable = Boolean(nextExternalTurnId && snapshot?.external_queue_available);
+      elements.versionLabel.textContent = state.version ? `v${state.version}` : "--";
+      // forceRender：运行结束后强制用服务端真实数据重渲染，避免直播期间
+      // 事件丢失（如思考后正文未显示）导致界面与服务端不一致
+      if (forceRender || (previousExternalTurnId || nextExternalTurnId) && (turnsChanged || previousExternalTurnId !== nextExternalTurnId)) {
+        renderConversation();
+      }
+      if (previousExternalTurnId && !nextExternalTurnId) refreshBalance();
+      renderChannelList();
+      renderConversationList();
+      renderModelMenu();
+      renderQueueTray();
+      updateCapabilities();
+      updateContext();
+      updateRuntimeUsage();
+      updateConversationChrome();
+      updateControlState();
+    } catch (error) {
+      if (error.status === 401) showBlockedState(true);
+    } finally {
+      scheduleExternalSync();
+    }
+  }
+
+  async function ensureActiveTurnUser(turnId) {
+    const live = state.live;
+    if (!live || live.userRendered || !turnId) return;
+    const existing = state.turns.find((turn) => String(turn?.id) === String(turnId));
+    if (existing) {
+      live.userText = String(existing.user_content || "");
+      ensureLiveUser(live.userText, live.runId);
+      return;
+    }
+    try {
+      const response = await apiRequest("/api/bootstrap");
+      const snapshot = await response.json();
+      const turn = Array.isArray(snapshot?.turns) ? snapshot.turns.find((item) => String(item?.id) === String(turnId)) : null;
+      if (!turn || state.live !== live) return;
+      state.turns = snapshot.turns.sort((a, b) => asFiniteNumber(a?.seq) - asFiniteNumber(b?.seq));
+      live.userText = String(turn.user_content || "");
+      ensureLiveUser(live.userText, live.runId);
+    } catch (_) {
+      // The stream can continue; a later bootstrap will recover the user turn.
+    }
+  }
+
+  function handleRunEvent(name, data) {
+    const runId = String(data?.run_id || "");
+    if (!runId) return;
+    // 只读浏览其他通道/历史对话时忽略运行事件，避免 live 文章插入只读视图
+    if (state.viewingChannel || state.viewingConversation) return;
+    if (state.activeRunId && state.activeRunId !== runId) return;
+    if (!state.activeRunId && name !== "run.started" && state.live?.runId !== runId) return;
+    const live = establishRun(runId);
+    if (!live) return;
+
+    if (name === "run.started") {
+      if (["normal", "plan", "chat"].includes(data?.mode)) setMode(data.mode, false);
+      updateControlState();
+    } else if (name === "turn.started") {
+      live.turnId = String(data?.turn_id || "");
+      removeRunningStatus(live.turnId);
+      ensureActiveTurnUser(live.turnId);
+    } else if (name === "assistant.delta") {
+      // 修复：此处曾调用不存在的 clearIdleSyncTimer()（git 历史中亦无定义），
+      // 每次事件都抛 ReferenceError 被外层 catch 吞掉，导致 appendAssistantDelta 不执行、
+      // 流式正文增量丢失。直接移除死调用。
+      appendAssistantDelta(live, data?.delta);
+    }
+    else if (name.startsWith("reasoning.")) handleReasoningEvent(name, live, data);
+    else if (name === "queue.consumed") consumeLiveQueue(live, data);
+    else if (name.startsWith("tool.")) handleToolEvent(name, live, data);
+    else if (name === "question.requested") createQuestion(live, data);
+    else if (name === "question.answered") {
+      const question = live.questions.get(String(data?.question_id || ""));
+      if (question) markQuestionAnswered(question, data?.answers);
+    } else if (name.startsWith("context.")) handleContextEvent(name, live, data);
+    else if (name === "run.completed") finishLiveRun("completed", data);
+    else if (name === "run.cancelled") finishLiveRun("cancelled", data);
+    else if (name === "run.failed") finishLiveRun("failed", data);
+  }
+
+  function eventShouldBeHandled(name, data, eventId) {
+    if (name === "resync_required") {
+      if (eventId > 0) state.lastEventId = eventId;
+      return true;
+    }
+    if (eventId > 0 && eventId <= state.lastEventId) return false;
+    if (eventId > 0) state.lastEventId = eventId;
+    if (state.replayRunId && eventId > 0 && eventId <= state.replayCutoff) {
+      if (!RUN_EVENTS.has(name)) return false;
+      return String(data?.run_id || "") === state.replayRunId;
+    }
+    if (RUN_EVENTS.has(name) && state.activeRunId && String(data?.run_id || "") !== state.activeRunId) return false;
+    return true;
+  }
+
+  function handleSseEvent(name, event) {
+    let data;
+    try {
+      data = event.data ? JSON.parse(event.data) : {};
+    } catch (_) {
+      showToast("收到无法解析的事件，正在重新同步", "error");
+      loadBootstrap();
+      return;
+    }
+    const eventId = Math.max(0, asFiniteNumber(event.lastEventId));
+    if (!eventShouldBeHandled(name, data, eventId)) return;
+    try {
+      dispatchSseEvent(name, data);
+    } catch (error) {
+      // 单个事件处理异常不影响后续事件（如 reasoning/正文渲染出错时仍能完成对账）
+      console.warn("SSE event handler failed", name, error);
+    }
+  }
+
+  function dispatchSseEvent(name, data) {
+    if (name === "model.compacting") {
+      state.modelCompacting = true;
+      updateModelMenuState();
+      return;
+    }
+    if (name === "model.compacted") {
+      state.modelCompacting = false;
+      updateModelMenuState();
+      return;
+    }
+    if (name === "resync_required") {
+      if (!state.resyncing) {
+        state.resyncing = true;
+        loadBootstrap().finally(() => {
+          state.resyncing = false;
+        });
+      }
+      return;
+    }
+    if (name === "queue.added") {
+      const prompt = data?.prompt;
+      if (prompt && !state.queuedPrompts.some((item) => String(item?.id) === String(prompt?.id))) {
+        state.queuedPrompts.push(prompt);
+        renderQueueTray();
+      }
+      return;
+    }
+    if (name === "queue.removed") {
+      state.queuedPrompts = state.queuedPrompts.filter((prompt) => String(prompt?.id) !== String(data?.prompt_id));
+      renderQueueTray();
+      return;
+    }
+    if (name === "conversation.reset") {
+      loadBootstrap();
+      return;
+    }
+    if (name === "conversation.deleted") {
+      // 其他面板删了会话：本地同步移除（正在浏览则退回）
+      const deletedId = String(data?.conversation_id || "");
+      if (deletedId) {
+        if (String(state.viewingConversation) === deletedId) {
+          state.viewingConversation = null;
+          state.viewedTurns = [];
+          loadBootstrap();
+        } else {
+          removeLocalConversation(deletedId);
+          renderConversationList();
+        }
+      }
+      return;
+    }
+    if (name === "config.reloaded") {
+      // 配置文件被外部修改（CLI/编辑），后端已自动重载：提示并刷新配置显示。
+      // 面板自己刚保存的配置（5 秒内）静默同步，避免「切换模型」重复弹提示。
+      if (Date.now() - (state.configSavedAt || 0) > 5000) {
+        showToast("检测到配置变更，已自动重新加载", "info");
+      }
+      loadConfigDraft();
+      loadBootstrap();
+      return;
+    }
+    handleRunEvent(name, data);
+  }
+
+  function closeEventSource() {
+    if (state.eventSource) {
+      state.eventSource.close();
+      state.eventSource = null;
+    }
+    if (state.healthTimer) {
+      window.clearTimeout(state.healthTimer);
+      state.healthTimer = null;
+    }
+  }
+
+  async function refineConnectionHealth(source) {
+    if (state.eventSource !== source || source.readyState === EventSource.OPEN) return;
+    try {
+      const response = await fetch("/api/health", { cache: "no-store", credentials: "same-origin" });
+      if (!response.ok) throw new Error("health check failed");
+      if (state.eventSource === source && source.readyState !== EventSource.OPEN) setConnectionStatus("connecting");
+    } catch (_) {
+      if (state.eventSource === source && source.readyState !== EventSource.OPEN) setConnectionStatus("offline");
+    }
+  }
+
+  function connectEventSource(after) {
+    closeEventSource();
+    if (state.blocked) return;
+    const source = new EventSource(`/api/events?after=${encodeURIComponent(Math.max(0, asFiniteNumber(after)))}`);
+    state.eventSource = source;
+    source.onopen = () => {
+      if (state.eventSource !== source) return;
+      setConnectionStatus("online");
+      if (state.healthTimer) window.clearTimeout(state.healthTimer);
+      state.healthTimer = null;
+    };
+    source.onerror = () => {
+      if (state.eventSource !== source) return;
+      setConnectionStatus("connecting");
+      if (state.healthTimer) window.clearTimeout(state.healthTimer);
+      state.healthTimer = window.setTimeout(() => refineConnectionHealth(source), 1200);
+    };
+    for (const name of EVENT_NAMES) source.addEventListener(name, (event) => handleSseEvent(name, event));
+  }
+
+  function showBlockedState(unauthorized, message = "") {
+    state.blocked = true;
+    state.activeRunId = null;
+    state.externalRunningTurnId = null;
+    state.externalQueueAvailable = false;
+    clearExternalSyncTimer();
+    disposeLiveState(state.live);
+    state.live = null;
+    clearQuestionDock();
+    closeEventSource();
+    elements.loadingState.hidden = true;
+    elements.timeline.hidden = true;
+    elements.emptyState.hidden = true;
+    elements.blockedState.hidden = false;
+    elements.blockedTitle.textContent = unauthorized ? "登录顾清影" : "无法载入顾清影 WebUI";
+    elements.blockedMessage.textContent = unauthorized ? "输入访问密码以继续。" : message || "本地服务暂时无法访问";
+    elements.loginForm.hidden = !unauthorized;
+    elements.retryBootstrapButton.hidden = unauthorized;
+    elements.loginError.textContent = "";
+    elements.loginError.hidden = true;
+    elements.retryBootstrapButton.hidden = unauthorized;
+    setLoginSubmitting(false);
+    setConnectionStatus(unauthorized ? "blocked" : "offline");
+    updateControlState();
+    if (unauthorized) window.requestAnimationFrame(() => elements.loginPassword.focus());
+  }
+
+  function refreshQrCode() {
+    const img = elements.lanQrImage;
+    if (!img) return;
+    img.src = `/api/auth/qr.png?t=${Date.now()}`;
+  }
+
+  function applyBootstrap(snapshot) {
+    state.blocked = false;
+    clearExternalSyncTimer();
+    disposeLiveState(state.live);
+    state.bootId = String(snapshot?.boot_id || "");
+    state.latestEventId = Math.max(0, asFiniteNumber(snapshot?.latest_event_id));
+    state.turns = Array.isArray(snapshot?.turns) ? snapshot.turns.sort((a, b) => asFiniteNumber(a?.seq) - asFiniteNumber(b?.seq)) : [];
+    state.channel = String(snapshot?.channel || "webui");
+    state.channels = Array.isArray(snapshot?.channels) ? snapshot.channels : [];
+    state.conversations = Array.isArray(snapshot?.conversations) ? snapshot.conversations : [];
+    state.viewingChannel = null;
+    state.viewingConversation = null;
+    state.viewedTurns = [];
+    state.queuedPrompts = Array.isArray(snapshot?.queued_prompts) ? snapshot.queued_prompts : [];
+    state.models = Array.isArray(snapshot?.models) ? snapshot.models : [];
+    state.display = snapshot?.display && typeof snapshot.display === "object" ? snapshot.display : state.display;
+    state.context = snapshot?.context && typeof snapshot.context === "object" ? snapshot.context : { tokens: 0, window: null };
+    state.usage = snapshot?.usage && typeof snapshot.usage === "object" ? snapshot.usage : {};
+    state.capabilities = snapshot?.capabilities && typeof snapshot.capabilities === "object" ? snapshot.capabilities : {};
+    state.engine = String(snapshot?.engine || "");
+    state.preview = Boolean(snapshot?.preview);
+    applyPreviewMode();
+    state.version = snapshot?.version ?? null;
+    state.activeRunId = typeof snapshot?.active_run_id === "string" && snapshot.active_run_id ? snapshot.active_run_id : null;
+    state.externalRunningTurnId = !state.activeRunId && typeof snapshot?.running_turn_id === "string" && snapshot.running_turn_id
+      ? snapshot.running_turn_id
+      : null;
+    state.externalQueueAvailable = Boolean(state.externalRunningTurnId && snapshot?.external_queue_available);
+    state.cancellationRequested = false;
+    state.pendingSubmission = null;
+    state.live = null;
+    elements.loginForm.hidden = true;
+    elements.retryBootstrapButton.hidden = false;
+    elements.loginPassword.value = "";
+    elements.loginError.textContent = "";
+    elements.loginError.hidden = true;
+    setLoginSubmitting(false);
+    elements.versionLabel.textContent = state.version ? `v${state.version}` : "--";
+    clearInlineError();
+    renderChannelList();
+    renderConversationList();
+    renderConversation();
+    renderModelMenu();
+    renderQueueTray();
+    updateCapabilities();
+    updateContext();
+    if (state.activeRunId) {
+      const runningTurn = [...state.turns].reverse().find((turn) => turn?.status === "running");
+      state.live = createLiveState(state.activeRunId, {
+        turnId: runningTurn?.id || null,
+        userText: runningTurn?.user_content || "",
+        startedAt: runningTurn?.user_timestamp || new Date(),
+        userRendered: Boolean(runningTurn)
+      });
+      state.replayRunId = state.activeRunId;
+      state.replayCutoff = state.latestEventId;
+      state.lastEventId = 0;
+      connectEventSource(0);
+    } else {
+      state.replayRunId = null;
+      state.replayCutoff = 0;
+      state.lastEventId = state.latestEventId;
+      connectEventSource(state.latestEventId);
+    }
+    setConnectionStatus("connecting");
+    updateRuntimeUsage();
+    updateConversationChrome();
+    updateControlState();
+    scheduleExternalSync();
+  }
+
+  // 预览模式：公开浏览界面，隐藏设置、禁用输入
+  function applyPreviewMode() {
+    if (!state.preview) return;
+    if (elements.previewBanner) elements.previewBanner.hidden = false;
+    if (elements.settingsButton) elements.settingsButton.hidden = true;
+    if (elements.composerInput) {
+      elements.composerInput.disabled = true;
+      elements.composerInput.placeholder = "预览模式：聊天已禁用";
+    }
+    if (elements.sendButton) elements.sendButton.disabled = true;
+    if (elements.modeSwitch) {
+      elements.modeSwitch.querySelectorAll("button").forEach((button) => {
+        button.disabled = true;
+      });
+    }
+    if (elements.stopButton) elements.stopButton.hidden = true;
+    const stateLabel = document.getElementById("composerState");
+    if (stateLabel) stateLabel.textContent = "预览模式";
+  }
+
+  async function loadBootstrap() {
+    if (state.bootstrapPromise) return state.bootstrapPromise;
+    state.bootstrapPromise = (async () => {
+      clearExternalSyncTimer();
+      closeEventSource();
+      state.adminBusy = false;
+      state.submitting = false;
+      if (!state.turns.length && !state.live) {
+        elements.loadingState.hidden = false;
+        elements.blockedState.hidden = true;
+        elements.emptyState.hidden = true;
+        elements.timeline.hidden = true;
+      }
+      setConnectionStatus("connecting");
+      updateControlState();
+      try {
+        const response = await apiRequest("/api/bootstrap");
+        const snapshot = await response.json();
+        applyBootstrap(snapshot);
+      } catch (error) {
+        showBlockedState(error.status === 401, error.message);
+      }
+    })();
+    try {
+      await state.bootstrapPromise;
+    } finally {
+      state.bootstrapPromise = null;
+      // 初始就加载配置：人格徽标等顶栏 UI 依赖 configDraft，懒加载（仅打开设置）会导致不显示
+      if (!state.configLoaded && !state.configLoading) loadConfigDraft();
+      handleOpenSettingsParam();
+    }
+  }
+
+  function setLoginSubmitting(submitting) {
+    state.loginSubmitting = Boolean(submitting);
+    elements.loginPassword.disabled = state.loginSubmitting;
+    elements.loginSubmit.disabled = state.loginSubmitting;
+    elements.loginSubmit.classList.toggle("is-loading", state.loginSubmitting);
+    elements.loginSubmitLabel.textContent = state.loginSubmitting ? "正在登录" : "登录";
+    const icon = elements.loginSubmit.querySelector(".icon-slot");
+    if (icon) icon.replaceChildren(createIcon(state.loginSubmitting ? "loader-circle" : "log-in"));
+  }
+
+  async function submitLogin() {
+    if (state.loginSubmitting) return;
+    const password = elements.loginPassword.value;
+    if (!password) {
+      elements.loginError.textContent = "请输入访问密码";
+      elements.loginError.hidden = false;
+      elements.loginPassword.focus();
+      return;
+    }
+    elements.loginError.textContent = "";
+    elements.loginError.hidden = true;
+    setLoginSubmitting(true);
+    try {
+      await apiRequest("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ password })
+      });
+      elements.loginPassword.value = "";
+      await loadBootstrap();
+    } catch (error) {
+      elements.loginError.textContent = error.status === 401 ? "密码不正确，请重试" : error.message || "登录失败";
+      elements.loginError.hidden = false;
+      window.requestAnimationFrame(() => {
+        elements.loginPassword.focus();
+        elements.loginPassword.select();
+      });
+    } finally {
+      setLoginSubmitting(false);
+    }
+  }
+
+  async function confirmModelSelection() {
+    if (!(state.stagedModelKeys instanceof Set) || conversationRunning() || state.adminBusy || state.submitting) return;
+    const selected = state.models.filter((model) => state.stagedModelKeys.has(modelKey(model)));
+    if (selected.length === 0) {
+      state.modelMenuError = "至少选择一个模型";
+      updateModelMenuState();
+      return;
+    }
+    state.modelSelectionSubmitting = true;
+    state.adminBusy = true;
+    state.modelMenuError = "";
+    clearInlineError();
+    updateControlState();
+    let applied = false;
+    try {
+      const response = await apiRequest("/api/models/active", {
+        method: "PUT",
+        body: JSON.stringify({
+          models: selected.map((model) => ({
+            provider_id: String(model.provider_id || ""),
+            model: String(model.model || "")
+          }))
+        })
+      });
+      const payload = await response.json();
+      state.models = Array.isArray(payload?.models) ? payload.models : state.models;
+      if (payload?.display && typeof payload.display === "object") state.display = payload.display;
+      state.context = payload?.context && typeof payload.context === "object" ? payload.context : state.context;
+      applied = true;
+    } catch (error) {
+      state.modelMenuError = error.message || "模型设置未保存";
+      showInlineError(error.message);
+      showToast(error.message, "error");
+    } finally {
+      state.adminBusy = false;
+      state.modelSelectionSubmitting = false;
+      if (applied) {
+        closeModelMenu();
+        renderModelMenu();
+        updateContext();
+        // 面板自己保存的配置：随后 config.reloaded 静默同步，不再重复提示
+        state.configSavedAt = Date.now();
+        showToast("模型设置已更新");
+      }
+      updateControlState();
+      if (applied) window.requestAnimationFrame(() => elements.modelButton.focus());
+      else {
+        updateModelMenuState();
+        window.requestAnimationFrame(() => elements.modelMenu.querySelector(".model-confirm")?.focus());
+      }
+    }
+  }
+
+  let pendingImageSeq = 0;
+
+  function addPendingImageFile(file) {
+    if (!file || !file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const id = `img-${++pendingImageSeq}`;
+      state.pendingImages.push({
+        id,
+        mime: file.type || "image/png",
+        dataUrl: String(reader.result || ""),
+        name: file.name || "图片",
+      });
+      renderImageTray();
+      updateControlState();
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function removePendingImage(id) {
+    state.pendingImages = state.pendingImages.filter((image) => image.id !== id);
+    renderImageTray();
+    updateControlState();
+  }
+
+  function renderImageTray() {
+    const tray = elements.imageTray;
+    tray.textContent = "";
+    if (state.pendingImages.length === 0) {
+      tray.hidden = true;
+      return;
+    }
+    tray.hidden = false;
+    for (const image of state.pendingImages) {
+      const chip = document.createElement("figure");
+      chip.className = "image-chip";
+      const img = document.createElement("img");
+      img.src = image.dataUrl;
+      img.alt = image.name;
+      img.title = image.name;
+      img.classList.add("is-zoomable");
+      img.addEventListener("click", () => openLightbox(image.dataUrl, image.name));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "image-chip-remove";
+      remove.title = "移除图片";
+      remove.setAttribute("aria-label", "移除图片");
+      remove.textContent = "×";
+      remove.addEventListener("click", () => removePendingImage(image.id));
+      chip.append(img, remove);
+      tray.appendChild(chip);
+    }
+  }
+
+  function collectPendingImages() {
+    const images = state.pendingImages.slice();
+    state.pendingImages = [];
+    renderImageTray();
+    return images;
+  }
+
+  async function submitTurn() {
+    if (state.adminBusy || state.submitting || state.blocked || state.viewingChannel || state.viewingConversation) return;
+    if (hasPendingQuestion() || (state.externalRunningTurnId && !state.externalQueueAvailable)) return;
+    const content = elements.composerInput.value.trim();
+    const attachedImages = state.pendingImages.slice();
+    const count = countCharacters(content);
+    if (!content) {
+      elements.composerState.textContent = "消息不能为空";
+      elements.composerState.classList.add("is-error");
+      return;
+    }
+    if (count > MAX_CONTENT_CHARS) {
+      elements.composerState.textContent = "消息不能超过 20,000 个字符";
+      elements.composerState.classList.add("is-error");
+      return;
+    }
+    if (!(await sendTurnContent(content, state.mode, attachedImages))) {
+      return;
+    }
+    elements.composerInput.value = "";
+    resizeComposer();
+    if (attachedImages.length) collectPendingImages();
+    updateRuntimeUsage();
+    updateConversationChrome();
+  }
+
+  // 发送一条消息（重试/重新生成也走这里）。images 为 {mime, dataUrl} 列表。
+  // 返回是否成功受理。
+  async function sendTurnContent(content, mode, images = []) {
+    if (state.adminBusy || state.submitting || state.blocked || state.viewingChannel) return false;
+    if (hasPendingQuestion() || (state.externalRunningTurnId && !state.externalQueueAvailable)) return false;
+    const queueing = conversationRunning();
+    requestNotificationPermission();
+    state.submitting = true;
+    if (!queueing) state.pendingSubmission = { content, mode };
+    clearInlineError();
+    updateControlState();
+    try {
+      const payloadImages = images
+        .filter((image) => image && image.dataUrl)
+        .map((image) => {
+          const comma = String(image.dataUrl).indexOf(",");
+          return {
+            mime: image.mime || "image/png",
+            data_base64: comma >= 0 ? String(image.dataUrl).slice(comma + 1) : "",
+          };
+        });
+      const body = {
+        content,
+        images: payloadImages,
+        conversation_id: state.viewingConversation || undefined,
+      };
+      // 单模式（自动情境）：统一走 normal，由她根据内容自动切换态度
+      if (!queueing) body.mode = "normal";
+      const response = await apiRequest(queueing ? "/api/queue" : "/api/turns", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json();
+      // 已受理：退出历史会话视图，回到实时模式（新消息已归入该会话）
+      if (state.viewingConversation) {
+        state.viewingConversation = null;
+        state.viewedTurns = [];
+        renderConversationList();
+        renderChannelList();
+      }
+      const queuedPrompt = queueing ? payload : payload?.queued ? payload.prompt : null;
+      if (queuedPrompt) {
+        if (!state.queuedPrompts.some((prompt) => String(prompt?.id) === String(queuedPrompt?.id))) {
+          state.queuedPrompts.push(queuedPrompt);
+        }
+        state.pendingSubmission = null;
+        if (!queueing) {
+          const fallbackRunId = String(payload?.run_id || "");
+          state.externalRunningTurnId = fallbackRunId ? null : String(payload?.running_turn_id || "") || null;
+          state.externalQueueAvailable = Boolean(state.externalRunningTurnId);
+          if (fallbackRunId) state.activeRunId = fallbackRunId;
+        }
+        renderQueueTray();
+        if (!queueing && state.activeRunId) await loadBootstrap();
+        else scheduleExternalSync();
+        return true;
+      }
+      const runId = String(payload?.run_id || "");
+      if (!runId) throw new ApiError("服务未返回运行标识", response.status);
+      if (state.terminalRunIds.has(runId)) {
+        await loadBootstrap();
+      } else {
+        state.activeRunId = runId;
+        const live = state.live?.runId === runId ? state.live : createLiveState(runId, { userText: content });
+        live.userText = content;
+        state.live = live;
+        ensureLiveUser(content, runId, images);
+      }
+      return true;
+    } catch (error) {
+      if (!queueing) state.pendingSubmission = null;
+      showInlineError(error.status === 409
+        ? queueing ? "回复状态刚刚发生变化，正在同步" : "已有回复正在运行，正在同步当前状态"
+        : error.message);
+      showToast(error.status === 409 ? "回复状态已同步，请重新发送" : error.message, "error");
+      if (error.status === 409) await loadBootstrap();
+      return false;
+    } finally {
+      state.submitting = false;
+      updateControlState();
+    }
+  }
+
+  async function cancelActiveRun() {
+    const runId = state.activeRunId;
+    if (!runId || state.cancellationRequested) return;
+    state.cancellationRequested = true;
+    updateConversationChrome();
+    updateControlState();
+    try {
+      await apiRequest(`/api/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" });
+    } catch (error) {
+      state.cancellationRequested = false;
+      showInlineError(error.message);
+      showToast(error.message, "error");
+      updateConversationChrome();
+      updateControlState();
+      if (error.status === 404 || error.status === 409) await loadBootstrap();
+    }
+  }
+
+  function hasHistory() {
+    return state.turns.length > 0 || Boolean(state.live?.userRendered) || Boolean(elements.timeline.querySelector(".user-message"));
+  }
+
+  function requestNewConversation() {
+    closeSidebar();
+    hideUsageView();
+    if (state.viewingConversation) {
+      exitConversationView();
+      return;
+    }
+    if (state.viewingChannel) {
+      exitChannelView();
+      return;
+    }
+    if (!hasHistory()) {
+      elements.composerInput.focus();
+      return;
+    }
+    if (conversationRunning() || state.adminBusy || state.submitting) return;
+    startNewConversation();
+  }
+
+  // 新建对话：当前对话归档（数据完整保留，gqy 仍可查历史），面板从空会话开始
+  async function startNewConversation() {
+    state.adminBusy = true;
+    updateControlState();
+    try {
+      await apiRequest("/api/conversation/reset", { method: "POST" });
+      await loadBootstrap();
+      elements.composerInput.focus();
+      showToast("已开始新对话（之前的对话已归档，顾清影随时可查）", "info");
+    } catch (error) {
+      showInlineError(error.message);
+      showToast(error.message, "error");
+      if (error.status === 409) await loadBootstrap();
+    } finally {
+      state.adminBusy = false;
+      updateControlState();
+    }
+  }
+
+  // 菜单栏「打开配置」通过 ?open=settings 直达设置抽屉（等价终端 gqy config 的 GUI 版）
+  function handleOpenSettingsParam() {
+    const open = new URLSearchParams(location.search).get("open");
+    if (open === "settings") {
+      openSettings();
+      // 清理参数，避免面板内后续刷新重复弹抽屉
+      const url = new URL(location.href);
+      url.searchParams.delete("open");
+      history.replaceState(null, "", url);
+    }
+  }
+
+  // ─────────────────────────── 用量统计（GitHub 贡献图风） ───────────────────────────
+
+  function showUsageView() {
+    elements.usageView.hidden = false;
+    elements.conversationStage.hidden = true;
+    closeSettings();
+    bindUsageRangeSeg();
+    bindUsageRecordFilters();
+    loadUsageStats();
+  }
+
+  function hideUsageView() {
+    elements.usageView.hidden = true;
+    elements.conversationStage.hidden = false;
+  }
+
+  // 范围分段：切换即重新拉统计（含 range_totals/prev_totals/sources）
+  function bindUsageRangeSeg() {
+    const seg = elements.usageRangeSeg;
+    if (!seg || seg.dataset.bound) return;
+    seg.dataset.bound = "1";
+    seg.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-range]");
+      if (!button) return;
+      const range = button.dataset.range;
+      if (range === state.usageRange) return;
+      state.usageRange = range;
+      seg.querySelectorAll("[data-range]").forEach((other) => {
+        other.classList.toggle("on", other.dataset.range === range);
+      });
+      loadUsageStats();
+    });
+  }
+
+  // 最近调用过滤器：来源/模型变化即重新拉明细
+  function bindUsageRecordFilters() {
+    for (const select of [elements.usageSrcFilter, elements.usageModelFilter]) {
+      if (!select || select.dataset.bound) continue;
+      select.dataset.bound = "1";
+      select.addEventListener("change", () => loadUsageDetails());
+    }
+  }
+
+  // 筛选选项来自 stats.sources（来源）与 models（模型）
+  function refreshUsageFilterOptions(stats) {
+    const fill = (select, entries, current) => {
+      if (!select) return;
+      const first = select.options[0];
+      select.replaceChildren(first);
+      for (const [value, label] of entries) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        select.appendChild(option);
+      }
+      select.value = entries.some(([value]) => value === current) ? current : "";
+    };
+    const sources = Array.isArray(stats?.sources) ? stats.sources : [];
+    fill(elements.usageSrcFilter,
+      sources.map((source) => [String(source.src || ""), usageSourceLabel(String(source.src || ""))]),
+      state.usageSrcFilterValue || "");
+    const models = Array.isArray(stats?.models) ? stats.models : [];
+    fill(elements.usageModelFilter,
+      models.map((model) => [String(model.model || ""), String(model.model || "")]),
+      state.usageModelFilterValue || "");
+  }
+
+  function usageSourceLabel(src) {
+    const labels = { agent: "智能体（终端/WebUI）", qq: "QQ", wechat: "微信" };
+    return labels[src] || src || "未知";
+  }
+
+  async function loadUsageStats() {
+    elements.usageSubtitle.textContent = "正在载入…";
+    try {
+      const response = await apiRequest("/api/usage/stats?range=" + encodeURIComponent(state.usageRange));
+      const data = await response.json();
+      const stats = data?.stats;
+      if (!stats) return;
+      state.usageStats = stats;
+      state.usageBilling = stats.billing || { default: { input: 2, output: 8, cache_read: 0.2 }, providers: {} };
+      // 副标题随范围变化：显示范围内消耗（而非全局）
+      const rt = stats.range_totals || stats.total || {};
+      const rtCost = asFiniteNumber(rt.cost, 0);
+      const costStr = rtCost > 0 ? ` · ≈ ¥${rtCost.toFixed(2)}` : "";
+      const rangeLabel = { "1d": "近 24 小时", "7d": "近 7 天", "30d": "近 30 天", all: "至今" }[stats.range] || "";
+      elements.usageSubtitle.textContent =
+        `${rangeLabel}${rangeLabel ? " · " : ""}共 ${formatTokens(rt.total_tokens)} token · ${formatInteger(rt.requests || 0)} 次请求${costStr}`;
+      renderUsageSummary(stats);
+      renderUsageHeatmap(stats);
+      renderUsageBarsStacked(stats);
+      renderUsageSources(stats);
+      refreshUsageFilterOptions(stats);
+      renderUsageModelTable(stats);
+      renderUsageBillingEditor();
+      loadUsageDetails();
+    } catch (error) {
+      elements.usageSubtitle.textContent = "加载失败";
+      showToast(error.message, "error");
+    }
+  }
+
+  async function loadUsageDetails() {
+    try {
+      const params = new URLSearchParams({ limit: "300" });
+      if (elements.usageSrcFilter && elements.usageSrcFilter.value) params.set("src", elements.usageSrcFilter.value);
+      if (elements.usageModelFilter && elements.usageModelFilter.value) params.set("model", elements.usageModelFilter.value);
+      const response = await apiRequest("/api/usage/details?" + params.toString());
+      const data = await response.json();
+      const records = Array.isArray(data?.records) ? data.records : [];
+      state.usageRecords = records;
+      renderUsageRecentList(records);
+      if (state.usageDetailModel) renderUsageModelDetail(state.usageDetailModel, records);
+    } catch (_) {
+      elements.usageRecentList.textContent = "明细加载失败";
+    }
+  }
+
+  // ── 单价表 ──
+
+  function billingRate(providerId) {
+    const b = state.usageBilling || { default: { input: 2, output: 8, cache_read: 0.2 }, providers: {} };
+    return (b.providers && b.providers[providerId]) || b.default || { input: 2, output: 8, cache_read: 0.2 };
+  }
+
+  function fmtCost(n) {
+    if (n == null || n === 0) return "¥0";
+    if (Math.abs(n) < 0.01) return "¥" + n.toFixed(4);
+    return "¥" + n.toFixed(2);
+  }
+
+  function renderUsageBillingEditor() {
+    const editor = elements.usageBillingEditor;
+    const b = state.usageBilling || { default: { input: 2, output: 8, cache_read: 0.2 }, providers: {} };
+    editor.replaceChildren();
+    const form = document.createElement("div");
+    form.className = "usage-billing-form";
+    const heading = document.createElement("div");
+    heading.className = "usage-billing-heading";
+    heading.textContent = "单价（元/百万 token）· 修改后用量刷新即生效";
+    form.appendChild(heading);
+    const row = document.createElement("div");
+    row.className = "usage-billing-row";
+    ["input", "output", "cache_read"].forEach((field) => {
+      const label = document.createElement("label");
+      label.textContent = { input: "输入", output: "输出", cache_read: "缓存" }[field];
+      const input = document.createElement("input");
+      input.type = "number"; input.step = "0.1"; input.min = "0";
+      input.value = String(b.default[field] || 0);
+      input.addEventListener("change", () => {
+        const v = parseFloat(input.value);
+        if (Number.isFinite(v) && v >= 0) {
+          b.default = Object.assign({}, b.default, { [field]: v });
+          state.usageBilling = b;
+          if (state.usageStats) {
+            state.usageStats.billing = b;
+            renderUsageSummary(state.usageStats);
+            renderUsageModelTable(state.usageStats);
+            const totalCost = asFiniteNumber(state.usageStats.total?.cost, 0);
+            elements.usageSubtitle.textContent =
+              `共 ${formatTokens(state.usageStats.total?.total_tokens)} token · ${formatInteger(state.usageStats.total?.requests || 0)} 次请求` +
+              (totalCost > 0 ? ` · ≈ ¥${totalCost.toFixed(2)}` : "");
+          }
+        }
+      });
+      label.appendChild(input);
+      row.appendChild(label);
+    });
+    form.appendChild(row);
+    editor.appendChild(form);
+  }
+
+  // ── 4 张汇总卡片 ──
+
+  function renderUsageSummary(stats) {
+    // 范围卡：总消耗 / 请求 / 缓存命中率（带环比差与环形占比）
+    const rt = stats.range_totals || stats.total || {};
+    const prev = stats.prev_totals || null;
+    const deltaOf = (current, previous) => {
+      if (!prev) return "";
+      const base = asFiniteNumber(previous, 0);
+      if (!base) return "";
+      const value = (asFiniteNumber(current, 0) / base - 1) * 100;
+      const sign = value >= 0 ? "+" : "";
+      const cls = value >= 0 ? "up" : "down";
+      return { text: sign + value.toFixed(0) + "%", cls };
+    };
+    const cards = [
+      {
+        label: "总消耗",
+        value: formatTokens(asFiniteNumber(rt.total_tokens, 0)),
+        sub: "入 " + formatTokens(asFiniteNumber(rt.prompt_tokens, 0)) + " · 出 " + formatTokens(asFiniteNumber(rt.completion_tokens, 0)),
+        delta: deltaOf(rt.total_tokens, prev && prev.total_tokens)
+      },
+      {
+        label: "请求",
+        value: formatInteger(asFiniteNumber(rt.requests, 0)),
+        sub: "对话 + 记忆/压缩等辅助",
+        delta: deltaOf(rt.requests, prev && prev.requests)
+      },
+      {
+        label: "缓存命中率",
+        value: cacheHitRate(rt) + "%",
+        sub: "命中 " + formatTokens(asFiniteNumber(rt.cache_read_tokens, 0)) + " / 输入 " + formatTokens(asFiniteNumber(rt.prompt_tokens, 0)),
+        delta: null
+      },
+      {
+        label: "费用",
+        value: fmtCost(asFiniteNumber(rt.cost, 0)),
+        sub: "按已配置单价估算",
+        delta: deltaOf(rt.cost, prev && prev.cost)
+      }
+    ];
+    elements.usageSummary.replaceChildren();
+    for (const card of cards) {
+      const el = document.createElement("div");
+      el.className = "usage-summary-card";
+      const name = document.createElement("span");
+      name.className = "usage-summary-label";
+      name.textContent = card.label;
+      if (card.delta) {
+        const delta = document.createElement("span");
+        delta.className = "usage-summary-delta " + card.delta.cls;
+        delta.textContent = card.delta.text;
+        delta.title = "对比上一周期";
+        name.appendChild(delta);
+      }
+      const value = document.createElement("strong");
+      value.textContent = card.value;
+      const hint = document.createElement("small");
+      hint.textContent = card.sub;
+      el.append(name, value, hint);
+      elements.usageSummary.appendChild(el);
+    }
+  }
+
+  function cacheHitRate(agg) {
+    const prompt = asFiniteNumber(agg && agg.prompt_tokens, 0);
+    if (!prompt) return 0;
+    return Math.round((asFiniteNumber(agg && agg.cache_read_tokens, 0) / prompt) * 100);
+  }
+
+  // ── GitHub 热力图（52 周） ──
+
+  // 本地日期 key（修复：此前用 toISOString 取 UTC 日期，东八区凌晨数据错位一天）
+  function localDateKey(date) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  }
+
+  // Token 贡献热力图（GitHub 式，近 52 周）：看「哪天用了多少」的密度分布，
+  // 与下方的 30 天堆叠柱（输入/输出构成）互补。
+  function renderUsageHeatmap(stats) {
+    const daily = Array.isArray(stats.daily) ? stats.daily : [];
+    const container = elements.usageHeatmap;
+    container.replaceChildren();
+    if (!daily.length) { container.textContent = "暂无消耗数据"; return; }
+    const byDate = new Map(daily.map((d) => [d.date, d]));
+    const today = new Date();
+    const end = new Date(today);
+    end.setDate(end.getDate() + (7 - ((end.getDay() + 6) % 7)));
+    const start = new Date(end);
+    start.setDate(start.getDate() - 52 * 7 + 1);
+    const maxTokens = Math.max(1, ...daily.map((d) => asFiniteNumber(d.tokens, 0)));
+    function cellLevel(v) {
+      if (v === 0) return "l0";
+      if (v < maxTokens * 0.25) return "l1";
+      if (v < maxTokens * 0.5) return "l2";
+      if (v < maxTokens * 0.75) return "l3";
+      return "l4";
+    }
+    const grid = document.createElement("div");
+    grid.className = "usage-hm-grid";
+    const months = document.createElement("div");
+    months.className = "usage-hm-months";
+    const weeks = [];
+    for (let w = 0; w < 53; w++) {
+      const col = document.createElement("div");
+      col.className = "usage-hm-week";
+      const colDate = new Date(start);
+      colDate.setDate(start.getDate() + w * 7);
+      const m = colDate.getMonth();
+      if (w === 0 || (w > 0 && m !== new Date(start.getTime() + (w - 1) * 7 * 86400000).getMonth())) {
+        const lbl = document.createElement("span");
+        lbl.className = "usage-hm-month";
+        const monthsEn = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        const monthsZh = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
+        lbl.textContent = colDate.getFullYear() === today.getFullYear() ? monthsZh[m] : `${colDate.getFullYear()}-${monthsEn[m]}`;
+        months.appendChild(lbl);
+      } else {
+        months.appendChild(document.createElement("span"));
+      }
+      for (let d = 0; d < 7; d++) {
+        const dDate = new Date(colDate);
+        dDate.setDate(colDate.getDate() + d);
+        // 时区修复：本地日期 key 匹配后端 chrono::Local 分组
+        const key = localDateKey(dDate);
+        const rec = byDate.get(key);
+        const tokens = rec ? asFiniteNumber(rec.tokens, 0) : 0;
+        const cell = document.createElement("i");
+        cell.className = "usage-hm-cell " + cellLevel(tokens);
+        const cost = rec ? asFiniteNumber(rec.cost, 0) : 0;
+        cell.title = rec ? `${key}\n${formatTokens(tokens)} token · ${rec.requests} 次\n≈ ${fmtCost(cost)}` : `${key}\n无记录`;
+        col.appendChild(cell);
+      }
+      weeks.push(col);
+    }
+    const wl = document.createElement("div");
+    wl.className = "usage-hm-weeks";
+    ["一","三","五"].forEach((s) => {
+      const d = document.createElement("span");
+      d.textContent = s;
+      wl.appendChild(d);
+    });
+    grid.appendChild(wl);
+    grid.appendChild(months);
+    weeks.forEach((c) => grid.appendChild(c));
+    const legend = document.createElement("div");
+    legend.className = "usage-hm-legend";
+    legend.append(
+      Object.assign(document.createElement("span"), { textContent: "少" }),
+      ...["l0","l1","l2","l3","l4"].map((l) => {
+        const i = document.createElement("i");
+        i.className = "usage-hm-legend-cell " + l;
+        return i;
+      }),
+      Object.assign(document.createElement("span"), { textContent: "多" })
+    );
+    container.appendChild(grid);
+    container.appendChild(legend);
+  }
+
+  // ── 近 30 天输入/输出/缓存堆叠柱状图 ──
+
+  function renderUsageBarsStacked(stats) {
+    const daily = Array.isArray(stats.daily) ? stats.daily : [];
+    const range = state.usageRange || "all";
+    let recent;
+    let weekly = false;
+    if (range === "1d") recent = daily.slice(-2); // 滚动 24h 跨两个日历日
+    else if (range === "7d") recent = daily.slice(-7);
+    else if (range === "30d") recent = daily.slice(-30);
+    else {
+      weekly = true;
+      recent = [];
+      for (let week = 0; week < Math.floor(daily.length / 7); week += 1) {
+        const chunk = daily.slice(daily.length - (Math.floor(daily.length / 7) - week) * 7,
+          daily.length - (Math.floor(daily.length / 7) - week - 1) * 7);
+        if (!chunk.length) continue;
+        const merged = { date: chunk[0].date, requests: 0, prompt: 0, completion: 0, cache_read: 0, cost: 0, tokens: 0 };
+        for (const day of chunk) {
+          merged.requests += asFiniteNumber(day.requests, 0);
+          merged.prompt += asFiniteNumber(day.prompt, 0);
+          merged.completion += asFiniteNumber(day.completion, 0);
+          merged.cache_read += asFiniteNumber(day.cache_read, 0);
+          merged.cost += asFiniteNumber(day.cost, 0);
+          merged.tokens += asFiniteNumber(day.tokens, 0);
+        }
+        recent.push(merged);
+      }
+    }
+    const container = elements.usageBarsStacked;
+    container.replaceChildren();
+    if (!recent.length) { container.textContent = "该范围内暂无消耗数据"; return; }
+    const maxV = Math.max(1, ...recent.map((d) => asFiniteNumber(d.tokens, 0)));
+    const chart = document.createElement("div");
+    chart.className = "usage-stacked-chart";
+    for (const day of recent) {
+      const prompt = asFiniteNumber(day.prompt, 0);
+      const completion = asFiniteNumber(day.completion, 0);
+      const cacheRead = asFiniteNumber(day.cache_read, 0);
+      const cost = asFiniteNumber(day.cost, 0);
+      const col = document.createElement("div");
+      col.className = "usage-stacked-col";
+      const bar = document.createElement("div");
+      bar.className = "usage-stacked-bar";
+      const segCache = document.createElement("i"); segCache.className = "usage-stacked-seg seg-cache";
+      segCache.style.height = (cacheRead / maxV * 100).toFixed(2) + "%";
+      const segPrompt = document.createElement("i"); segPrompt.className = "usage-stacked-seg seg-prompt";
+      segPrompt.style.height = Math.max(1, (prompt / maxV * 100)).toFixed(2) + "%";
+      const segComp = document.createElement("i"); segComp.className = "usage-stacked-seg seg-completion";
+      segComp.style.height = Math.max(1, (completion / maxV * 100)).toFixed(2) + "%";
+      bar.append(segCache, segPrompt, segComp);
+      const date = new Date(`${day.date}T00:00:00`);
+      const label = document.createElement("span");
+      label.className = "usage-stacked-label";
+      label.textContent = weekly
+        ? `${date.getMonth() + 1}/${date.getDate()} 周`
+        : `${date.getMonth() + 1}/${date.getDate()}`;
+      col.append(bar, label);
+      col.title = `${day.date}${weekly ? " 当周" : ""}\n入 ${formatTokens(prompt)} · 出 ${formatTokens(completion)} · 缓存 ${formatTokens(cacheRead)}\n≈ ${fmtCost(cost)}`;
+      chart.appendChild(col);
+    }
+    const legend = document.createElement("div");
+    legend.className = "usage-stacked-legend";
+    legend.append(
+      objSpan("usage-legend-chip seg-prompt", "输入"),
+      objSpan("usage-legend-chip seg-completion", "输出"),
+      objSpan("usage-legend-chip seg-cache", "缓存命中"),
+    );
+    const statsLine = document.createElement("div");
+    statsLine.className = "usage-stacked-stats";
+    const peak = recent.reduce((max, day) => (asFiniteNumber(day.tokens, 0) > max.tokens ? { date: day.date, tokens: asFiniteNumber(day.tokens, 0) } : max), { date: "", tokens: 0 });
+    const total = recent.reduce((sum, day) => sum + asFiniteNumber(day.tokens, 0), 0);
+    const avg = Math.round(total / recent.length);
+    const totalCost = recent.reduce((sum, day) => sum + asFiniteNumber(day.cost, 0), 0);
+    // eslint-disable-next-line no-irregular-whitespace -- 全角空格为有意排版
+    statsLine.textContent = `峰值 ${peak.date} · ${formatTokens(peak.tokens)}　日均 ${formatTokens(avg)}　合计 ${formatTokens(total)}　≈ ${fmtCost(totalCost)}`;
+    container.append(chart, legend, statsLine);
+  }
+
+  function objSpan(cls, txt) {
+    const s = document.createElement("span");
+    s.className = cls;
+    s.textContent = txt;
+    return s;
+  }
+
+  // ── 来源构成（智能体 / 通讯平台），仿 Miyu：每来源一张卡片 + 模型占比条 ──
+
+  function renderUsageSources(stats) {
+    const container = elements.usageSources;
+    if (!container) return;
+    container.replaceChildren();
+    const sources = Array.isArray(stats && stats.sources) ? stats.sources : [];
+    const totals = (stats && stats.range_totals) || (stats && stats.total) || {};
+    const totalTokens = asFiniteNumber(totals.total_tokens, 0);
+    if (!sources.length) {
+      const empty = document.createElement("p");
+      empty.className = "settings-empty";
+      empty.textContent = "该范围内暂无调用记录";
+      container.appendChild(empty);
+      return;
+    }
+    const agent = sources.find((source) => source.src === "agent");
+    const platforms = sources.filter((source) => source.src !== "agent");
+    const heading = document.createElement("div");
+    heading.className = "usage-section-heading";
+    const h3 = document.createElement("h3");
+    h3.textContent = "来源构成";
+    const hint = document.createElement("span");
+    hint.className = "usage-chart-hint";
+    hint.textContent = "智能体对话与各通讯平台的消耗拆分";
+    heading.append(h3, hint);
+    container.appendChild(heading);
+    if (agent) container.appendChild(buildUsageSourceCard(agent, totalTokens));
+    for (const platform of platforms) {
+      container.appendChild(buildUsageSourceCard(platform, totalTokens));
+    }
+  }
+
+  function buildUsageSourceCard(source, totalTokens) {
+    const card = document.createElement("div");
+    card.className = "usage-source-card";
+    const head = document.createElement("div");
+    head.className = "usage-source-head";
+    const name = document.createElement("strong");
+    name.textContent = usageSourceLabel(String(source.src || ""));
+    const agg = source.aggregate || source;
+    const meta = document.createElement("span");
+    meta.className = "usage-chart-hint";
+    const share = totalTokens > 0
+      ? " · 占 " + Math.round((asFiniteNumber(agg.total_tokens, 0) / totalTokens) * 100) + "%"
+      : "";
+    meta.textContent =
+      formatInteger(asFiniteNumber(agg.requests, 0)) + " 次 · " +
+      formatTokens(asFiniteNumber(agg.total_tokens, 0)) + " token" + share;
+    head.append(name, meta);
+    card.appendChild(head);
+
+    const models = Array.isArray(source.models) ? source.models : [];
+    if (!models.length) {
+      const empty = document.createElement("p");
+      empty.className = "settings-empty";
+      empty.textContent = "暂无模型记录";
+      card.appendChild(empty);
+      return card;
+    }
+    const table = document.createElement("div");
+    table.className = "usage-source-models";
+    for (const model of models) {
+      const row = document.createElement("div");
+      row.className = "usage-source-model-row";
+      const label = document.createElement("span");
+      label.className = "usage-source-model-name";
+      label.textContent = (model.model || "(未标注)") + (model.provider_id ? " · " + model.provider_id : "");
+      const bar = document.createElement("div");
+      bar.className = "usage-source-model-bar";
+      const total = asFiniteNumber(agg.total_tokens, 0);
+      const sharePct = total > 0 ? (asFiniteNumber(model.total_tokens, 0) / total) * 100 : 0;
+      bar.style.width = Math.max(1, Math.min(100, sharePct)).toFixed(1) + "%";
+      const detail = document.createElement("span");
+      detail.className = "usage-source-model-detail";
+      const cost = asFiniteNumber(model.cost, 0);
+      detail.textContent = formatTokens(asFiniteNumber(model.total_tokens, 0)) +
+        (cost > 0 ? " · " + fmtCost(cost) : "");
+      row.append(label, bar, detail);
+      row.title =
+        (model.model || "(未标注)") + "\n" +
+        "请求 " + formatInteger(asFiniteNumber(model.requests, 0)) +
+        " · 输入 " + formatTokens(asFiniteNumber(model.prompt_tokens, 0)) +
+        " · 输出 " + formatTokens(asFiniteNumber(model.completion_tokens, 0)) +
+        "\n缓存命中 " + formatTokens(asFiniteNumber(model.cache_read_tokens, 0));
+      table.appendChild(row);
+    }
+    card.appendChild(table);
+    return card;
+  }
+
+  // ── 模型明细表（含费用列 + 堆叠比例条） ──  // ── 模型明细表（含费用列 + 堆叠比例条） ──
+
+  function renderUsageModelTable(stats) {
+    const models = Array.isArray(stats.models) ? stats.models : [];
+    const totalTokens = Math.max(1, asFiniteNumber(stats.total?.total_tokens, 0));
+    elements.usageModelTable.replaceChildren();
+    if (!models.length) {
+      const empty = document.createElement("p");
+      empty.className = "settings-empty";
+      empty.textContent = "暂无消耗记录";
+      elements.usageModelTable.appendChild(empty);
+      return;
+    }
+    const table = document.createElement("table");
+    table.className = "usage-model-table";
+    const head = document.createElement("thead");
+    const headRow = document.createElement("tr");
+    for (const label of ["模型", "请求", "输入", "输出", "缓存", "总 Token", "费用", "占比"]) {
+      const th = document.createElement("th");
+      th.textContent = label;
+      headRow.appendChild(th);
+    }
+    head.appendChild(headRow);
+    table.appendChild(head);
+    const body = document.createElement("tbody");
+    for (const model of models) {
+      const row = document.createElement("tr");
+      const nameCell = document.createElement("td");
+      nameCell.className = "usage-model-name";
+      const mark = document.createElement("span");
+      mark.className = "model-mark usage-model-mark";
+      applyModelMark(mark, { provider_id: model.provider_id, provider_name: model.provider_id, base_url: "" });
+      const copy = document.createElement("span");
+      copy.className = "usage-model-copy";
+      const name = document.createElement("strong");
+      name.textContent = model.model || "(未标注)";
+      const provider = document.createElement("small");
+      provider.textContent = model.provider_id || "";
+      copy.append(name, provider);
+      nameCell.append(mark, copy);
+      row.appendChild(nameCell);
+      for (const key of ["requests", "prompt_tokens", "completion_tokens", "cache_read_tokens"]) {
+        const td = document.createElement("td");
+        td.textContent = key === "requests" ? formatInteger(model[key] || 0) : formatTokens(model[key] || 0);
+        row.appendChild(td);
+      }
+      const total = document.createElement("td");
+      total.className = "usage-model-total";
+      total.textContent = formatTokens(model.total_tokens);
+      row.appendChild(total);
+      const costTd = document.createElement("td");
+      costTd.className = "usage-model-cost";
+      costTd.textContent = fmtCost(model.cost);
+      row.appendChild(costTd);
+      const shareCell = document.createElement("td");
+      const shareWrap = document.createElement("div");
+      shareWrap.className = "usage-share-stacked";
+      const pct = model.total_tokens / totalTokens;
+      const pPrompt = (model.prompt_tokens / Math.max(1, model.total_tokens)) * pct * 100;
+      const pComp = (model.completion_tokens / Math.max(1, model.total_tokens)) * pct * 100;
+      const pCache = ((model.cache_read_tokens || 0) / Math.max(1, model.total_tokens)) * pct * 100;
+      [{ w: pPrompt, c: "share-prompt" }, { w: pComp, c: "share-completion" }, { w: pCache, c: "share-cache" }].forEach((seg) => {
+        if (seg.w > 0) {
+          const i = document.createElement("i");
+          i.className = seg.c;
+          i.style.flex = String(seg.w);
+          shareWrap.appendChild(i);
+        }
+      });
+      const shareText = document.createElement("span");
+      shareText.textContent = `${(pct * 100).toFixed(1)}%`;
+      shareCell.append(shareWrap, shareText);
+      row.appendChild(shareCell);
+      row.classList.add("usage-model-row");
+      row.tabIndex = 0;
+      row.title = `查看 ${model.model} 的每日消耗与调用明细`;
+      const openDetail = () => renderUsageModelDetail(model, state.usageRecords);
+      row.addEventListener("click", openDetail);
+      row.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openDetail();
+        }
+      });
+      body.appendChild(row);
+    }
+    table.appendChild(body);
+    elements.usageModelTable.appendChild(table);
+  }
+
+  function renderUsageModelDetail(model, records) {
+    state.usageDetailModel = model;
+    const detail = elements.usageModelDetail;
+    detail.hidden = false;
+    detail.replaceChildren();
+
+    const header = document.createElement("header");
+    header.className = "usage-detail-header";
+    const copy = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = `${model?.model || "(未标注)"} · 每日消耗`;
+    const provider = document.createElement("small");
+    provider.textContent = `${model?.provider_id || ""} · 累计 ${formatTokens(model?.total_tokens)} token · ${formatInteger(model?.requests || 0)} 次请求` + (model?.cost > 0 ? ` · ≈ ${fmtCost(model.cost)}` : "");
+    copy.append(name, provider);
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "secondary-button compact-button";
+    close.textContent = "收起";
+    close.addEventListener("click", () => {
+      detail.hidden = true;
+      state.usageDetailModel = null;
+    });
+    header.append(copy, close);
+    detail.appendChild(header);
+
+    const list = Array.isArray(records) ? records : [];
+    const modelRecords = list.filter((record) =>
+      String(record?.model || "") === String(model?.model || "") &&
+      String(record?.provider || "") === String(model?.provider_id || "")
+    );
+    const days = new Map();
+    for (const record of modelRecords) {
+      const date = recordDayKey(record?.ts);
+      const entry = days.get(date) || { tokens: 0, requests: 0, cost: 0 };
+      entry.tokens += asFiniteNumber(record?.total, 0);
+      entry.requests += 1;
+      const rate = billingRate(record?.provider || "");
+      entry.cost += ((record?.prompt || 0) * rate.input + (record?.completion || 0) * rate.output + (record?.cache_read || 0) * rate.cache_read) / 1e6;
+      days.set(date, entry);
+    }
+    const maxDayTokens = Math.max(1, ...Array.from(days.values()).map((entry) => entry.tokens));
+    const chart = document.createElement("div");
+    chart.className = "usage-detail-bars";
+    if (days.size === 0) {
+      const empty = document.createElement("p");
+      empty.className = "settings-empty";
+      empty.textContent = "最近调用明细中暂无该模型记录";
+      chart.appendChild(empty);
+    } else {
+      for (const [date, entry] of Array.from(days.entries()).sort()) {
+        const bar = document.createElement("div");
+        bar.className = "usage-detail-bar";
+        bar.title = `${date} · ${formatTokens(entry.tokens)} token（${entry.requests} 次）` + (entry.cost > 0 ? ` · ≈ ${fmtCost(entry.cost)}` : "");
+        const fill = document.createElement("i");
+        const height = Math.max(4, Math.round((entry.tokens / maxDayTokens) * 96));
+        fill.style.height = `${height}%`;
+        const dayLabel = document.createElement("span");
+        dayLabel.textContent = date.slice(5);
+        bar.append(fill, dayLabel);
+        chart.appendChild(bar);
+      }
+    }
+    detail.appendChild(chart);
+
+    if (modelRecords.length) {
+      const listTitle = document.createElement("h4");
+      listTitle.className = "usage-detail-list-title";
+      listTitle.textContent = "调用明细（最近）";
+      detail.appendChild(listTitle);
+      detail.appendChild(createUsageRecordsList(modelRecords.slice(0, 100)));
+    }
+  }
+
+  function recordDayKey(ts) {
+    const value = asFiniteNumber(ts, 0);
+    if (!value) return "unknown";
+    const date = new Date(value * 1000);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  }
+
+  function createUsageRecordsList(records) {
+    const list = document.createElement("div");
+    list.className = "usage-records-list";
+    for (const record of records) {
+      const row = document.createElement("div");
+      row.className = "usage-record-row";
+      const time = document.createElement("span");
+      time.className = "usage-record-time";
+      time.textContent = formatDateTime(new Date(asFiniteNumber(record?.ts, 0) * 1000));
+      const src = document.createElement("span");
+      src.className = "usage-record-src";
+      src.textContent = usageSourceLabel(String(record?.src || "agent"));
+      const model = document.createElement("span");
+      model.className = "usage-record-model";
+      model.textContent = `${record?.model || "(未标注)"}${record?.provider ? ` · ${record.provider}` : ""}`;
+      const tokens = document.createElement("span");
+      tokens.className = "usage-record-tokens";
+      const parts = [];
+      if (asFiniteNumber(record?.prompt, 0) > 0) parts.push(`入 ${formatTokens(record.prompt)}`);
+      if (asFiniteNumber(record?.completion, 0) > 0) parts.push(`出 ${formatTokens(record.completion)}`);
+      if (parts.length) tokens.textContent = parts.join(" / ");
+      const cacheRead = asFiniteNumber(record?.cache_read, 0);
+      const cacheCreation = asFiniteNumber(record?.cache_creation, 0);
+      if (cacheRead > 0 || cacheCreation > 0) {
+        const cache = document.createElement("span");
+        cache.className = "usage-record-cache";
+        if (cacheRead > 0) cache.textContent = `缓存命中 ${formatTokens(cacheRead)}`;
+        else if (cacheCreation > 0) cache.textContent = `新建缓存 ${formatTokens(cacheCreation)}`;
+        tokens.after(cache);
+      }
+      const total = document.createElement("strong");
+      total.className = "usage-record-total";
+      total.textContent = formatTokens(record?.total || 0);
+      if (record?.aux) {
+        const badge = document.createElement("span");
+        badge.className = "usage-record-aux";
+        badge.textContent = "记忆";
+        total.before(badge);
+      }
+      const rate = billingRate(record?.provider || "");
+      const recCost = ((record?.prompt || 0) * rate.input + (record?.completion || 0) * rate.output + (record?.cache_read || 0) * rate.cache_read) / 1e6;
+      const costSpan = document.createElement("span");
+      costSpan.className = "usage-record-cost";
+      costSpan.textContent = fmtCost(recCost);
+      if (recCost > 1) costSpan.classList.add("usage-record-cost-hot");
+      row.append(time, src, model, tokens, total, costSpan);
+      list.appendChild(row);
+    }
+    return list;
+  }
+
+  function renderUsageRecentList(records) {
+    const list = Array.isArray(records) ? records : [];
+    elements.usageRecentList.replaceChildren();
+    if (!list.length) {
+      const empty = document.createElement("p");
+      empty.className = "settings-empty";
+      empty.textContent = "暂无调用记录";
+      elements.usageRecentList.appendChild(empty);
+      return;
+    }
+    elements.usageRecentList.appendChild(createUsageRecordsList(list.slice(0, 60)));
+  }
+
+
+  function handleGlobalKeydown(event) {
+    if (elements.settingsDrawer.classList.contains("open") && event.key === "Tab") {
+      const focusable = getFocusable(elements.settingsDrawer);
+      if (!focusable.length) {
+        event.preventDefault();
+        elements.settingsDrawer.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    if (event.key === "Escape") {
+      if (!elements.modelMenu.hidden) {
+        event.preventDefault();
+        closeModelMenu({ restoreFocus: true });
+        return;
+      }
+      if (elements.settingsDrawer.classList.contains("open")) {
+        event.preventDefault();
+        closeSettings();
+        return;
+      }
+      if (elements.sidebar.classList.contains("open")) {
+        event.preventDefault();
+        closeSidebar();
+        state.sidebarOpener?.focus?.();
+      }
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k" && !event.shiftKey && !event.altKey) {
+      event.preventDefault();
+      requestNewConversation();
+    }
+  }
+
+  function bindEvents() {
+    elements.mobileMenuButton.addEventListener("click", (event) => openSidebar(event.currentTarget));
+    elements.sidebarClose.addEventListener("click", closeSidebar);
+    elements.sidebarScrim.addEventListener("click", closeSidebar);
+    elements.currentConversation.addEventListener("click", () => {
+      closeSidebar();
+      if (state.viewingConversation) {
+        exitConversationView();
+        return;
+      }
+      if (state.viewingChannel) {
+        exitChannelView();
+        return;
+      }
+      scrollToBottom({ force: true, smooth: true });
+    });
+    elements.settingsButton.addEventListener("click", (event) => openSettings(event.currentTarget));
+    elements.settingsClose.addEventListener("click", () => closeSettings());
+    elements.drawerScrim.addEventListener("click", () => closeSettings());
+    elements.settingsNav.querySelectorAll("[data-settings-view]").forEach((button) => {
+      button.addEventListener("click", () => setSettingsView(button.dataset.settingsView));
+    });
+    elements.addProviderButton.addEventListener("click", () => {
+      if (!state.configDraft) return;
+      state.configDraft.providers = Array.isArray(state.configDraft.providers) ? state.configDraft.providers : [];
+      state.configDraft.providers.push(ensureProviderDefaults());
+      state.providerSecretStates.push(false);
+      refreshProviderSecretStates();
+      markConfigDirty();
+      renderConfigEditors();
+      setSettingsView("providers");
+      const cards = elements.providerEditor.querySelectorAll(".provider-card");
+      const card = cards[cards.length - 1];
+      if (card) {
+        card.open = true;
+        card.scrollIntoView({ block: "nearest" });
+      }
+    });
+    elements.reloadConfigButton.addEventListener("click", loadConfigDraft);
+    const refreshAlarmsButton = document.getElementById("refreshAlarmsButton");
+    if (refreshAlarmsButton) refreshAlarmsButton.addEventListener("click", loadAlarms);
+    elements.saveConfigButton.addEventListener("click", saveConfigDraft);
+    elements.applyAdvancedConfigButton.addEventListener("click", applyAdvancedConfig);
+    // 三主题循环：graphite → moon → linen → graphite
+    elements.sidebarThemeButton.addEventListener("click", () => {
+      const current = elements.body.dataset.theme;
+      const next = THEMES[(THEMES.indexOf(current) + 1) % THEMES.length];
+      setTheme(next);
+    });
+    // 折叠侧栏（仅桌面；移动端侧栏是抽屉，不显示折叠按钮）
+    const applyCollapseButtonVisibility = () => {
+      if (!elements.sidebarCollapseButton) return;
+      elements.sidebarCollapseButton.hidden = window.innerWidth <= 980;
+    };
+    applyCollapseButtonVisibility();
+    window.addEventListener("resize", applyCollapseButtonVisibility);
+    elements.sidebarCollapseButton?.addEventListener("click", () => {
+      const collapsed = elements.body.dataset.sidebarCollapsed === "1";
+      if (collapsed) {
+        delete elements.body.dataset.sidebarCollapsed;  // 移除属性，恢复展开态
+      } else {
+        elements.body.dataset.sidebarCollapsed = "1";
+      }
+      safeStorageSet("gqy.web.sidebarCollapsed", !collapsed);
+      elements.sidebarCollapseButton.title = collapsed ? "折叠会话栏" : "展开会话栏";
+      elements.sidebarCollapseButton.setAttribute("aria-label", elements.sidebarCollapseButton.title);
+      elements.sidebarCollapseButton.querySelector("[data-icon]")?.replaceChildren(createIcon(collapsed ? "panel-left-close" : "panel-left-open"));
+    });
+    // 恢复持久化的折叠状态
+    if (safeStorageGet("gqy.web.sidebarCollapsed") === "true") {
+      elements.body.dataset.sidebarCollapsed = "1";
+      elements.sidebarCollapseButton.title = "展开会话栏";
+      elements.sidebarCollapseButton.setAttribute("aria-label", "展开会话栏");
+      elements.sidebarCollapseButton.querySelector("[data-icon]")?.replaceChildren(createIcon("panel-left-open"));
+    }
+    document.querySelectorAll("[data-theme-choice]").forEach((button) => button.addEventListener("click", () => setTheme(button.dataset.themeChoice)));
+    elements.modeSwitch.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => setMode(button.dataset.mode)));
+    elements.exportButton.addEventListener("click", async () => {
+      try {
+        const response = await apiRequest("/api/export");
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "gqy-export.md";
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast("对话已导出为 markdown", "info");
+      } catch (error) {
+        showToast(`导出失败：${error.message || error}`, "error");
+      }
+    });
+    elements.modelButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (elements.modelMenu.hidden) {
+        if (state.engine === "pi") openPiModelMenu();
+        else openModelMenu();
+      } else {
+        closeModelMenu({ restoreFocus: true });
+      }
+    });
+    elements.modelMenu.addEventListener("keydown", (event) => {
+      const items = Array.from(elements.modelMenu.querySelectorAll("button:not(:disabled)"));
+      const index = items.indexOf(document.activeElement);
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        items[(index + direction + items.length) % items.length]?.focus();
+      } else if (event.key === "Home" || event.key === "End") {
+        event.preventDefault();
+        items[event.key === "Home" ? 0 : items.length - 1]?.focus();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeModelMenu({ restoreFocus: true });
+      }
+    });
+    document.addEventListener("click", (event) => {
+      if (!elements.modelMenu.hidden && !event.target.closest("#modelMenuWrap")) closeModelMenu();
+    });
+    elements.promptGrid.querySelectorAll("[data-prompt]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (elements.composerInput.disabled) return;
+        elements.composerInput.value = button.dataset.prompt || "";
+        resizeComposer();
+        elements.composerInput.focus();
+      });
+    });
+    elements.composerInput.addEventListener("input", resizeComposer);
+    elements.composerInput.addEventListener("compositionstart", () => {
+      state.composing = true;
+    });
+    elements.composerInput.addEventListener("compositionend", () => {
+      state.composing = false;
+    });
+    elements.sidebarSearchInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        runConversationSearch();
+      }
+      if (event.key === "Escape") {
+        elements.sidebarSearchInput.value = "";
+        clearConversationSearch();
+      }
+    });
+    elements.composerInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey && !event.isComposing && !state.composing && event.keyCode !== 229) {
+        event.preventDefault();
+        if (!elements.sendButton.disabled) elements.composerForm.requestSubmit();
+      }
+    });
+    elements.composerForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitTurn();
+    });
+    if (elements.attachButton && elements.attachInput) {
+      elements.attachButton.addEventListener("click", () => elements.attachInput.click());
+      elements.attachInput.addEventListener("change", () => {
+        for (const file of Array.from(elements.attachInput.files || [])) addPendingImageFile(file);
+        elements.attachInput.value = ""; // 允许重复选择同一文件
+      });
+    }
+    elements.composerInput.addEventListener("paste", (event) => {
+      const items = event.clipboardData?.items || [];
+      let added = false;
+      for (const item of items) {
+        if (item.kind === "file" && item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) {
+            addPendingImageFile(file);
+            added = true;
+          }
+        }
+      }
+      if (added) event.preventDefault();
+    });
+    const composerDock = document.getElementById("composerDock");
+    if (composerDock) {
+      composerDock.addEventListener("dragover", (event) => {
+        if (Array.from(event.dataTransfer?.types || []).includes("Files")) {
+          event.preventDefault();
+          composerDock.classList.add("is-dragging");
+        }
+      });
+      composerDock.addEventListener("dragleave", () => composerDock.classList.remove("is-dragging"));
+      composerDock.addEventListener("drop", (event) => {
+        event.preventDefault();
+        composerDock.classList.remove("is-dragging");
+        for (const file of Array.from(event.dataTransfer?.files || [])) addPendingImageFile(file);
+      });
+    }
+    elements.stopButton.addEventListener("click", cancelActiveRun);
+    elements.loginForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitLogin();
+    });
+    elements.newChatButton.addEventListener("click", requestNewConversation);
+    elements.usageButton.addEventListener("click", showUsageView);
+    elements.usageBackButton.addEventListener("click", hideUsageView);
+    if (elements.usageBillingBtn) elements.usageBillingBtn.addEventListener("click", () => {
+      elements.usageBillingEditor.hidden = !elements.usageBillingEditor.hidden;
+    });
+    elements.retryBootstrapButton.addEventListener("click", loadBootstrap);
+    const logsRefresh = document.getElementById("logsRefresh");
+    if (logsRefresh) logsRefresh.addEventListener("click", loadLogs);
+    const logsQuery = document.getElementById("logsQuery");
+    if (logsQuery) logsQuery.addEventListener("keydown", (event) => { if (event.key === "Enter") loadLogs(); });
+    elements.lanQrRefresh.addEventListener("click", refreshQrCode);
+    elements.chatScroll.addEventListener("scroll", () => {
+      state.nearBottom = isNearBottom();
+      if (state.nearBottom) {
+        state.followOutput = true;
+        elements.jumpBottomButton.hidden = true;
+      } else if (!state.programmaticScroll) {
+        state.followOutput = false;
+        elements.jumpBottomButton.hidden = false;
+      }
+    }, { passive: true });
+    elements.chatScroll.addEventListener("wheel", (event) => {
+      if (event.deltaY < 0) state.followOutput = false;
+    }, { passive: true });
+    elements.chatScroll.addEventListener("touchmove", () => {
+      if (!isNearBottom()) state.followOutput = false;
+    }, { passive: true });
+    elements.jumpBottomButton.addEventListener("click", () => scrollToBottom({ force: true, smooth: true }));
+    window.addEventListener("resize", updateJumpButtonOffset, { passive: true });
+    document.addEventListener("keydown", handleGlobalKeydown);
+  }
+
+  // 时间感知问候：空状态的人格舞台文案随时段变化（顾清影的语气，不用 emoji）。
+  function applyTimeGreeting() {
+    const hour = new Date().getHours();
+    let title;
+    let hint;
+    if (hour >= 5 && hour < 11) {
+      title = "早上好";
+      hint = "新的一天，想从哪儿开始";
+    } else if (hour >= 11 && hour < 13) {
+      title = "中午好";
+      hint = "记得先吃饭，再回来找我";
+    } else if (hour >= 13 && hour < 18) {
+      title = "下午好";
+      hint = "忙了一上午，歇一会儿吧";
+    } else if (hour >= 18 && hour < 23) {
+      title = "晚上好";
+      hint = "今晚想聊点什么";
+    } else {
+      title = "这么晚还没睡";
+      hint = "正好，我也习惯在夜里待着";
+    }
+    const titleEl = document.getElementById("emptyTitle");
+    const hintEl = document.getElementById("emptyHint");
+    if (titleEl) titleEl.textContent = title;
+    if (hintEl) hintEl.textContent = hint;
+    // 顶栏日期 chip：今天 · 周几 · 时段
+    const dateChip = document.getElementById("dateChip");
+    if (dateChip) {
+      const now = new Date();
+      const weekday = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][now.getDay()];
+      const period =
+        hour >= 23 || hour < 5 ? "深夜" :
+        hour < 11 ? "上午" :
+        hour < 13 ? "中午" :
+        hour < 18 ? "下午" : "晚上";
+      dateChip.textContent = `今天 · ${weekday} · ${period}`;
+      dateChip.title = formatDateTime(now.toISOString());
+      dateChip.hidden = false;
+    }
+  }
+
+  // 顾清影最近的心情：空状态显示（她的人格外露，只在无对话时出现，不打扰聊天）
+  async function loadMoods() {
+    try {
+      const response = await apiRequest("/api/moods");
+      const data = await response.json();
+      state.moods = Array.isArray(data?.moods) ? data.moods : [];
+      renderMoodLine();
+    } catch (_) { /* 心情接口失败可静默 */ }
+  }
+
+  function renderMoodLine() {
+    const el = document.getElementById("moodLine");
+    if (!el) return;
+    const moods = Array.isArray(state.moods) ? state.moods : [];
+    const latest = moods.find((mood) => String(mood?.content || "").trim());
+    if (!latest) {
+      el.hidden = true;
+      return;
+    }
+    const content = String(latest.content).trim();
+    el.textContent = content;
+    el.title = moods.slice(0, 3).map((mood) => String(mood?.content || "")).join("\n");
+    el.hidden = false;
+  }
+
+  // 背景强度：对话区壁纸/夜空的显示强度（0-100 → 0-1），localStorage 持久化。
+  function defaultBgIntensity() {
+    return document.body.dataset.theme === "moon" ? 100 : 20;
+  }
+
+  function applyBgIntensity(value) {
+    const clamped = Math.max(0, Math.min(100, asFiniteNumber(value, defaultBgIntensity())));
+    document.body.style.setProperty("--bg-intensity", String(clamped / 100));
+    if (elements.bgIntensityRange) elements.bgIntensityRange.value = String(clamped);
+    return clamped;
+  }
+
+  function initBackgroundIntensity() {
+    const stored = safeStorageGet("gqy.web.bgIntensity");
+    const value = stored === null || stored === "" ? defaultBgIntensity() : Number(stored);
+    applyBgIntensity(Number.isFinite(value) ? value : defaultBgIntensity());
+    if (elements.bgIntensityRange) {
+      elements.bgIntensityRange.addEventListener("input", () => {
+        const value = asFiniteNumber(elements.bgIntensityRange.value, defaultBgIntensity());
+        applyBgIntensity(value);
+        safeStorageSet("gqy.web.bgIntensity", String(value));
+      });
+    }
+  }
+
+  // ── 头像自定义：我的头像 / 顾清影头像（压缩到 96px 存 localStorage，仅本机）──
+  const AVATAR_KEYS = {
+    user: "gqy.web.avatarUser",
+    assistant: "gqy.web.avatarAssistant",
+  };
+
+  // 头像来源：顾清影走 localStorage（无后端存储）；用户头像走后端文件（/api/avatar/user），
+  // WKWebView 里 data URL 渲染不可靠（会显示损坏图），改普通 URL 加载最稳。
+  // localStorage 存的是「是否已设置」标记（值 1），避免未设置时 404 破损图。
+  function getAvatar(role) {
+    if (role === "user") {
+      const marker = safeStorageGet("gqy.web.avatarUser");
+      return marker === "1" ? "/api/avatar/user" : null;
+    }
+    const stored = safeStorageGet(AVATAR_KEYS[role] || "");
+    return stored && stored.startsWith("data:image/") ? stored : null;
+  }
+
+  // 保存头像：顾清影(assistant) 仍存 localStorage；我的头像(user) 上传到后端文件，
+  // 前端走 /api/avatar/user 加载——绕开 WKWebView 渲染 data URL 的损坏问题。
+  async function saveUserAvatar(role, dataUrl) {
+    if (role !== "user") {
+      safeStorageSet(AVATAR_KEYS[role], dataUrl);
+      return;
+    }
+    if (!dataUrl || !dataUrl.startsWith("data:image/")) {
+      throw new Error("无效图片数据");
+    }
+    const response = await apiRequest("/api/avatar/upload", {
+      method: "POST",
+      body: JSON.stringify({ data_url: dataUrl }),
+    });
+    const data = await response.json();
+    if (data?.ok !== true) {
+      throw new Error(data?.error || "上传失败");
+    }
+    safeStorageSet("gqy.web.avatarUser", "1");
+  }
+
+  function compressAvatar(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const image = new Image();
+        image.onload = () => {
+          const size = 96;
+          const canvas = document.createElement("canvas");
+          canvas.width = size;
+          canvas.height = size;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) { reject(new Error("canvas unavailable")); return; }
+          ctx.drawImage(image, 0, 0, size, size);
+          resolve(canvas.toDataURL("image/jpeg", 0.85));
+        };
+        image.onerror = () => reject(new Error("invalid image"));
+        image.src = reader.result;
+      };
+      reader.onerror = () => reject(new Error("read failed"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function setupAvatarPicker(role) {
+    const input = document.getElementById(`${role}AvatarInput`);
+    const button = document.getElementById(`${role}AvatarButton`);
+    const clear = document.getElementById(`${role}AvatarClear`);
+    const preview = document.getElementById(`${role}AvatarPreview`);
+    if (!input || !button || !clear || !preview) return;
+    const refresh = () => {
+      const avatar = getAvatar(role);
+      if (avatar) {
+        preview.src = avatar;
+        preview.hidden = false;
+        clear.hidden = false;
+        button.textContent = "更换";
+      } else {
+        preview.hidden = true;
+        clear.hidden = true;
+        button.textContent = "选择图片";
+      }
+    };
+    button.addEventListener("click", () => input.click());
+    input.addEventListener("change", async () => {
+      const file = input.files && input.files[0];
+      input.value = "";
+      if (!file) return;
+      try {
+        const dataUrl = await compressAvatar(file);
+        await saveUserAvatar(role, dataUrl);
+        refresh();
+        showToast(role === "user" ? "我的头像已更新" : "顾清影头像已更新", "info");
+      } catch (error) {
+        // WKWebView 里文件选择器常不可用：明确引导走路径导入
+        showToast(`头像读取失败（${error.message || error}）。可改用下方「输入本机图片路径 → 导入」。`, "error");
+      }
+    });
+    clear.addEventListener("click", () => {
+      safeStorageSet(AVATAR_KEYS[role], "");
+      refresh();
+    });
+    // 路径导入通道：文件选择器在 WKWebView 中不可靠，直接填本机路径最稳
+    const pathInput = document.getElementById(`${role}AvatarPath`);
+    const pathImport = document.getElementById(`${role}AvatarPathImport`);
+    if (pathInput && pathImport) {
+      const importFromPath = async () => {
+        const path = String(pathInput.value || "").trim();
+        if (!path) {
+          showToast("请先输入图片路径", "error");
+          return;
+        }
+        pathImport.disabled = true;
+        pathImport.textContent = "导入中…";
+        try {
+          const response = await apiRequest(`/api/avatar/from-path?path=${encodeURIComponent(path)}`);
+          const data = await response.json();
+          if (data?.ok !== true) {
+            showToast(data?.error || "导入失败", "error");
+            return;
+          }
+          await saveUserAvatar(role, data.data_url);
+          refresh();
+          showToast(role === "user" ? "我的头像已更新" : "顾清影头像已更新", "info");
+        } catch (error) {
+          showToast(error.message || "导入失败", "error");
+        } finally {
+          pathImport.disabled = false;
+          pathImport.textContent = "导入";
+        }
+      };
+      pathImport.addEventListener("click", importFromPath);
+      pathInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") importFromPath();
+      });
+    }
+    refresh();
+  }
+
+  function initAvatars() {
+    setupAvatarPicker("user");
+    setupAvatarPicker("assistant");
+  }
+
+  // 运行日志查看器（设置 → 高级）：kind=run|activity，行数 + 关键词过滤
+  async function loadLogs() {
+    const viewer = document.getElementById("logsViewer");
+    if (!viewer) return;
+    const kind = document.getElementById("logsKind")?.value || "run";
+    const lines = document.getElementById("logsLines")?.value || "200";
+    const query = document.getElementById("logsQuery")?.value.trim() || "";
+    const params = new URLSearchParams({ kind, lines });
+    if (query) params.set("query", query);
+    viewer.textContent = "正在载入…";
+    try {
+      const response = await apiRequest(`/api/logs?${params.toString()}`);
+      const data = await response.json();
+      if (data?.ok !== true) {
+        viewer.textContent = data?.error || "加载失败";
+        return;
+      }
+      const linesList = Array.isArray(data.lines) ? data.lines : [];
+      if (!linesList.length) {
+        viewer.textContent = data.total ? `无匹配（共 ${data.total} 行）` : "暂无日志";
+        return;
+      }
+      viewer.textContent = linesList.join("\n");
+      viewer.title = `${data.file} · 显示 ${linesList.length} / ${data.total} 行`;
+    } catch (error) {
+      viewer.textContent = `加载失败：${error.message || error}`;
+    }
+  }
+
+  // 备份设置页：远程仓库 + 最近快照 + 立即备份 + 恢复指引
+  async function loadBackupSettings() {
+    const card = document.getElementById("backupSettingsCard");
+    if (!card) return;
+    card.textContent = "正在载入…";
+    try {
+      const [settingsRes, statusRes] = await Promise.all([
+        apiRequest("/api/backup/settings"),
+        apiRequest("/api/backup/status"),
+      ]);
+      const settings = await settingsRes.json();
+      const last = await statusRes.json();
+      card.replaceChildren();
+
+      const statusRow = document.createElement("div");
+      statusRow.className = "backup-status-row";
+      const remoteLabel = document.createElement("span");
+      remoteLabel.textContent = settings?.configured
+        ? `远程仓库：${settings.remote || "已配置"}`
+        : "远程仓库：未配置（仅本地快照）";
+      const lastCommit = settings?.last_commit_at
+        ? ` · 最近快照 ${formatRelativeTime(new Date(settings.last_commit_at * 1000).toISOString())}`
+        : " · 暂无快照";
+      const autoPush = document.createElement("span");
+      autoPush.textContent = settings?.configured
+        ? (settings.auto_push ? " · 自动推送已开启" : " · 自动推送未开启")
+        : "";
+      statusRow.append(remoteLabel, document.createTextNode(lastCommit), autoPush);
+      card.appendChild(statusRow);
+
+      const lastRow = document.createElement("div");
+      lastRow.className = "backup-last-row";
+      if (last?.ok) {
+        lastRow.textContent = last.error
+          ? `上次备份失败：${last.error}`
+          : `上次备份成功${last.commit ? `（${String(last.commit).slice(0, 7)}）` : ""}${last.pushed ? " · 已推送远程" : ""}`;
+      } else {
+        lastRow.textContent = "暂无备份记录";
+      }
+      card.appendChild(lastRow);
+
+      const actions = document.createElement("div");
+      actions.className = "backup-actions";
+      const nowButton = document.createElement("button");
+      nowButton.type = "button";
+      nowButton.className = "primary-button";
+      nowButton.textContent = "立即备份";
+      nowButton.addEventListener("click", async () => {
+        nowButton.disabled = true;
+        nowButton.textContent = "备份中…";
+        try {
+          const response = await apiRequest("/api/backup/now", { method: "POST" });
+          const data = await response.json();
+          showToast(data?.ok ? `备份完成${data.pushed ? "，已推送远程" : ""}` : (data?.error || "备份失败"), data?.ok ? "info" : "error");
+          loadBackupSettings();
+        } catch (error) {
+          showToast(error.message || "备份失败", "error");
+        } finally {
+          nowButton.disabled = false;
+          nowButton.textContent = "立即备份";
+        }
+      });
+      actions.appendChild(nowButton);
+      card.appendChild(actions);
+
+      const guide = document.createElement("div");
+      guide.className = "backup-guide";
+      const heading = document.createElement("h3");
+      heading.textContent = "换机恢复";
+      const steps = document.createElement("pre");
+      steps.textContent = `1. 新机器安装 GQY\n2. 终端执行：\n   gqy backup restore --remote <仓库URL> --ssh-key <密钥路径>\n3. 重启 GQY，顾清影带着全部记忆回来`;
+      guide.append(heading, steps);
+      card.appendChild(guide);
+    } catch (error) {
+      card.textContent = `载入失败：${error.message || error}`;
+    }
+  }
+
+  // 好感度详情页：分数条 + 等级 + 累计交互 + 当日增减 + 印象/标签
+  async function loadAffection() {
+    const card = document.getElementById("affectionCard");
+    if (!card) return;
+    card.textContent = "正在载入…";
+    try {
+      const res = await apiRequest("/api/affection");
+      const data = await res.json();
+      card.replaceChildren();
+
+      const score = Math.max(0, Math.min(100, Number(data.score) || 0));
+      const level = String(data.level || "生疏");
+
+      const topRow = document.createElement("div");
+      topRow.className = "affection-top";
+      const scoreNum = document.createElement("div");
+      scoreNum.className = "affection-score";
+      scoreNum.textContent = String(Math.round(score));
+      const levelLabel = document.createElement("div");
+      levelLabel.className = "affection-level";
+      levelLabel.textContent = level;
+      topRow.append(scoreNum, levelLabel);
+      card.appendChild(topRow);
+
+      const bar = document.createElement("div");
+      bar.className = "affection-bar";
+      const fill = document.createElement("div");
+      fill.className = "affection-bar-fill";
+      fill.style.width = `${score}%`;
+      bar.appendChild(fill);
+      card.appendChild(bar);
+
+      const stats = document.createElement("dl");
+      stats.className = "affection-stats";
+      const rows = [
+        ["累计对话", `${Number(data.message_count) || 0} 轮`],
+        ["今日加分", `+${(Number(data.daily_gain) || 0).toFixed(1)}`],
+        ["今日减分", `-${(Number(data.daily_loss) || 0).toFixed(1)}`],
+        ["开始记录", data.created_at ? new Date(Number(data.created_at) * 1000).toLocaleDateString("zh-CN") : "—"],
+      ];
+      for (const [k, v] of rows) {
+        const div = document.createElement("div");
+        const dt = document.createElement("dt");
+        dt.textContent = k;
+        const dd = document.createElement("dd");
+        dd.textContent = v;
+        div.append(dt, dd);
+        stats.appendChild(div);
+      }
+      card.appendChild(stats);
+
+      const tags = Array.isArray(data.tags) ? data.tags.filter(Boolean) : [];
+      if (tags.length) {
+        const tagRow = document.createElement("div");
+        tagRow.className = "affection-tags";
+        tagRow.textContent = "印象：" + tags.join("、");
+        card.appendChild(tagRow);
+      }
+      if (String(data.note || "").trim()) {
+        const note = document.createElement("div");
+        note.className = "affection-note";
+        note.textContent = String(data.note).trim();
+        card.appendChild(note);
+      }
+
+      const hint = document.createElement("p");
+      hint.className = "settings-description";
+      hint.textContent = "好感度会随你们真实相处自然变化，是顾清影记得你的方式之一。";
+      card.appendChild(hint);
+    } catch (error) {
+      card.textContent = `载入失败：${error.message || error}`;
+    }
+  }
+
+  function initialize() {
+    renderIconSlots();
+    applyTimeGreeting();
+    // 时段问候随时间刷新：跨过 5/11/13/18/23 点边界时文案自动切换（此前只在加载时算一次）
+    window.setInterval(applyTimeGreeting, 60_000);
+    setTheme(safeStorageGet("gqy.web.theme") || "graphite", false);
+    initBackgroundIntensity();
+    initAvatars();
+    // 单模式（自动情境）：统一 normal，清掉旧三模式存储，避免残留 chat/plan 影响内部逻辑
+    setMode("normal", false);
+    safeStorageSet("gqy.web.mode", "normal");
+    setSettingsView(safeStorageGet("gqy.web.settingsView") || "interface");
+    bindEvents();
+    resizeComposer();
+    updateSettingsControls();
+    loadBootstrap();
+  }
+
+  initialize();
+})();

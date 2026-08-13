@@ -3,6 +3,171 @@
 本项目所有值得记录的改动都会列在此文件。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### QQ onebot 平台接入（第一阶段：文本双向通道）
+
+- **`gqy qq` 命令**：反向 WebSocket 监听（默认端口 8300，`--port` 覆盖），NapCat / LLOneBot 等 onebot v11 客户端主动连入；
+- **配置**（`config qq.*`）：`enabled` / `reverse_ws_port` / `access_token`（与 NapCat 的 `Authorization: Bearer` 对应，空串仅允许回环）/ `admin_users` / `max_reply_chars`；
+- **鉴权**：Bearer token 常量时间比对（空 token 仅回环放行），握手头 `x-self-id` 记录本机 QQ 号；
+- **消息入站**：私聊文本直达 agent 循环（channel = "qq"，沿用现有 Agent + StateStore）；群聊仅响应 @ 了机器人或呼名「清影」的消息（at 段解析，避免打扰）；
+- **发送者识别**（Miyu user_identification）：回合输入前注入 `[QQ 私聊/群聊] 发消息的人 QQ …`，顾清影知道在和谁说话；
+- **回复出站**：`send_private_msg` / `send_group_msg`，超过 `max_reply_chars` 自动拆分多条；
+- **心跳保活**：`meta_event_type=heartbeat` 回 `get_status` 保持连接；
+- **回复引用**：回复首条自动带 `reply` 段引用原消息；
+- **限流**：非管理员每 QQ 号 2 条/10 分钟（窗口内超限静默丢弃，管理员不限）；
+- **用量来源**：QQ 轮的 token 明细以 `src=qq` 落账（StateStore 按通道注入来源），用量页「来源构成」可见 QQ 消耗；
+- **会话隔离**（Miyu per-conversation）：私聊每人一个会话（`qq-p-<QQ>`）、群聊每群一个会话（`qq-g-<群号>`），历史与记忆互不串台（E2E 验证：A 的暗号 B 看不到）；
+- **图片入站**：提取 image 段 URL 注入回合上下文，顾清影可调用「分析图片」查看（NapCat 等带 url 直连）；
+- **应答式 API 调用**（Miyu call_api）：echo→oneshot 表 + 并发收读循环——连接循环拆分收发，消息处理跑独立任务，`get_group_info` 等调用不再因等待响应而卡死；
+- **群名上下文**（Miyu show_group_name）：群聊回合先 `get_group_info` 查群名注入（失败退化群号），E2E 验证「夜猫子之家」正确出现在她上下文；
+- **图片解析**：无直连 URL 的图片段自动 `get_image` 解析成本地路径再注入（有 URL 直连），顾清影可分析 QQ 收到的图；
+- **转告主人（notify_owner 工具）**：别人让顾清影带话时，她调用工具写入 outbox，连接可用即 QQ 私信主人（默认 1950930166，`qq.owner_qq` 可改）；昵称解析（`get_stranger_info`/`get_group_member_info`）让转告带上对方昵称；
+- **重要事件转告**：`qq.forward_events` 开启后，后台轮询事件源（watch/disk），投递成功的事件写入 outbox 私信主人；
+- **限流可配置**：`qq.rate_limit_max` / `qq.rate_limit_window`（默认 2 条/600s）；主人恒为管理员；
+- **人格认知**：顾清影知晓 Miyu（技术远亲）与 SHORiN-KiWATA（其开发者）、NapCat（QQ 桥）、主人 QQ 通道，涉及这些话题如实回答；
+- **App 集成**：设置新增「QQ 机器人」开关——开启后 App 启动拉起 `gqy qq` 子进程、退出即终止（与 web 后端同管理模式）；
+- **NapCat 接入调研**：NapCat.Shell v4.18.18 已装入 `~/Library/Application Support/gqy/napcat/`（含 darwin.arm64 native，native 模块已本地重签以过 Gatekeeper）；实测 macOS 上 QQ 协议核心（major/wrapper.node）原生运行 SIGSEGV，**官方仅支持 macOS Docker 方式**——接入指南与 Docker 命令写入 `gqy/src/scripts/napcat-setup.md`，顾清影对此有认知；
+- **QQ 会话查看工具（qq_conversations）**：顾清影在终端/WebUI 主通道可用 `qq_conversations` 工具列出所有 QQ 会话（群聊/私聊含摘要）并读取某个会话的对话内容（剥掉发送者上下文前缀，含 token 数）——主人不在 QQ 侧也能知道那边发生了什么（E2E 验证）；
+- **出站图片（qq_send_image）**：顾清影可把本机图片（如生成图）发给当前 QQ 会话——media outbox 按会话隔离，回合后 base64:// 段发送（上限 20MB，E2E 验证 2×2 测试图送达）；
+- **入站文件（fetch_inbound_files）**：QQ 用户发的文件段自动下载到 `data_dir/files/incoming/`（直连 url 或 file_id 走 `get_*_file_url` 解析，上限 50MB，文件名安全化）并注入路径——顾清影可用 read_file 读取内容（E2E 验证测试文件内容正确读出）；
+- **出站文件（qq_send_file）**：顾清影可把本机文件发给当前 QQ 会话（media outbox 支持 kind=file，base64:// 段 + 文件名，上限 50MB，E2E 验证「转告.txt」送达）；
+- **群管指令**：`/mute <QQ> <分钟>`（set_group_ban）、`/unmute <QQ>`、`/kick <QQ>`（set_group_kick）、`/quit`（set_group_leave）、`/conversations` 列会话、`/help`——仅群聊 + 管理员可用（E2E 验证 /mute 888001 5 分钟 → set_group_ban API）；
+- **引用消息上下文**：对方回复某条消息（reply 段）时，用 `get_msg` 取回被引用内容注入回合——顾清影能接住「你刚说的那句话」这类话题（E2E 验证引用「紫罗兰是暗号」正确进入她上下文）；
+- **好友/加群申请**：主人（owner_qq）的加好友/被拉群申请自动通过（set_friend_add_request / set_group_add_request）；其他人的申请写入转告 outbox 通知主人待审批（含备注）；**outbox 周期性排空**（5s）让转告及时送达，不再依赖重连（E2E 验证：主人自动通过 + 陌生人申请 5 秒内转告）；
+- **会话并发闸**（Miyu session limits 思路）：同一会话已有回合在跑时，非管理员的新消息立即提示「正在处理上一条消息」并丢弃（防连发打爆；管理员/主人不限），回合结束自动释放（E2E 验证：300ms 内第二条消息收到稍候提示）；
+- **昵称/群名片缓存**（仿 Miyu MentionNameCache）：私聊昵称与群成员名片按 TTL 10 分钟缓存，命中则不再发 get_stranger_info / get_group_member_info API（E2E 验证：同用户两条消息只发 1 次 API，第二条走缓存）；
+- **群名缓存**：get_group_info 同按 TTL 缓存，减少群聊消息的 API 往返；
+- **`/stop` 管理指令**：取消当前会话进行中的回合（结束时不发回复，下一条重新开始），仅管理员可用（E2E 验证）；
+- **中间消息（intermediate_messages）**：`qq.intermediate_messages` 开启后，回合流式输出每攒够约 60 字发一条中间消息——长回复边生成边到，不等到底（Miyu 同款体验，E2E 验证多条 [中间] 实时到达）；
+- **WebUI 设置页 QQ 配置组**：设置 → 全局 新增「QQ 机器人」组——启用开关/端口/Token/主人 QQ/管理员列表/回复拆分/限流/事件转告/中间消息 全部 GUI 可配（/api/config 完整返回 10 个 qq 字段，保存即生效）；
+- **QQ 会话进 WebUI 通道列表**：channel_summaries 含 qq 通道，WebUI 侧边栏自动出现「QQ」通道项（channelLabel/图标已支持），点击即读该通道对话——主人可在主界面直接查看 QQ 会话（单测验证）；
+- **通知类事件（notice）**：群成员加入自动欢迎（「欢迎新群友！我是顾清影…」，防刷屏只对新人有动作）、消息撤回静默记录不打扰（E2E 验证群成员加入欢迎）；
+- **引用图片合并**（Miyu merge_quoted_message_images）：回复带图消息时，被引用消息里的图片 URL 一并注入上下文——顾清影可直接分析对方引用里的图（E2E 验证：引用录取分数表图片被正确分析）；
+- **语音消息转写**（record 段）：下载语音（直连 url 或 get_record 解析）→ macOS 原生 speech 转写（离线免费，独立线程 + 20s 超时防卡）→ 文本注入上下文——顾清影能听懂对方发的语音（E2E 验证复述语音内容）；
+- **表情/emoji 段**：face 转 `[表情<id>]` 占位、emoji 取文本——纯表情消息不再被丢弃，顾清影能回应（E2E 验证单发表情收到回应）；
+- **视频段**（video）：并入文件下载通道（直连 url 或 file 名），下载到 files/incoming/ 并注入路径——顾清影可检查对方发的视频文件（E2E 验证下载+检查）；
+- **CQ 字符串消息**：部分客户端把消息发成 `[CQ:image,url=...]` 字符串——提取图片直链注入（CQ 码剥离保留正文），顾清影可分析（E2E 验证）；
+- **@全体（at qq=all）**：视为点名回应（`[全体]` 占位注入），群消息不再因 @all 被过滤器丢弃（E2E 验证）；
+- **连接注册表**（仿 Miyu ConnectionRegistry）：按 self_id 跟踪活跃 NapCat 连接（多账号可见），断开自动注销；管理指令 `/connections` 列出已连接账号与活跃时间（E2E 验证）；
+- **自身禁言感知**（仿 Miyu bot_send_availability）：群消息先查 `get_group_member_info(self_id).shut_up_timestamp`——被禁言的群直接跳过回合不浪费 token（TTL 30s 缓存，查不到按未禁言，E2E 验证禁言群不回复）；
+- **群上下文注入**（仿 Miyu group_context）：`get_group_info` 一次取群名+群公告/简介（截断 200 字）注入回合——顾清影知道群规群况（E2E 验证：公告内容正确回答）；
+- **消息撤回转告**：群/私聊消息被撤 → 转告主人（谁撤的、哪个群/私聊），主人不在 QQ 侧也能知道（E2E 验证）；
+- **修复：我的头像在 App 显示损坏**——根因是 WKWebView 渲染 localStorage 里的大段 data URL 不可靠；改为后端文件存储（`/api/avatar/upload` 存 pictures/avatars/user.jpg，`/api/avatar/user` 读取），前端直接 `<img src>` 加载，绕开 data URL；顾清影头像仍走 localStorage（E2E 验证上传/读取 200）；
+- **修复：空状态时段问候不刷新**——`applyTimeGreeting` 此前只在加载时算一次，页面开着跨时段不更新；加 1 分钟定时器自动重算（跨 5/11/13/18/23 点自动切换文案与日期 chip）；
+- **按会话模型路由**：`qq.conversations` 路由表（conversation_id 前缀 → 供应商+模型），命中则在 QQ 回合按该会话用指定模型，未命中走全局配置——不同会话可分流省钱/体验（可配置，编译通过）；
+- **管理指令**（仅 `admin_users` 中的 QQ 号）：`/status` 在线状态、`/affection` 好感度快照；
+- 阶段说明：当前为文本最小闭环（消息 → 顾清影 → 回复），图片/文件/群管/限流等 Miyu 完整能力按后续阶段补齐；用量记录 `src` 已预留 "qq"。
+
+### 插件框架 + 好感度 + 打扰判断（借鉴 Miyu 的插件协议）
+
+- **插件协议**（`src/plugins/mod.rs`）：`Plugin` trait（描述符 / 工具注册 / 轮次完成钩子 / 打扰判断）+ `default_plugins()` 注册表——系统能力（watch 管家、好感度）收编为插件，新能力 = 实现一个 Plugin 注册一行，不改 agent 循环；
+- **好感度（affection）**：`data/affection.json` 存关系档案（分数/等级/印象/标签/累计对话/当日增减），每轮对话后按内容与情境自动增减（深夜倾诉、任务利落加分，每日增益/减损上限），注入对话上下文 `<affection .../>`；顶栏**好感度芯片**（分数 · 等级，点击直达设置页）+ 设置 → 数据 → **好感度详情页**（分数条 / 等级 / 累计 / 当日增减 / 印象标签）；新增 `/api/affection`；
+- **打扰判断（judge）**：系统主动事件（watch/disk）投递前先走本地规则（深夜 23-7 点压制，除非磁盘告急），再由模型五维打分（relevance/urgency/timing/noise/continuity），低于阈值不打扰；`events.rs` 投递链（deliver/poll_source/poll_all）改为 async 以支持模型判断；
+- **watch 管家收编为插件**：`watch_plugin.rs` 实现深夜本地规则 + 模型判断入口。
+- **修复**：`affection_status` 工具参数 schema 缺 `type: object` 导致 provider 拒绝请求，已补全（E2E 验证 QQ 通道时发现）。
+
+### 用量页对齐 Miyu：时间范围 + 来源构成 + 明细过滤
+
+- **时间范围分段**：用量页顶部 近 1 天 / 7 天 / 30 天 / 至今，切换即重拉统计——摘要卡（总消耗/请求/缓存命中率/费用）与柱状图随范围联动（至今 = 按周聚合），带**环比差**（对比上一等长窗口）；
+- **缓存命中率卡**：命中/输入侧占比一目了然；
+- **来源构成**：按 智能体（agent）/通讯平台 拆分消耗，每来源一张卡（模型占比条 + 请求/token/费用），为 QQ 等平台接入预留；
+- **最近调用明细**：新增按来源/模型下拉过滤（`/api/usage/details` 支持 src/model 查询参数）；记录行新增来源徽标；
+- **每条回复的费用估算**：消息 meta 新增本次调用费用（按用量页单价表，未配置按默认价）；
+- 后端：`UsageRecord` 新增 `src` 字段（旧记录归 agent），`usage_stats` 支持 `UsageRange`（1d/7d/30d/all + range_totals/prev_totals/sources/first_ts）。
+
+### 备份可视化 + App 壳体验
+
+- **备份设置页**（设置 → 数据 → 备份）：远程仓库显示（URL 脱敏）、最近快照时间、自动推送状态、立即备份按钮（含推送结果）、上次结果详情、换机恢复指引；
+- **`/api/backup/settings`**：远程配置快照 + 最近 commit；
+- **修复隐藏 bug**：`GqyPaths::isolated_home()` 此前只读环境变量——默认布局改造后，未设 GQY_HOME 时备份/恢复全部静默失败（"Git backup requires an isolated GQY_HOME"）；现在默认返回隔离根，备份恢复全链路恢复（实测新快照已提交并推送 GitHub 私有仓库）；
+- **App 首次启动引导页**：欢迎 + 右键放行说明 + 数据目录 + 备份提醒（UserDefaults 记忆，只出现一次）；
+- **App 悬浮窗模式**：菜单「顾清影 → 打开悬浮窗」——置顶小卡片窗口（复用 WebUI ?panel=1 单聊形态）；
+- **壳设置页扩展**：数据目录（GQY_HOME）显示 + 备份指引；
+- App 打包验证通过（build-app.sh 产物含全部新资源）。
+
+### 体验五件套：重试修复 + meta 增强 + 模型位置 + 上下文条 + 日志系统
+
+- **重试按钮修复**：流式对话失败/停止时（run.failed/cancelled），实时用户消息立即补「重新生成」按钮（此前要刷新后才有）；纯图消息、思考后无输出（占位回复）的轮次也可重试；
+- **回复 meta 增强**：底部信息从「约 46.6k tokens」扩展为「模型名 / 耗时 Ns / 总 token · 入 X · 出 Y · 缓存 Z」——turns 表新增 prompt/completion/cache_read 三列（自动迁移），模型名默认显示（不再受 show_mixed_model_endpoint 限制）；
+- **模型切换移到输入框上方**：从顶栏移到 composer 上方（主流位置），菜单向上弹出；顶栏更干净；
+- **上下文条**：3px → 6px 圆角胶囊，悬停显示「已用 / 窗口 / 剩余 / 百分比」（流式中含本轮估算）；
+- **日志系统**：WebUI 设置 → 高级 新增日志查看器（运行日志 gqy.*.log / 活动记录 activity.jsonl，行数 + 关键词过滤）；新增 `/api/logs`；新增 **read_logs 工具**——顾清影遇到问题可以自己翻日志找原因；
+- **失败详情可见**：发送失败的轮次显示具体原因（原有机制保留，配合重试按钮可用）；
+- 修复：webui smoke 测试读取上限 1MB → 16MB（app.js 产物已超 1MB）。
+
+### 用量图重做 + 图片预览闭环
+
+- **Token 消耗图重做**：修复时区 bug（此前用 `toISOString` 取 UTC 日期查本地日期的数据，东八区凌晨错位一天）；GitHub 格子热力图改为**近 52 周周聚合柱状图**（主流用量图形态：柱高 = 周 token 总量，hover 看明细，月份标签 + 峰值周图例）；
+- **输入框图片托盘点击灯箱**：粘贴/拖入的待发送图片，点击缩略图即可全屏预览；
+- **消息内 http(s) 图片链接自动预览**：模型回复里出现的图片直链（https://…x.png）自动内嵌缩略图，点击灯箱；远端加载失败自动回退为普通链接文本；本地路径预览沿用 `/api/files/preview`；
+
+### 模式三合一：一个顾清影，情境自适应
+
+- **移除普通/计划/闲聊三模式**：WebUI 模式按钮改为「自动」指示——任务来了就利落，聊开了就放松，她根据对话性质自己调整态度；发送统一走 normal；
+- **情境纪律提示词**（`work-mode.md` 重写为「情境纪律」）：任务情境（结论先行/不玩梗/不推表情包/低把握才报不确定）与闲聊情境（可玩梗/可发表情包/温柔回应情绪/深夜不打扰）划清边界，但始终是顾清影；
+- **历史连贯**：会话历史不再按模式隔离——chat/plan 旧轮次与 normal 按 seq 全局混排显示，她的记忆是一条线；
+- **心情进 UI**：新增 `/api/moods`（读 log_mood 记录），空状态显示她最近的心情（如「心情：开心（项目跑通了）」），hover 看最近三条；
+- 内部 AgentMode 机制保留（防御），工具集/事件过滤代码未删。
+
+### WebUI 第二轮打磨：死代码清零 + 会话管理 + 页面细节
+
+- **eslint 0 error 0 warning**：清理全部 8 个存量死代码（未用函数 `addPendingImageDataUrl`/`pendingImagesPayload`、未用变量 `billing`/`tokens`、未用参数、空块）；**修复断点**：`createAssistantMessage` 的 `reasoningTitle` 参数此前从未生效（硬编码「已思考」），现在真正传入推理块标题；
+- **侧边栏**：历史会话按「今天/昨天/更早」分组，空态提示（虚线框）；
+- **历史会话交互**：新增**删除会话**（后端 `DELETE /api/conversations/{id}` + 前端 hover 删除按钮 + 确认弹窗 + SSE `conversation.deleted` 多端同步）；
+- **用量页**：摘要卡片加「占累计 %」上下文，数值等宽对齐（tabular-nums），卡片 hover 微效；
+- **设置页**：记住上次打开的分区（localStorage），下次打开直接回到那里；
+
+### WebUI 氛围升级：月神主题 + 人格舞台 + 交互仪式感
+
+- **新增月神主题**：月夜深蓝系（`data-theme="moon"`），与石墨/浅色并列三主题；侧栏按钮循环切换（graphite → moon → linen）；设置面板主题选择器三选一；meta theme-color 同步；代码块头部/预览横幅颜色变量化，主题可全覆盖；
+- **空状态人格舞台**：顾清影头像 + 月白呼吸光环（纯 CSS，零新增资源），入场动画；**时间感知问候**——早上好/中午好/下午好/晚上好/「这么晚还没睡」，深夜有她的人设感（「正好，我也习惯在夜里待着」）；
+- **顶栏人格化**：新增日期 chip（今天 · 周几 · 时段）；
+- **背景氛围层**：石墨壁纸透明度提升（0.16 → 0.2/0.26）；月神主题下壁纸让位给月夜——深蓝夜空渐变 + 顶部洒下的月光；
+- **回复仪式感**：回复完成时头像完成光晕（一次性呼吸收尾）；
+- **空闲存在感**：月神主题下极缓的月相光斑漂移（60s 周期，`prefers-reduced-motion` 时关闭）；
+- **发送反馈**：发送/停止按钮按压缩放（90ms）；
+- 删除 `docs/preview/moon-theme-preview.png`（与项目无关的杂物，用户确认）。
+
+### WebUI 体验优化：长对话性能 + 手机端细节
+
+- **历史渲染分批化**：`renderConversation` 从一次全量渲染改为每帧 15 条（rAF 分帧），几百轮历史切换/重载不再产生阻塞主线程的长任务，首帧立即可见；
+- **渲染令牌防竞态**：重载/切会话时旧批次排队的 rAF 回调自我废弃，不会往新 timeline 续写旧数据；
+- **超长消息折叠**：历史消息超过 1600 字符先渲染 800 字符预览 + 「展开全文」按钮（含剩余字数），点击才渲染全文——避免巨型 markdown 解析卡死首屏；流式消息不受影响（live 渲染另有节流路径）；
+- **浏览历史会话不再强制跳底**：查看历史会话/通道时保持滚动位置（从头看），返回当前对话才滚到底；
+- **手机端细节**：发送/停止按钮加大到 42px 触摸目标；viewport 加 `interactive-widget=resizes-content`（Android Chrome 键盘弹出时视口正确收缩）；
+
+### 架构重构：工作/情感双人格驱动 + 事件源插件面
+
+围绕「贾维斯（干活）+ 陪伴（情感）」双身份，把骨架从「以对话为中心」翻成「事件内核 + 双插件面 + 双人格驱动」，每一步可发布、数据不迁移。
+
+#### 新增
+- **工作模式纪律块（`prompts/work-mode.md`）**：Normal 模式追加工作纪律（简洁直接、结论先行、禁 emoji/表情包/玩梗、把握程度只在低把握时说明、任务优先不闲聊），运行时可用 `GQY_HOME/config/prompts/work-mode.md` 覆盖；人格文件本体（gqy.md 等）一行未动。
+- **陪伴模式硬隔离（消息来源标记）**：`queued_prompts` 新增 `source` 列（`user` / `system` / `app`，老库自动迁移默认 user）；`gqy watch` 等系统主动事件以 `source=system` 入队；**Chat 模式消费时丢弃 system 来源**——磁盘告警等系统噪音永不侵入深夜闲聊。
+- **表情包自动提醒收敛到陪伴模式**：Normal（工作）不再主动推表情包，用户主动要求时表情包工具照常可用。
+- **EventSource 事件源插件面（`src/events.rs`）**：`EventSource` trait + 默认注册表；`gqy watch` 从旁路命令升级为事件源循环，新增磁盘水位监控（`disk`，默认 90% 告警，`GQY_DISK_WARN_USED_PERCENT` 可调）；新增主动提醒 = 实现 trait 注册一行，不再改对话循环。
+- **高危命令代码级确认**：`run_command` 命中破坏性/提权模式（`rm -rf /`、`sudo rm`、`diskutil erase`、`mkfs`/`newfs`、`launchctl unload/bootout`）时，先弹确认再执行，拒绝即拦截（fail-closed）；词边界匹配，不误伤 `rm -rf /tmp/xxx` 等合法清理。
+- **工具输出消毒（prompt injection 防线）**：网页/文件/命令输出视为外部不可信内容，回注模型上下文前剥离伪造的 `system-reminder` 标签。
+
+#### 修复
+- **存量测试破损**：`WebArgs` 新增 `preview` 字段后 cli 测试未同步（`cargo test --no-run` 编译失败），已补 `preview: _`。
+
+### WebUI 稳定性防线：轻量构建链 + 错误边界 + smoke 测试
+
+- **前端源码模块化起步**：`app.js` 迁移为 `src/main.js`（源码）+ `src/utils.js`（纯工具函数），esbuild 打包回单文件 `app.js` 提交进 git——**cargo build 不依赖 node**，改源码后 `npm run build` 重新生成；
+- **eslint 静态检查（0 error 底线）**：`no-undef` 为 error，抓到并修复**存量真 bug**——`assistant.delta` 事件处理调用了从未定义的 `clearIdleSyncTimer()`，每次事件都抛 ReferenceError 被 catch 吞掉，导致 `appendAssistantDelta` 不执行、**流式正文增量可能丢失**（表现为偶尔流式卡顿/需刷新）；
+- **全局错误边界**：未捕获异常/未处理的 Promise 拒绝显示错误遮罩（带复制错误信息/重新载入按钮），替代白屏——这是最后一道网；
+- **Rust 侧 smoke 测试**（`webui_assets_smoke`）：关键 DOM id 存在性 + 静态资源可加载，防止拆分/重构漏引用；
+- 遗留记录：8 个 warnings（死代码 `addPendingImageDataUrl`/`pendingImagesPayload`、未用赋值 `tokens`/`billing`/`reasoningTitle` 等），均不影响运行，待后续清理。
+
+### TTS 克隆音色：找回丢失脚本 + 运行时路径解析
+
+- **恢复 `tts-server.py` / `qwen3-tts.py`**：restructure 时脚本被误删（`f948f5c`/`b7d0103`）但代码引用一直在——从 git 历史找回，放回 `gqy/src/scripts/`（build-app.sh 自动打进 App 的 share/gqy/scripts）；
+- **`spawn_tts_server` 运行时路径解析**：不再用编译期硬编码（App 打包后必然指向构建机路径），改为按优先级解析：`GQY_TTS_SCRIPT`/`GQY_TTS_PYTHON` 环境变量 → `GQY_HOME/scripts/`+`GQY_HOME/venv`（自托管，随备份迁移）→ 可执行文件旁 `share/gqy/scripts/`（App/brew 内嵌）→ 源码树；找不到时给安装指引；
+- **按需拉起 + 健康轮询**：`speak`/`/api/tts` 服务不可达时自动拉起并轮询 `/health`（`GQY_TTS_START_TIMEOUT` 可覆盖超时，首次运行需下载模型约 1GB）；子进程由后台线程回收，不再积累僵尸；
+- **修掉 blocking reqwest 在 tokio runtime 下的 panic**：TTS HTTP 改用 macOS 自带 `curl`（与 watch 投递同一模式）；
+- **一键安装脚本 `tts-setup.sh`**：源码模式 venv 建在仓库 `gqy/venv`；App/CLI 模式装到 `GQY_HOME`（随备份迁移）；含音色克隆三要素指引（参考音频/参考文本/模型）。
+
 ## [0.9.2] - 2026-08-10
 
 ### 新增

@@ -68,6 +68,9 @@ pub struct Turn {
     pub owner_pid: Option<i64>,
     pub token_total: u64,
     pub token_usage_estimated: bool,
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub cache_read_tokens: u64,
 }
 
 /// 通道摘要（WebUI 左侧通道列表）：最近可见消息 + 条数 + 运行状态
@@ -108,6 +111,9 @@ pub struct QueuedPrompt {
     pub display_content: String,
     pub attachments: Vec<QueuedPromptAttachment>,
     pub submitted_at: String,
+    /// 消息来源：user（用户消息）/ system（系统主动事件，如 watch 管家提醒）/ app（应用注入）。
+    /// 陪伴模式（Chat）硬隔离时按此字段丢弃 system 来源，主动事件永不侵入闲聊。
+    pub source: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -216,6 +222,7 @@ impl ConversationDb {
                 display_content             TEXT NOT NULL,
                 attachments                 TEXT NOT NULL DEFAULT '[]',
                 status                      TEXT NOT NULL DEFAULT 'queued',
+                source                      TEXT NOT NULL DEFAULT 'user',
                 submitted_at                TEXT NOT NULL,
                 queue_session_id             TEXT,
                 owner_pid                    INTEGER,
@@ -249,6 +256,9 @@ impl ConversationDb {
         add_column_if_missing(&conn, "turns", "queue_session_id", "TEXT")?;
         add_column_if_missing(&conn, "turns", "mode", "TEXT NOT NULL DEFAULT 'normal'")?;
         add_column_if_missing(&conn, "turns", "token_total", "INTEGER NOT NULL DEFAULT 0")?;
+        add_column_if_missing(&conn, "turns", "prompt_tokens", "INTEGER NOT NULL DEFAULT 0")?;
+        add_column_if_missing(&conn, "turns", "completion_tokens", "INTEGER NOT NULL DEFAULT 0")?;
+        add_column_if_missing(&conn, "turns", "cache_read_tokens", "INTEGER NOT NULL DEFAULT 0")?;
         add_column_if_missing(
             &conn,
             "turns",
@@ -280,6 +290,7 @@ impl ConversationDb {
             "TEXT",
         )?;
         add_column_if_missing(&conn, "queued_prompts", "preceding_assistant_model", "TEXT")?;
+        add_column_if_missing(&conn, "queued_prompts", "source", "TEXT NOT NULL DEFAULT 'user'")?;
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_turns_visible_seq ON turns(hidden, seq);
              CREATE INDEX IF NOT EXISTS idx_turns_visible_summary_seq
@@ -387,7 +398,18 @@ impl ConversationDb {
         content: &str,
         reasoning: Option<&str>,
     ) -> Result<()> {
-        self.complete_turn_with_usage(turn_id, content, reasoning, None, None, None, false)
+        self.complete_turn_with_usage(
+            turn_id,
+            content,
+            reasoning,
+            None,
+            None,
+            None,
+            false,
+            None,
+            None,
+            None,
+        )
     }
 
     pub fn complete_turn_with_usage(
@@ -399,6 +421,9 @@ impl ConversationDb {
         model: Option<&str>,
         token_total: Option<u64>,
         token_usage_estimated: bool,
+        prompt_tokens: Option<u64>,
+        completion_tokens: Option<u64>,
+        cache_read_tokens: Option<u64>,
     ) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         let now = Utc::now().to_rfc3339();
@@ -407,7 +432,8 @@ impl ConversationDb {
         conn.execute(
             "UPDATE turns SET assistant_content = ?1, assistant_reasoning = ?2,
                     assistant_provider_id = ?3, assistant_model = ?4, assistant_timestamp = ?5,
-                    status = 'completed', token_total = ?6, token_usage_estimated = ?7
+                    status = 'completed', token_total = ?6, token_usage_estimated = ?7,
+                    prompt_tokens = ?9, completion_tokens = ?10, cache_read_tokens = ?11
              WHERE turn_id = ?8",
             params![
                 content,
@@ -417,7 +443,10 @@ impl ConversationDb {
                 now,
                 token_total,
                 token_usage_estimated,
-                turn_id
+                turn_id,
+                prompt_tokens.unwrap_or(0) as i64,
+                completion_tokens.unwrap_or(0) as i64,
+                cache_read_tokens.unwrap_or(0) as i64
             ],
         )?;
         Ok(())
@@ -540,6 +569,7 @@ impl ConversationDb {
         Ok(())
     }
 
+    /// 入队一条消息（默认来源 user）。
     pub fn enqueue_prompt(
         &self,
         prompt_id: &str,
@@ -549,14 +579,36 @@ impl ConversationDb {
         queue_session_id: &str,
         owner_pid: u32,
     ) -> Result<QueuedPrompt> {
+        self.enqueue_prompt_with_source(
+            prompt_id,
+            content,
+            display_content,
+            attachments,
+            queue_session_id,
+            owner_pid,
+            "user",
+        )
+    }
+
+    /// 入队一条消息并显式标注来源（user / system / app）。
+    pub fn enqueue_prompt_with_source(
+        &self,
+        prompt_id: &str,
+        content: &str,
+        display_content: &str,
+        attachments: &[QueuedPromptAttachment],
+        queue_session_id: &str,
+        owner_pid: u32,
+        source: &str,
+    ) -> Result<QueuedPrompt> {
         let conn = self.conn.lock().unwrap();
         let submitted_at = Utc::now().to_rfc3339();
         let attachments_json = serde_json::to_string(attachments)?;
         conn.execute(
             "INSERT INTO queued_prompts
-                (prompt_id, content, display_content, attachments, status, submitted_at,
+                (prompt_id, content, display_content, attachments, status, source, submitted_at,
                  queue_session_id, owner_pid)
-             VALUES (?1, ?2, ?3, ?4, 'queued', ?5, ?6, ?7)",
+             VALUES (?1, ?2, ?3, ?4, 'queued', ?8, ?5, ?6, ?7)",
             params![
                 prompt_id,
                 content,
@@ -564,7 +616,8 @@ impl ConversationDb {
                 attachments_json,
                 submitted_at,
                 queue_session_id,
-                owner_pid as i64
+                owner_pid as i64,
+                source
             ],
         )?;
         let seq = conn.last_insert_rowid();
@@ -575,13 +628,14 @@ impl ConversationDb {
             display_content: display_content.to_string(),
             attachments: attachments.to_vec(),
             submitted_at,
+            source: source.to_string(),
         })
     }
 
     pub fn load_queued_prompts(&self, queue_session_id: &str) -> Result<Vec<QueuedPrompt>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT prompt_id, seq, content, display_content, attachments, submitted_at
+            "SELECT prompt_id, seq, content, display_content, attachments, submitted_at, source
              FROM queued_prompts
              WHERE status = 'queued' AND queue_session_id = ?1
              ORDER BY seq ASC",
@@ -597,6 +651,7 @@ impl ConversationDb {
                     display_content: row.get(3)?,
                     attachments,
                     submitted_at: row.get(5)?,
+                    source: row.get(6)?,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -787,7 +842,7 @@ impl ConversationDb {
         let mut stmt = conn.prepare(
             "SELECT turn_id, seq, user_content, user_timestamp, assistant_content,
                     assistant_reasoning, assistant_provider_id, assistant_model, assistant_timestamp, status, tool_reports, hidden, is_summary, owner_pid,
-                    token_total, token_usage_estimated
+                    token_total, token_usage_estimated, prompt_tokens, completion_tokens, cache_read_tokens
              FROM turns WHERE channel = ?1 ORDER BY seq ASC",
         )?;
         let mut turns = stmt
@@ -850,7 +905,7 @@ impl ConversationDb {
         let mut stmt = conn.prepare(
             "SELECT turn_id, seq, user_content, user_timestamp, assistant_content,
                     assistant_reasoning, assistant_provider_id, assistant_model, assistant_timestamp, status, tool_reports, hidden, is_summary, owner_pid,
-                    token_total, token_usage_estimated
+                    token_total, token_usage_estimated, prompt_tokens, completion_tokens, cache_read_tokens
              FROM turns WHERE channel = ?1 AND turn_id != ?2 ORDER BY seq ASC",
         )?;
         let mut turns = stmt
@@ -870,7 +925,7 @@ impl ConversationDb {
         let mut stmt = conn.prepare(
             "SELECT turn_id, seq, user_content, user_timestamp, assistant_content,
                     assistant_reasoning, assistant_provider_id, assistant_model, assistant_timestamp, status, tool_reports, hidden, is_summary, owner_pid,
-                    token_total, token_usage_estimated
+                    token_total, token_usage_estimated, prompt_tokens, completion_tokens, cache_read_tokens
              FROM turns WHERE channel = ?1 AND hidden = 0 ORDER BY seq ASC",
         )?;
         let mut turns = stmt
@@ -885,7 +940,7 @@ impl ConversationDb {
         let mut stmt = conn.prepare(
             "SELECT turn_id, seq, user_content, user_timestamp, assistant_content,
                     assistant_reasoning, assistant_provider_id, assistant_model, assistant_timestamp, status, tool_reports, hidden, is_summary, owner_pid,
-                    token_total, token_usage_estimated
+                    token_total, token_usage_estimated, prompt_tokens, completion_tokens, cache_read_tokens
              FROM turns WHERE channel = ?1 AND hidden = 0 AND turn_id != ?2 ORDER BY seq ASC",
         )?;
         let mut turns = stmt
@@ -904,7 +959,7 @@ impl ConversationDb {
             let mut stmt = conn.prepare(
                 "SELECT turn_id, seq, user_content, user_timestamp, assistant_content,
                         assistant_reasoning, assistant_provider_id, assistant_model, assistant_timestamp, status, tool_reports, hidden, is_summary, owner_pid,
-                        token_total, token_usage_estimated
+                        token_total, token_usage_estimated, prompt_tokens, completion_tokens, cache_read_tokens
                  FROM turns WHERE channel = ?1 AND hidden = 0 AND mode = 'chat'
                  ORDER BY seq DESC LIMIT ?2",
             )?;
@@ -918,8 +973,8 @@ impl ConversationDb {
             let mut stmt = conn.prepare(
                 "SELECT turn_id, seq, user_content, user_timestamp, assistant_content,
                         assistant_reasoning, assistant_provider_id, assistant_model, assistant_timestamp, status, tool_reports, hidden, is_summary, owner_pid,
-                        token_total, token_usage_estimated
-                 FROM turns WHERE channel = ?1 AND hidden = 0 AND mode != 'chat' ORDER BY seq ASC",
+                        token_total, token_usage_estimated, prompt_tokens, completion_tokens, cache_read_tokens
+                 FROM turns WHERE channel = ?1 AND hidden = 0 ORDER BY seq ASC",
             )?;
             let mut turns = stmt
                 .query_map(params![self.channel], map_turn_row)?
@@ -942,7 +997,7 @@ impl ConversationDb {
             let mut stmt = conn.prepare(
                 "SELECT turn_id, seq, user_content, user_timestamp, assistant_content,
                         assistant_reasoning, assistant_provider_id, assistant_model, assistant_timestamp, status, tool_reports, hidden, is_summary, owner_pid,
-                        token_total, token_usage_estimated
+                        token_total, token_usage_estimated, prompt_tokens, completion_tokens, cache_read_tokens
                  FROM turns WHERE channel = ?1 AND hidden = 0 AND mode = 'chat' AND turn_id != ?2
                  ORDER BY seq DESC LIMIT ?3",
             )?;
@@ -957,7 +1012,7 @@ impl ConversationDb {
             let mut stmt = conn.prepare(
                 "SELECT turn_id, seq, user_content, user_timestamp, assistant_content,
                         assistant_reasoning, assistant_provider_id, assistant_model, assistant_timestamp, status, tool_reports, hidden, is_summary, owner_pid,
-                        token_total, token_usage_estimated
+                        token_total, token_usage_estimated, prompt_tokens, completion_tokens, cache_read_tokens
                  FROM turns WHERE channel = ?1 AND hidden = 0 AND mode != 'chat' AND turn_id != ?2
                    AND (conversation_id = ?3 OR (?3 = 'legacy' AND conversation_id IS NULL))
                  ORDER BY seq ASC",
@@ -971,8 +1026,8 @@ impl ConversationDb {
             let mut stmt = conn.prepare(
                 "SELECT turn_id, seq, user_content, user_timestamp, assistant_content,
                         assistant_reasoning, assistant_provider_id, assistant_model, assistant_timestamp, status, tool_reports, hidden, is_summary, owner_pid,
-                        token_total, token_usage_estimated
-                 FROM turns WHERE channel = ?1 AND hidden = 0 AND mode != 'chat' AND turn_id != ?2 ORDER BY seq ASC",
+                        token_total, token_usage_estimated, prompt_tokens, completion_tokens, cache_read_tokens
+                 FROM turns WHERE channel = ?1 AND hidden = 0 AND turn_id != ?2 ORDER BY seq ASC",
             )?;
             let mut turns = stmt
                 .query_map(params![self.channel, exclude_turn_id], map_turn_row)?
@@ -990,7 +1045,7 @@ impl ConversationDb {
         let mut stmt = conn.prepare(
             "SELECT turn_id, seq, user_content, user_timestamp, assistant_content,
                     assistant_reasoning, assistant_provider_id, assistant_model, assistant_timestamp, status, tool_reports, hidden, is_summary, owner_pid,
-                    token_total, token_usage_estimated
+                    token_total, token_usage_estimated, prompt_tokens, completion_tokens, cache_read_tokens
              FROM turns
              WHERE hidden = 0 AND is_summary = 0
                AND (user_content LIKE ?1 OR assistant_content LIKE ?1)
@@ -1009,7 +1064,7 @@ impl ConversationDb {
         let mut stmt = conn.prepare(
             "SELECT turn_id, seq, user_content, user_timestamp, assistant_content,
                     assistant_reasoning, assistant_provider_id, assistant_model, assistant_timestamp, status, tool_reports, hidden, is_summary, owner_pid,
-                    token_total, token_usage_estimated
+                    token_total, token_usage_estimated, prompt_tokens, completion_tokens, cache_read_tokens
              FROM turns WHERE channel = ?1 AND hidden = 0 ORDER BY seq ASC",
         )?;
         let mut turns = stmt
@@ -1031,7 +1086,7 @@ impl ConversationDb {
                 let mut stmt = conn.prepare(
                     "SELECT turn_id, seq, user_content, user_timestamp, assistant_content,
                             assistant_reasoning, assistant_provider_id, assistant_model, assistant_timestamp, status, tool_reports, hidden, is_summary, owner_pid,
-                            token_total, token_usage_estimated
+                            token_total, token_usage_estimated, prompt_tokens, completion_tokens, cache_read_tokens
                      FROM turns WHERE channel = ?1 AND hidden = 0 AND mode = 'chat' ORDER BY seq ASC",
                 )?;
                 let mut turns = stmt
@@ -1044,8 +1099,8 @@ impl ConversationDb {
                 let mut stmt = conn.prepare(
                     "SELECT turn_id, seq, user_content, user_timestamp, assistant_content,
                             assistant_reasoning, assistant_provider_id, assistant_model, assistant_timestamp, status, tool_reports, hidden, is_summary, owner_pid,
-                            token_total, token_usage_estimated
-                     FROM turns WHERE channel = ?1 AND hidden = 0 AND mode != 'chat' ORDER BY seq ASC",
+                            token_total, token_usage_estimated, prompt_tokens, completion_tokens, cache_read_tokens
+                     FROM turns WHERE channel = ?1 AND hidden = 0 ORDER BY seq ASC",
                 )?;
                 let mut turns = stmt
                     .query_map(params![channel], map_turn_row)?
@@ -1193,7 +1248,7 @@ impl ConversationDb {
         let mut stmt = conn.prepare(
             "SELECT turn_id, seq, user_content, user_timestamp, assistant_content,
                     assistant_reasoning, assistant_provider_id, assistant_model, assistant_timestamp, status, tool_reports, hidden, is_summary, owner_pid,
-                    token_total, token_usage_estimated
+                    token_total, token_usage_estimated, prompt_tokens, completion_tokens, cache_read_tokens
              FROM turns
              WHERE channel = ?1
                AND (conversation_id = ?2 OR (?2 = 'legacy' AND conversation_id IS NULL))
@@ -1271,7 +1326,7 @@ impl ConversationDb {
         let mut stmt = conn.prepare(
             "SELECT turn_id, seq, user_content, user_timestamp, assistant_content,
                     assistant_reasoning, assistant_provider_id, assistant_model, assistant_timestamp, status, tool_reports, hidden, is_summary, owner_pid,
-                    token_total, token_usage_estimated
+                    token_total, token_usage_estimated, prompt_tokens, completion_tokens, cache_read_tokens
              FROM turns WHERE channel = ?1 AND is_summary = 1 AND hidden = 0 ORDER BY seq DESC LIMIT 1",
         )?;
         let turn = stmt
@@ -1304,7 +1359,7 @@ impl ConversationDb {
         let mut stmt = conn.prepare(
             "SELECT turn_id, seq, user_content, user_timestamp, assistant_content,
                     assistant_reasoning, assistant_provider_id, assistant_model, assistant_timestamp, status, tool_reports, hidden, is_summary, owner_pid,
-                    token_total, token_usage_estimated
+                    token_total, token_usage_estimated, prompt_tokens, completion_tokens, cache_read_tokens
              FROM turns WHERE channel = ?1 AND is_summary = 0 ORDER BY seq ASC LIMIT ?2",
         )?;
         let mut to_remove: Vec<Turn> = stmt
@@ -1326,7 +1381,7 @@ impl ConversationDb {
         let mut stmt = conn.prepare(
             "SELECT turn_id, seq, user_content, user_timestamp, assistant_content,
                     assistant_reasoning, assistant_provider_id, assistant_model, assistant_timestamp, status, tool_reports, hidden, is_summary, owner_pid,
-                    token_total, token_usage_estimated
+                    token_total, token_usage_estimated, prompt_tokens, completion_tokens, cache_read_tokens
              FROM turns
              WHERE channel = ?1 AND hidden = 0 AND is_summary = 0 AND status != 'running'
              ORDER BY seq ASC LIMIT ?2",
@@ -1521,6 +1576,16 @@ impl ConversationDb {
         conn.execute("DELETE FROM queued_prompts", [])?;
         conn.execute("DELETE FROM session_loaded_items", [])?;
         Ok(())
+    }
+
+    /// 删除指定会话（conversation_id）的全部 turns。
+    /// question_exchanges / queued_prompts / image_assets 经外键 ON DELETE CASCADE 一并清理。
+    pub fn delete_conversation(&self, conversation_id: &str) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn.execute(
+            "DELETE FROM turns WHERE channel = ?1 AND conversation_id = ?2",
+            params![self.channel, conversation_id],
+        )?)
     }
 
     pub fn reset_history(&self) -> Result<()> {
@@ -1971,6 +2036,9 @@ fn map_turn_row(row: &rusqlite::Row) -> rusqlite::Result<Turn> {
         owner_pid: row.get(13)?,
         token_total: row.get::<_, i64>(14)?.max(0) as u64,
         token_usage_estimated: row.get::<_, i64>(15)? != 0,
+        prompt_tokens: row.get::<_, i64>(16)?.max(0) as u64,
+        completion_tokens: row.get::<_, i64>(17)?.max(0) as u64,
+        cache_read_tokens: row.get::<_, i64>(18)?.max(0) as u64,
     })
 }
 
@@ -2118,6 +2186,72 @@ impl ConversationDb {
 }
 
 #[cfg(test)]
+mod queued_prompt_source_tests {
+    use super::*;
+
+    /// 老库迁移：source 列缺失时自动补列，默认 user。
+    #[test]
+    fn source_column_is_added_to_existing_databases() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("conversation.db");
+        {
+            // 先建一张没有 source 列的旧表（schema 与历史版本一致，open() 建索引需要 turn_id）
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE queued_prompts (
+                    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                    prompt_id TEXT NOT NULL UNIQUE,
+                    content TEXT NOT NULL,
+                    display_content TEXT NOT NULL,
+                    attachments TEXT NOT NULL DEFAULT '[]',
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    submitted_at TEXT NOT NULL,
+                    queue_session_id TEXT,
+                    owner_pid INTEGER,
+                    consumed_at TEXT,
+                    turn_id TEXT,
+                    context_content TEXT,
+                    preceding_assistant_content TEXT,
+                    preceding_assistant_reasoning TEXT
+                );",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO queued_prompts
+                 (prompt_id, content, display_content, submitted_at, queue_session_id)
+                 VALUES ('old1', 'c', 'c', '2026-08-13T00:00:00+00:00', 'any-session')",
+                [],
+            )
+            .unwrap();
+        }
+        let db = ConversationDb::open(temp.path()).unwrap();
+        let loaded = db.load_queued_prompts("any-session").unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].source, "user", "老数据默认来源应为 user");
+    }
+
+    /// source 写入/读取回环。
+    #[test]
+    fn source_round_trips_through_enqueue_and_load() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = ConversationDb::open(temp.path()).unwrap();
+        let _ = db
+            .enqueue_prompt_with_source(
+                "s1", "sys msg", "sys msg", &[], "session-1", 42, "system",
+            )
+            .unwrap();
+        let _ = db
+            .enqueue_prompt("u1", "user msg", "user msg", &[], "session-1", 42)
+            .unwrap();
+        let loaded = db.load_queued_prompts("session-1").unwrap();
+        assert_eq!(loaded.len(), 2);
+        let by_id = |id: &str| loaded.iter().find(|p| p.prompt_id == id).unwrap();
+        assert_eq!(by_id("s1").source, "system");
+        assert_eq!(by_id("u1").source, "user");
+    }
+}
+
+#[cfg(test)]
 mod search_history_tests {
     use super::*;
 
@@ -2145,5 +2279,28 @@ mod search_history_tests {
         // 无命中返回空
         let hits = db.search_history("不存在的词", 5).unwrap();
         assert!(hits.is_empty());
+    }
+}
+
+
+#[cfg(test)]
+mod qq_channel_tests {
+    use super::*;
+
+    #[test]
+    fn channel_summaries_include_qq_channel() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = ConversationDb::open(temp.path()).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(
+                "INSERT INTO turns (turn_id, seq, user_content, user_timestamp, assistant_content, status, tool_reports, hidden, is_summary, token_total, token_usage_estimated, channel, conversation_id, mode) VALUES
+                 ('t-qq-1', 1, '你好', '2026-08-02T10:00:00+00:00', '在的', 'completed', '[]', 0, 0, 0, 0, 'qq', 'qq-p-555111', 'normal');",
+            )
+            .unwrap();
+        }
+        // channel_summaries 按 turns.channel 分组，不依赖本进程 GQY_CHANNEL
+        let summaries = db.channel_summaries().unwrap();
+        assert!(summaries.iter().any(|s| s.channel == "qq"), "qq channel should appear");
     }
 }

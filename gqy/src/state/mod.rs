@@ -18,7 +18,7 @@ pub use conversation_db::{
     HistoryHit, ImageAsset, ImageAssetData, QueuedPrompt, QueuedPromptAttachment, Turn, TurnFollowup,
     TurnStatus,
 };
-pub use usage::UsageSnapshot;
+pub use usage::{UsageRange, UsageSnapshot};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunningTurnQueueTarget {
@@ -177,6 +177,9 @@ impl StateStore {
         model: Option<&str>,
         token_total: Option<u64>,
         token_usage_estimated: bool,
+        prompt_tokens: Option<u64>,
+        completion_tokens: Option<u64>,
+        cache_read_tokens: Option<u64>,
     ) -> Result<()> {
         self.conv_db.complete_turn_with_usage(
             turn_id,
@@ -186,6 +189,9 @@ impl StateStore {
             model,
             token_total,
             token_usage_estimated,
+            prompt_tokens,
+            completion_tokens,
+            cache_read_tokens,
         )
     }
 
@@ -276,6 +282,8 @@ impl StateStore {
         self.conv_db.append_question_exchange(turn_id, exchange)
     }
 
+    /// 入队一条消息（默认来源 user）。
+    /// 陪伴模式（Chat）会丢弃 system 来源的主动事件，保证系统噪音不侵入闲聊。
     pub fn enqueue_prompt(
         &self,
         prompt_id: &str,
@@ -283,13 +291,26 @@ impl StateStore {
         display_content: &str,
         attachments: &[QueuedPromptAttachment],
     ) -> Result<QueuedPrompt> {
-        self.conv_db.enqueue_prompt(
+        self.enqueue_prompt_with_source(prompt_id, content, display_content, attachments, "user")
+    }
+
+    /// 入队一条消息并显式标注来源（user / system / app）。
+    pub fn enqueue_prompt_with_source(
+        &self,
+        prompt_id: &str,
+        content: &str,
+        display_content: &str,
+        attachments: &[QueuedPromptAttachment],
+        source: &str,
+    ) -> Result<QueuedPrompt> {
+        self.conv_db.enqueue_prompt_with_source(
             prompt_id,
             content,
             display_content,
             attachments,
             &self.queue_session_id,
             self.queue_owner_pid,
+            source,
         )
     }
 
@@ -311,6 +332,25 @@ impl StateStore {
         display_content: &str,
         attachments: &[QueuedPromptAttachment],
     ) -> Result<QueuedPrompt> {
+        self.enqueue_prompt_for_target_with_source(
+            target,
+            prompt_id,
+            content,
+            display_content,
+            attachments,
+            "user",
+        )
+    }
+
+    pub fn enqueue_prompt_for_target_with_source(
+        &self,
+        target: &RunningTurnQueueTarget,
+        prompt_id: &str,
+        content: &str,
+        display_content: &str,
+        attachments: &[QueuedPromptAttachment],
+        source: &str,
+    ) -> Result<QueuedPrompt> {
         let queue_session_id = target
             .queue_session_id
             .as_deref()
@@ -318,13 +358,14 @@ impl StateStore {
         let owner_pid = target
             .owner_pid
             .context("running turn does not expose an owner process")?;
-        self.conv_db.enqueue_prompt(
+        self.conv_db.enqueue_prompt_with_source(
             prompt_id,
             content,
             display_content,
             attachments,
             queue_session_id,
             owner_pid,
+            source,
         )
     }
 
@@ -391,6 +432,11 @@ impl StateStore {
             preceding_assistant_model,
             &self.queue_session_id,
         )
+    }
+
+    /// 删除一个历史会话（供 WebUI 会话管理）。
+    pub fn delete_conversation(&self, conversation_id: &str) -> Result<usize> {
+        self.conv_db.delete_conversation(conversation_id)
     }
 
     pub fn discard_queued_prompts(&self) -> Result<usize> {
@@ -618,22 +664,34 @@ impl StateStore {
     pub fn add_usage(&self, usage: &Usage, provider_id: &str, model: &str) -> Result<()> {
         self.init_files()?;
         usage::add_usage(&self.usage_file(), usage)?;
-        usage::record_usage(&self.usage_history_file(), usage, provider_id, model, false)
+        // 来源 = 本进程会话通道（terminal/webui/qq…）；QQ 进程里就是 "qq"
+        let src = self.conv_db.channel();
+        usage::record_usage_with_src(&self.usage_history_file(), usage, provider_id, model, false, src)
     }
 
     pub fn add_auxiliary_usage(&self, usage: &Usage, provider_id: &str, model: &str) -> Result<()> {
         self.init_files()?;
         usage::add_auxiliary_usage(&self.usage_file(), usage)?;
-        usage::record_usage(&self.usage_history_file(), usage, provider_id, model, true)
+        let src = self.conv_db.channel();
+        usage::record_usage_with_src(&self.usage_history_file(), usage, provider_id, model, true, src)
     }
 
-    pub fn usage_stats(&self, billing: &crate::config::UsageBillingConfig) -> Result<usage::UsageStats> {
-        usage::usage_stats(&self.usage_history_file(), billing)
+    pub fn usage_stats(
+        &self,
+        billing: &crate::config::UsageBillingConfig,
+        range: usage::UsageRange,
+    ) -> Result<usage::UsageStats> {
+        usage::usage_stats(&self.usage_history_file(), billing, range)
     }
 
-    /// 最近调用明细（新→旧），供 WebUI 用量页列表与模型详情
-    pub fn usage_details(&self, limit: usize) -> Result<Vec<usage::UsageDetailRecord>> {
-        usage::usage_details(&self.usage_history_file(), limit)
+    /// 最近调用明细（新→旧），可按来源/模型过滤，供 WebUI 用量页列表与模型详情
+    pub fn usage_details(
+        &self,
+        limit: usize,
+        src: Option<&str>,
+        model: Option<&str>,
+    ) -> Result<Vec<usage::UsageDetailRecord>> {
+        usage::usage_details(&self.usage_history_file(), limit, src, model)
     }
 
     #[allow(dead_code)]

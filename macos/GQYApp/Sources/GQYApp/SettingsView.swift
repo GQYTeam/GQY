@@ -20,6 +20,35 @@ struct SettingsView: View {
             TextField("如 https://gqy.example.com 或 http://100.64.0.1:4096", text: $remoteURL)
                 .textFieldStyle(.roundedBorder)
                 .frame(minWidth: 380)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("数据")
+                    .font(.headline)
+                Text("数据目录（GQY_HOME）：\n\(HomePath.value)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                Text("备份：每轮对话后自动 Git 快照并推送远程。配置与恢复指引在 WebUI「设置 → 备份」。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("QQ 机器人")
+                    .font(.headline)
+                Toggle("启用 QQ（与 App 同启停）", isOn: $vm.qqEnabled)
+                Text("开启后 App 启动即拉起 gqy qq 子进程（反向 WebSocket 监听），退出即终止。NapCat 需单独运行并连入；主人 QQ 默认 1950930166。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             HStack {
                 Spacer()
                 Button("取消") { dismiss() }

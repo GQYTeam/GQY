@@ -1,6 +1,7 @@
-//! 管家监控（主动对话）：后台采样系统进程，检测到异常（CPU 突增/内存吃紧/未知进程）
-//! 时，先本地判断是否值得打扰，再通过 WebUI 的 queue API 给运行中的会话入队
-//! 一条「主动消息」，让顾清影先判断再询问用户。
+//! 管家监控（主动对话）：采样系统进程，检测到异常（CPU 突增/内存吃紧）时
+//! 产出事件，由 events 层（EventSource 插件面）统一做冷却与投递：
+//! 通过 WebUI 的 queue API 以 source=system 给运行中的会话入队主动消息，
+//! 让顾清影先判断再询问用户。
 //!
 //! 用法：`gqy watch --every 30s`（前台跑）或由 LaunchAgent 托管。
 //! 设计原则：采样开销极小（一条 ps 命令），默认不打扰（阈值内静默）。
@@ -110,70 +111,32 @@ pub fn alert_message(sample: &WatchSample) -> String {
     )
 }
 
-/// 主动提醒的冷却期：一次编译能持续几十分钟，逐次采样都报警等于每个间隔烧一轮 LLM。
-/// ponytail: 单一全局冷却够用；要按异常类型分别冷却再拆成多个 stamp 文件。
-const ALERT_COOLDOWN_SECS: u64 = 30 * 60;
-
-fn alert_stamp_file(paths: &GqyPaths) -> std::path::PathBuf {
-    paths.state_dir.join("last_watch_alert")
-}
-
-/// 距上次成功提醒是否还在冷却期内。取 stamp 文件 mtime，不需要读内容。
-fn in_cooldown(paths: &GqyPaths) -> bool {
-    std::fs::metadata(alert_stamp_file(paths))
-        .and_then(|meta| meta.modified())
-        .ok()
-        .and_then(|modified| modified.elapsed().ok())
-        .is_some_and(|elapsed| elapsed.as_secs() < ALERT_COOLDOWN_SECS)
-}
-
-/// 主动提醒的投递结果，run_watch 据此打印真实的诊断文案（避免 409 被误报成「WebUI 未运行」）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AlertOutcome {
-    /// 已入队，会话将在回复结尾接续
-    Delivered,
-    /// 冷却期内，静默跳过
-    Cooldown,
-    /// WebUI 不在跑（连接失败）
-    WebUiUnreachable,
-    /// WebUI 在跑但没有进行中的会话，消息无处挂
-    NoRunningTurn,
-    /// 其他拒绝（如 401/403/500）
-    Rejected,
-}
-
-/// 通过 WebUI queue API 给运行中的会话入队主动消息。
-/// 需要 WebUI 在跑（默认 127.0.0.1:4096）；不在跑、或处于冷却期就静默跳过。
-pub fn enqueue_alert(paths: &GqyPaths, message: &str) -> Result<AlertOutcome> {
-    if in_cooldown(paths) {
-        return Ok(AlertOutcome::Cooldown);
-    }
+/// 通过 WebUI queue API 给运行中的会话入队一条系统主动消息（source=system）。
+/// 需要 WebUI 在跑（默认 127.0.0.1:4096）；不在跑返回 WebUiUnreachable。
+/// 冷却判断与 stamp 已上移到 events 层，按事件源分别冷却。
+pub fn post_event(_paths: &GqyPaths, content: &str) -> Result<crate::events::DeliveryOutcome> {
+    use crate::events::DeliveryOutcome;
     let port = std::env::var("GQY_WEB_PORT")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or(4096);
     let url = format!("http://127.0.0.1:{port}/api/queue");
-    let body = serde_json::json!({ "content": message }).to_string();
+    // source=system：系统主动事件。WebUI 端陪伴模式（Chat）据此丢弃，
+    // 保证磁盘告警等系统噪音永不侵入闲聊会话。
+    let body = serde_json::json!({ "content": content, "source": "system" }).to_string();
     let Ok(response) = Command::new("curl")
         .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "-X", "POST", "-H", "Content-Type: application/json", "-d", &body, &url])
         .output()
     else {
-        return Ok(AlertOutcome::WebUiUnreachable);
+        return Ok(DeliveryOutcome::WebUiUnreachable);
     };
     let code = String::from_utf8_lossy(&response.stdout);
     let code = code.trim();
     // 回环请求由 loopback_autofill 自动带会话令牌，本机免密；无 running turn 时返回 409
     let outcome = match code {
-        "200" | "202" => {
-            let file = alert_stamp_file(paths);
-            if let Some(parent) = file.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            let _ = std::fs::write(&file, "");
-            AlertOutcome::Delivered
-        }
-        "409" => AlertOutcome::NoRunningTurn,
-        _ => AlertOutcome::Rejected,
+        "200" | "202" => DeliveryOutcome::Delivered,
+        "409" => DeliveryOutcome::NoRunningTurn,
+        _ => DeliveryOutcome::Rejected,
     };
     Ok(outcome)
 }

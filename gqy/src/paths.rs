@@ -37,6 +37,13 @@ impl GqyPaths {
         if let Some(home) = isolated_home_from_env()? {
             return Ok(Self::from_isolated_home(home));
         }
+        // 未设置 GQY_HOME：默认走隔离布局，位置与 App 壳一致
+        // （~/Library/Application Support/gqy）。此前 CLI 走系统目录布局会把
+        // 数据散在同一个目录根上（conversation.db 在 home 根、config.jsonc 在根），
+        // 与 App 的隔离布局（state/、config/）分叉成两套数据；这里统一并迁移。
+        if let Some(home) = default_isolated_home() {
+            return Ok(Self::from_isolated_home(home));
+        }
 
         let base = BaseDirs::new().context(t(
             "could not determine XDG base directories",
@@ -82,6 +89,7 @@ impl GqyPaths {
     }
 
     fn from_isolated_home(home: PathBuf) -> Self {
+        migrate_legacy_layout_files(&home);
         let config_dir = home.join("config");
         let data_dir = home.join("data");
         let cache_dir = home.join("cache");
@@ -108,7 +116,12 @@ impl GqyPaths {
     }
 
     pub fn isolated_home(&self) -> Result<Option<PathBuf>> {
-        isolated_home_from_env()
+        // 未设置 GQY_HOME 时返回默认隔离根（与 App 壳一致），
+        // 保证 backup 等依赖隔离布局的子系统在默认布局下也正常工作。
+        if let Some(home) = isolated_home_from_env()? {
+            return Ok(Some(home));
+        }
+        Ok(default_isolated_home())
     }
 
     pub fn create_dirs(&self) -> Result<()> {
@@ -292,6 +305,42 @@ fn resolve_system_scripts_dir(share_base: &Path) -> PathBuf {
     primary
 }
 
+/// 未设置 GQY_HOME 时的默认隔离根：与 App 壳（ShellViewModel）一致。
+fn default_isolated_home() -> Option<PathBuf> {
+    directories::BaseDirs::new()
+        .map(|dirs| dirs.home_dir().join("Library/Application Support/gqy"))
+}
+
+/// 一次性迁移：隔离布局启用前，旧系统目录布局把数据放在 home 根目录
+/// （conversation.db、config.jsonc 等）。若隔离布局还没有数据，把根目录
+/// 旧数据搬进 state/ 与 config/，保证 CLI/App 同库、升级不丢数据。
+/// best-effort：失败静默（下次启动再试）；隔离布局已有数据则不迁移。
+fn migrate_legacy_layout_files(home: &std::path::Path) {
+    // 会话库：conversation.db（含 WAL/SHM）从 home 根 → home/state/
+    let legacy_db = home.join("conversation.db");
+    let state_db = home.join("state/conversation.db");
+    if legacy_db.is_file() && !state_db.exists() {
+        if let Some(state_dir) = state_db.parent() {
+            let _ = std::fs::create_dir_all(state_dir);
+            for suffix in ["", "-wal", "-shm"] {
+                let source = home.join(format!("conversation.db{suffix}"));
+                if source.is_file() {
+                    let _ = std::fs::rename(&source, state_dir.join(format!("conversation.db{suffix}")));
+                }
+            }
+        }
+    }
+    // 配置：config.jsonc 从 home 根 → home/config/
+    let legacy_config = home.join("config.jsonc");
+    let isolated_config = home.join("config/config.jsonc");
+    if legacy_config.is_file() && !isolated_config.exists() {
+        if let Some(config_dir) = isolated_config.parent() {
+            let _ = std::fs::create_dir_all(config_dir);
+            let _ = std::fs::rename(&legacy_config, &isolated_config);
+        }
+    }
+}
+
 fn isolated_home_from_env() -> Result<Option<PathBuf>> {
     let Some(raw) = std::env::var_os(GQY_HOME_ENV) else {
         return Ok(None);
@@ -323,6 +372,33 @@ pub mod test_env {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_layout_files_migrate_into_isolated_home() {
+        let home = std::env::temp_dir().join(format!("gqy-migrate-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        // 旧系统布局：根目录散放
+        std::fs::write(home.join("conversation.db"), b"legacy-db").unwrap();
+        std::fs::write(home.join("conversation.db-wal"), b"wal").unwrap();
+        std::fs::write(home.join("config.jsonc"), b"legacy-config").unwrap();
+
+        let _paths = GqyPaths::from_isolated_home(home.clone());
+
+        assert!(home.join("state/conversation.db").is_file(), "会话库应迁入 state/");
+        assert!(home.join("state/conversation.db-wal").is_file(), "WAL 应一并迁移");
+        assert!(!home.join("conversation.db").exists(), "根目录旧库应被移走");
+        assert!(home.join("config/config.jsonc").is_file(), "配置应迁入 config/");
+        assert!(!home.join("config.jsonc").exists(), "根目录旧配置应被移走");
+
+        // 幂等：再次构造不报错、不覆盖已有数据
+        let _paths2 = GqyPaths::from_isolated_home(home.clone());
+        assert_eq!(
+            std::fs::read(home.join("state/conversation.db")).unwrap(),
+            b"legacy-db"
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
 
     #[test]
     fn isolated_layout_stays_under_one_home() {

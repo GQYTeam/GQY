@@ -49,6 +49,77 @@ pub struct AppConfig {
     /// 用量计费单价：按供应商/模型配置，元/百万 token
     #[serde(default)]
     pub usage_billing: UsageBillingConfig,
+    /// QQ onebot 平台（反向 WebSocket 接入 NapCat 等客户端）
+    #[serde(default)]
+    pub qq: QqConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct QqConfig {
+    /// 是否启用 QQ 监听
+    pub enabled: bool,
+    /// 反向 WebSocket 监听端口（NapCat 连接进来）
+    pub reverse_ws_port: u16,
+    /// 连接鉴权 token（与 NapCat 的 Authorization: Bearer 对应；空串仅允许回环）
+    pub access_token: String,
+    /// 管理员 QQ 号（可执行管理指令；未配置时默认主人 QQ）
+    pub admin_users: Vec<i64>,
+    /// 主人 QQ：转告目标 + 默认管理员（默认 1950930166）
+    pub owner_qq: i64,
+    /// 回复超过此字符数时拆分多条发送；0 = 不拆分
+    pub max_reply_chars: usize,
+    /// 限流：窗口内每个非管理员 QQ 号最多几条（0 = 不限）
+    pub rate_limit_max: u32,
+    /// 限流窗口秒数（默认 600 = 10 分钟）
+    pub rate_limit_window: u32,
+    /// 重要系统事件（磁盘告警等）是否转告给主人 QQ
+    pub forward_events: bool,
+    /// 回合流式输出时，攒够一段就发一条中间消息（长回复不用等到底）
+    pub intermediate_messages: bool,
+    /// 群聊唤醒关键词（除 @ 机器人与呼名「清影」外，出现这些词也会回应）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trigger_keywords: Vec<String>,
+    /// 按会话模型路由：conversation_id 前缀（qq-p- / qq-g-）→ 指定供应商+模型。
+    /// 未命中用全局 active_provider/active_provider_models。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conversations: Vec<QqConversationRoute>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct QqConversationRoute {
+    /// 会话 id 前缀（如 "qq-p-555111" 或前缀 "qq-g-"）
+    pub prefix: String,
+    /// 供应商 id
+    pub provider_id: String,
+    /// 模型名
+    pub model: String,
+}
+
+impl Default for QqConversationRoute {
+    fn default() -> Self {
+        Self { prefix: String::new(), provider_id: String::new(), model: String::new() }
+    }
+}
+
+impl Default for QqConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            reverse_ws_port: 8300,
+            access_token: String::new(),
+            admin_users: Vec::new(),
+            owner_qq: 1_950_930_166,
+            max_reply_chars: 3000,
+            rate_limit_max: 2,
+            rate_limit_window: 600,
+            forward_events: false,
+            intermediate_messages: false,
+            trigger_keywords: Vec::new(),
+            conversations: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -647,6 +718,7 @@ impl Default for AppConfig {
             system_prompt: None,
             web_ui: WebUiConfig::default(),
             usage_billing: UsageBillingConfig::default(),
+            qq: QqConfig::default(),
         }
     }
 }

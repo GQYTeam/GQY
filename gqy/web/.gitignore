@@ -1,0 +1,2 @@
+# 构建依赖（npm install 生成；构建链是可选开发依赖，不影响 cargo build）
+node_modules/

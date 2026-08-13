@@ -274,6 +274,46 @@ pub fn status(paths: &GqyPaths) -> Result<String> {
     ))
 }
 
+/// WebUI 备份设置页用：远程配置 + 最近快照。远程 URL 脱敏显示。
+pub fn settings_snapshot(paths: &GqyPaths) -> Result<serde_json::Value> {
+    let home = required_isolated_home(paths)?;
+    let backup_dir = home.join("backup");
+    let settings = match load_settings(&backup_dir) {
+        Ok(settings) => settings,
+        Err(_) => {
+            return Ok(serde_json::json!({
+                "ok": true,
+                "configured": false,
+                "remote": "",
+                "branch": "",
+                "auto_push": false,
+                "last_commit_at": serde_json::Value::Null,
+            }))
+        }
+    };
+    let configured = !settings.remote.is_empty();
+    let remote_display = redact_remote(&settings.remote);
+    let last_commit_at = last_commit_timestamp(&backup_dir, &settings);
+    Ok(serde_json::json!({
+        "ok": true,
+        "configured": configured,
+        "remote": remote_display,
+        "branch": settings.branch,
+        "auto_push": settings.auto_push,
+        "last_commit_at": last_commit_at,
+    }))
+}
+
+/// 远程 URL 脱敏：https://token@host/… → https://***@host/…
+fn redact_remote(url: &str) -> String {
+    if let Some(at) = url.rfind('@') {
+        if let Some(scheme_end) = url.find("://") {
+            return format!("{}{}@{}", &url[..scheme_end + 3], "***", &url[at + 1..]);
+        }
+    }
+    url.to_string()
+}
+
 fn t_local_mode() -> String {
     "(none — local mode; run `gqy backup remote <url>` to attach one)".to_string()
 }

@@ -4,6 +4,8 @@ include!(concat!(env!("OUT_DIR"), "/default_gqy_prompt.rs"));
 
 pub const PLAN_REMINDER: &str = include_str!("prompts/plan.md");
 pub const CHAT_REMINDER: &str = include_str!("prompts/chat.md");
+/// 工作模式（Normal）纪律块：与陪伴模式分离，干活时人格噪音不进场。
+pub const WORK_MODE_REMINDER: &str = include_str!("prompts/work-mode.md");
 pub const MEME_DESCRIPTION_PROMPT: &str = include_str!("prompts/meme-description.md");
 pub const COMPACT_SYSTEM_PROMPT: &str = include_str!("prompts/compact.md");
 

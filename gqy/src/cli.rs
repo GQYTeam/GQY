@@ -839,6 +839,15 @@ pub enum Command {
     Tts(TtsArgs),
     Stt(SttArgs),
     Provider(ProviderArgs),
+    /// QQ onebot 平台：反向 WebSocket 接入 NapCat 等客户端
+    Qq(QqArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct QqArgs {
+    /// 监听端口（默认取配置 qq.reverse_ws_port，通常 8300）
+    #[arg(long)]
+    pub port: Option<u16>,
 }
 
 #[derive(Debug, Args)]
@@ -1428,10 +1437,11 @@ pub async fn run(cli: Cli, paths: GqyPaths) -> Result<()> {
 
     match cli.command {
         Some(Command::Alarm(args)) => run_alarm_cmd(&paths, args),
-        Some(Command::Watch(args)) => run_watch(&paths, args),
+        Some(Command::Watch(args)) => run_watch(&paths, args).await,
         Some(Command::Tts(args)) => run_tts(args),
         Some(Command::Stt(args)) => run_stt(&paths, args),
         Some(Command::Provider(args)) => run_provider(&paths, args).await,
+        Some(Command::Qq(args)) => crate::qq::run(paths, args).await,
         Some(Command::AlarmWorker(args)) => run_alarm_worker(args),
         Some(Command::Tool(args)) => run_tool(&paths, mode, args).await,
         Some(Command::Preview) => {
@@ -1820,21 +1830,16 @@ fn run_stt(paths: &GqyPaths, args: SttArgs) -> Result<()> {
     Ok(())
 }
 
-/// 管家监控：采样系统进程，检测到异常时给运行中的 WebUI 会话入队主动消息。
-fn run_watch(paths: &GqyPaths, args: WatchArgs) -> Result<()> {
+/// 管家监控（事件源循环）：按固定间隔采样所有 EventSource（进程管家 watch、
+/// 磁盘水位 disk …），命中本地打扰门槛的主动事件以 source=system 入队给运行中的会话。
+/// 新增事件源只需实现 crate::events::EventSource 并注册，无需改这里。
+async fn run_watch(paths: &GqyPaths, args: WatchArgs) -> Result<()> {
     let interval = crate::alarm::parse_alarm_seconds(&args.every)?;
     loop {
-        let sample = match crate::watch::sample_system() {
-            Ok(sample) => sample,
-            Err(err) => {
-                eprintln!("watch: {err}");
-                return Ok(());
-            }
-        };
-        if crate::watch::should_alert(&sample) {
-            let message = crate::watch::alert_message(&sample);
-            match crate::watch::enqueue_alert(paths, &message)? {
-                crate::watch::AlertOutcome::Delivered => {
+        for (source, outcome) in crate::events::poll_all(paths).await? {
+            use crate::events::DeliveryOutcome;
+            match outcome {
+                DeliveryOutcome::Delivered => {
                     println!(
                         "{}",
                         t(
@@ -1843,8 +1848,7 @@ fn run_watch(paths: &GqyPaths, args: WatchArgs) -> Result<()> {
                         )
                     );
                 }
-                crate::watch::AlertOutcome::Cooldown => {}
-                crate::watch::AlertOutcome::WebUiUnreachable => {
+                DeliveryOutcome::WebUiUnreachable => {
                     println!(
                         "{}",
                         t(
@@ -1853,7 +1857,7 @@ fn run_watch(paths: &GqyPaths, args: WatchArgs) -> Result<()> {
                         )
                     );
                 }
-                crate::watch::AlertOutcome::NoRunningTurn => {
+                DeliveryOutcome::NoRunningTurn => {
                     println!(
                         "{}",
                         t(
@@ -1862,7 +1866,7 @@ fn run_watch(paths: &GqyPaths, args: WatchArgs) -> Result<()> {
                         )
                     );
                 }
-                crate::watch::AlertOutcome::Rejected => {
+                DeliveryOutcome::Rejected => {
                     println!(
                         "{}",
                         t(
@@ -1871,7 +1875,9 @@ fn run_watch(paths: &GqyPaths, args: WatchArgs) -> Result<()> {
                         )
                     );
                 }
+                DeliveryOutcome::Cooldown => {}
             }
+            let _ = source;
         }
         if args.once {
             return Ok(());
@@ -7609,6 +7615,9 @@ mod repl_input_tests {
             owner_pid: None,
             token_total: 0,
             token_usage_estimated: false,
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            cache_read_tokens: 0,
         }
     }
 
@@ -7737,6 +7746,7 @@ mod repl_input_tests {
                 no_open: true,
                 password: None,
                 password_file: None,
+                preview: _,
             })) if host == "127.0.0.1"
         ));
 
@@ -7754,6 +7764,7 @@ mod repl_input_tests {
                 no_open: true,
                 password: Some(password),
                 password_file: None,
+                preview: _,
             })) if host == "0.0.0.0" && password == "secret"
         ));
 
@@ -7766,6 +7777,7 @@ mod repl_input_tests {
                 no_open: false,
                 password: None,
                 password_file: None,
+                preview: _,
             })) if host == "127.0.0.1"
         ));
 
@@ -8028,6 +8040,7 @@ mod repl_input_tests {
             display_content: "follow up".to_string(),
             attachments: Vec::new(),
             submitted_at: String::new(),
+            source: "user".to_string(),
         };
 
         let normal = queued_prompt_lines(std::slice::from_ref(&prompt), AgentMode::Normal, 80);

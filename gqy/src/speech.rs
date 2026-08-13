@@ -9,9 +9,10 @@ use crate::paths::GqyPaths;
 use anyhow::{bail, Context, Result};
 use std::process::Command;
 
-/// 顾清影克隆音色朗读（Qwen3-TTS 本地服务，见 scripts/tts-server.py）：
+/// 顾清影克隆音色朗读（Qwen3-TTS 本地服务，见 src/scripts/tts-server.py）：
 /// text → 8091 服务合成 → afplay 播放（终端直接播，不开 App）。
-/// 服务未启动时返回错误（可回退到 `speak`）。
+/// 服务未启动时按需拉起（运行环境运行时解析；首次运行需下载模型）。
+/// HTTP 走 macOS 自带 curl：避免在 tokio runtime 里用 blocking reqwest（会 panic）。
 pub fn speak_clone(text: &str, tts_url: Option<&str>) -> Result<()> {
     let text = text.trim();
     if text.is_empty() {
@@ -32,17 +33,22 @@ pub fn speak_clone(text: &str, tts_url: Option<&str>) -> Result<()> {
         }
     }
     let url = format!("{base}/tts?text={encoded}");
-    let resp = reqwest::blocking::get(&url)
-        .with_context(|| format!("TTS 服务不可达（{base}）——先启动：venv/bin/python scripts/tts-server.py") )?;
-    if !resp.status().is_success() {
-        bail!("TTS 服务返回 HTTP {}", resp.status());
+    let tmp = std::env::temp_dir().join(format!("gqy-tts-{}.wav", std::process::id()));
+    let mut code = http_get_to_file(&url, &tmp)?;
+    if code != 200 {
+        // 服务未起：按需拉起（首次要下模型，给足时间）
+        ensure_tts_server(std::time::Duration::from_secs(120))?;
+        code = http_get_to_file(&url, &tmp)
+            .with_context(|| format!("TTS 服务不可达（{base}）：拉起后仍无响应"))?;
     }
-    let bytes = resp.bytes().context("读取 TTS 音频失败")?;
+    if code != 200 {
+        bail!("TTS 服务返回 HTTP {code}");
+    }
+    let bytes = std::fs::read(&tmp).context("读取 TTS 音频失败")?;
     if bytes.len() < 100 {
+        let _ = std::fs::remove_file(&tmp);
         bail!("TTS 返回内容过短，可能合成失败");
     }
-    let tmp = std::env::temp_dir().join(format!("gqy-tts-{}.wav", std::process::id()));
-    std::fs::write(&tmp, &bytes)?;
     let status = Command::new("afplay")
         .arg(&tmp)
         .status()
@@ -52,6 +58,18 @@ pub fn speak_clone(text: &str, tts_url: Option<&str>) -> Result<()> {
         bail!("afplay exited with status {status}");
     }
     Ok(())
+}
+
+/// curl GET 到文件，返回 HTTP 状态码。连接失败返回 Ok(0)。
+fn http_get_to_file(url: &str, out: &std::path::Path) -> Result<u16> {
+    let output = Command::new("curl")
+        .args(["-s", "-o"])
+        .arg(out)
+        .args(["-w", "%{http_code}", url])
+        .output()
+        .with_context(|| "failed to run curl")?;
+    let code = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(code.parse().unwrap_or(0))
 }
 
 /// 文字转语音：默认直接播放，可指定输出文件（.aiff/.m4a）。
@@ -76,6 +94,154 @@ pub fn speak(text: &str, voice: Option<&str>, output: Option<&str>) -> Result<()
         bail!("say exited with status {status}");
     }
     Ok(())
+}
+
+// ──── 克隆音色 TTS（可选组件）：运行环境解析 + 按需拉起 ────
+//
+// tts-server.py 是独立的 Python 服务（Qwen3-TTS + mlx-audio，Apple Silicon）。
+// 它不在编译产物里：脚本随 share 资源分发（App bundle / brew / 源码树），
+// venv 是运行时依赖，需按 tts-setup.sh 安装。本模块负责在运行时解析
+// 两者的位置（不再用编译期硬编码路径——那在 App 打包后必然指向构建机）。
+
+/// 克隆音色 TTS 的运行环境：python 可执行 + tts-server.py 脚本。
+#[derive(Debug, Clone)]
+pub struct TtsRuntime {
+    pub python: std::path::PathBuf,
+    pub script: std::path::PathBuf,
+}
+
+/// 解析克隆音色 TTS 运行环境，按优先级：
+/// 1. GQY_TTS_PYTHON / GQY_TTS_SCRIPT 环境变量（完全自定义）
+/// 2. GQY_HOME/scripts/tts-server.py + GQY_HOME/venv/bin/python（用户自托管，随备份迁移）
+/// 3. 可执行文件旁 share/gqy/scripts/tts-server.py（App bundle / brew 内嵌）
+/// 4. 源码树 src/scripts/tts-server.py（开发模式）
+/// python 找不到时退回 PATH 里的 python3；脚本找不到时给安装指引。
+pub fn resolve_tts_runtime() -> Result<TtsRuntime> {
+    let mut candidates: Vec<(std::path::PathBuf, Option<std::path::PathBuf>)> = Vec::new();
+
+    // 1. 环境变量完全自定义
+    if let Ok(script) = std::env::var("GQY_TTS_SCRIPT") {
+        let python = std::env::var("GQY_TTS_PYTHON").map(std::path::PathBuf::from).ok();
+        candidates.push((std::path::PathBuf::from(script), python));
+    }
+
+    // 2. GQY_HOME（隔离布局）或兼容目录（非隔离布局）
+    let home = std::env::var("GQY_HOME")
+        .map(std::path::PathBuf::from)
+        .ok()
+        .or_else(|| {
+            directories::BaseDirs::new()
+                .map(|dirs| dirs.home_dir().join("Library/Application Support/gqy"))
+        });
+    if let Some(home) = &home {
+        candidates.push((
+            home.join("scripts/tts-server.py"),
+            Some(home.join("venv/bin/python")),
+        ));
+    }
+
+    // 3. 可执行文件旁 share（App bundle / brew 安装的内嵌资源）
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push((
+                dir.join("share/gqy/scripts/tts-server.py"),
+                Some(dir.join("venv/bin/python")),
+            ));
+        }
+    }
+
+    // 4. 源码树（开发模式；venv 由 tts-setup.sh 建在仓库 gqy/venv）
+    candidates.push((
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/scripts/tts-server.py"),
+        Some(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("venv/bin/python"),
+        ),
+    ));
+    // 历史位置：旧代码引用过 CARGO_MANIFEST_DIR/scripts，兼容一次
+    candidates.push((
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/tts-server.py"),
+        Some(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("venv/bin/python"),
+        ),
+    ));
+
+    for (script, python) in candidates {
+        if !script.is_file() {
+            continue;
+        }
+        let python = python
+            .filter(|path| path.is_file())
+            .unwrap_or_else(|| std::path::PathBuf::from("python3"));
+        return Ok(TtsRuntime { python, script });
+    }
+
+    bail!(
+        "未找到克隆音色 TTS 服务（tts-server.py）。安装方式：\n\
+          · 源码/开发：运行 src/scripts/tts-setup.sh\n\
+          · App/CLI：把 tts-server.py 放到 GQY_HOME/scripts/，并建 GQY_HOME/venv（pip install mlx-audio）\n\
+          · 或设置 GQY_TTS_SCRIPT / GQY_TTS_PYTHON 指定位置"
+    )
+}
+
+const TTS_PORT: u16 = 8091;
+
+/// 健康检查：TTS 服务是否已在响应（curl，快进快出）。
+fn tts_health() -> bool {
+    let url = format!("http://127.0.0.1:{TTS_PORT}/health");
+    Command::new("curl")
+        .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", &url])
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim() == "200")
+        .unwrap_or(false)
+}
+
+/// 拉起 TTS 服务（子进程；空闲自动退出由脚本负责）。
+/// 后台线程 wait 回收子进程，避免常驻进程积累僵尸。
+pub fn spawn_tts_server() -> Result<()> {
+    let runtime = resolve_tts_runtime()?;
+    let mut child = Command::new(&runtime.python)
+        .arg(&runtime.script)
+        .arg(TTS_PORT.to_string())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .with_context(|| {
+            format!(
+                "TTS 服务拉起失败：{} {}",
+                runtime.python.display(),
+                runtime.script.display()
+            )
+        })?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
+/// 确保 TTS 服务在跑：健康则复用；否则拉起并轮询就绪。
+/// timeout 要覆盖首次运行：模型（约 1GB）在首次合成时下载。
+/// 可用 GQY_TTS_START_TIMEOUT 秒数覆盖（调试/测试用）。
+pub fn ensure_tts_server(timeout: std::time::Duration) -> Result<()> {
+    let timeout = std::env::var("GQY_TTS_START_TIMEOUT")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(std::time::Duration::from_secs)
+        .unwrap_or(timeout);
+    if tts_health() {
+        return Ok(());
+    }
+    spawn_tts_server()?;
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        if tts_health() {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    }
+    bail!(
+        "TTS 服务启动超时（{}s）。首次运行需下载模型，可稍后重试",
+        timeout.as_secs()
+    )
 }
 
 /// 列出可用的系统语音（`say -v '?'` 解析）。
@@ -168,5 +334,33 @@ mod tests {
     #[test]
     fn rejects_empty_text() {
         assert!(speak("", None, None).is_err());
+    }
+
+    /// 源码树里必须能解析出 tts-server.py（restructure 后脚本曾丢失，回归保护）。
+    #[test]
+    fn resolves_tts_runtime_in_source_tree() {
+        let runtime = resolve_tts_runtime().unwrap();
+        assert!(runtime.script.is_file(), "脚本不存在：{}", runtime.script.display());
+        assert_eq!(
+            runtime.script.file_name().and_then(|name| name.to_str()),
+            Some("tts-server.py")
+        );
+        // python 未装 venv 时回退 PATH python3（不会 panic）
+        assert!(!runtime.python.as_os_str().is_empty());
+    }
+
+    /// 自定义环境变量优先；指向不存在的脚本时回退到源码树。
+    #[test]
+    fn tts_runtime_env_override_falls_back_gracefully() {
+        unsafe {
+            std::env::set_var("GQY_TTS_SCRIPT", "/nonexistent/tts-server.py");
+            std::env::set_var("GQY_TTS_PYTHON", "/nonexistent/python");
+        }
+        let runtime = resolve_tts_runtime().unwrap();
+        assert!(runtime.script.is_file());
+        unsafe {
+            std::env::remove_var("GQY_TTS_SCRIPT");
+            std::env::remove_var("GQY_TTS_PYTHON");
+        }
     }
 }

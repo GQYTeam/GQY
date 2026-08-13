@@ -1,5 +1,15 @@
 import Foundation
 
+/// 默认数据目录（与后端 default_isolated_home 一致）
+enum HomePath {
+    static var value: String {
+        if let env = ProcessInfo.processInfo.environment["GQY_HOME"], !env.isEmpty {
+            return env
+        }
+        return NSHomeDirectory() + "/Library/Application Support/gqy"
+    }
+}
+
 /// 壳层状态：探活 + 一键拉起 gqy web。聊天全部交给 WKWebView 里的 WebUI。
 @MainActor
 final class ShellViewModel: ObservableObject {
@@ -7,11 +17,25 @@ final class ShellViewModel: ObservableObject {
 
     @Published var connection: Connection = .offline
     @Published var message: String?
+    /// QQ 机器人开关（设置里切换；开启时启动 gqy qq 子进程，与 App 同启停）
+    @Published var qqEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(qqEnabled, forKey: "qqEnabled")
+            if qqEnabled != oldValue {
+                if qqEnabled {
+                    startQqProcess()
+                } else {
+                    stopQqProcess()
+                }
+            }
+        }
+    }
 
     var baseURL: URL
     private var client: APIClient
     private var healthTask: Task<Void, Never>?
     private var backendProcess: Process?
+    private var qqProcess: Process?
     private var lanMode = false
     private var lanPassword: String?
 
@@ -29,6 +53,49 @@ final class ShellViewModel: ObservableObject {
             process.terminate()
         }
         backendProcess = nil
+        stopQqProcess()
+    }
+
+    /// 启动 gqy qq 子进程（反向 WebSocket 监听，与 App 同生死）
+    func startQqProcess() {
+        guard !remoteMode else { return }
+        if let process = qqProcess, process.isRunning { return }
+        var candidates: [String] = []
+        if let bundled = Bundle.main.path(forResource: "gqy", ofType: nil) {
+            candidates.append(bundled)
+        }
+        candidates += [
+            ProcessInfo.processInfo.environment["GQY_BIN"],
+            "/opt/homebrew/bin/gqy",
+            "/usr/local/bin/gqy",
+        ]
+        .compactMap { $0 }
+        .filter { FileManager.default.isExecutableFile(atPath: $0) }
+        guard let binary = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
+            return
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: binary)
+        process.arguments = ["qq"]
+        var env = ProcessInfo.processInfo.environment
+        if env["GQY_HOME"] == nil {
+            env["GQY_HOME"] = HomePath.value
+        }
+        process.environment = env
+        do {
+            try process.run()
+            qqProcess = process
+        } catch {
+            message = "启动 QQ 后端失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// 终止 gqy qq 子进程（开关关闭 / App 退出时）
+    func stopQqProcess() {
+        if let process = qqProcess, process.isRunning {
+            process.terminate()
+        }
+        qqProcess = nil
     }
 
     /// 局域网 IPv4（ifconfig 解析，优先 192.168/10./172.16 段）
@@ -68,10 +135,14 @@ final class ShellViewModel: ObservableObject {
     init(baseURL: URL) {
         self.baseURL = baseURL
         client = APIClient(baseURL: baseURL)
+        _qqEnabled = Published(initialValue: UserDefaults.standard.bool(forKey: "qqEnabled"))
     }
 
     func start() {
         startBackend()
+        if qqEnabled {
+            startQqProcess()
+        }
     }
 
     /// 切换远程/本地地址并重连（设置里保存后调用）

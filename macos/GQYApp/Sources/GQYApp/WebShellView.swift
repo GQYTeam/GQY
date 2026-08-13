@@ -6,13 +6,18 @@ import WebKit
 struct ContentView: View {
     @EnvironmentObject var vm: ShellViewModel
     @State private var showSettings = false
+    @AppStorage("hasOnboarded") private var hasOnboarded = false
 
     var body: some View {
         Group {
-            switch vm.connection {
-            case .offline: OfflineView()
-            case .connecting: ProgressView("连接顾清影…")
-            case .ready: WebShellView(url: vm.baseURL)
+            if !hasOnboarded {
+                OnboardingView { hasOnboarded = true }
+            } else {
+                switch vm.connection {
+                case .offline: OfflineView()
+                case .connecting: ProgressView("连接顾清影…")
+                case .ready: WebShellView(url: vm.baseURL)
+                }
             }
         }
         .id(vm.baseURL) // 切换远程/本地地址时重建 WebView

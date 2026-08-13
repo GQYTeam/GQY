@@ -17,6 +17,7 @@ pub mod import;
 pub mod knowledge_base;
 mod load_tools;
 mod local_vision;
+mod logs;
 mod speech;
 mod man;
 mod mcp;
@@ -26,6 +27,7 @@ mod moegirl;
 pub(crate) mod path_guard;
 mod patch_preview;
 pub(crate) mod providers;
+mod qq_view;
 mod registry;
 mod scripts;
 mod skills;
@@ -265,6 +267,12 @@ pub fn builtin_registry(config: &AppConfig, paths: &GqyPaths) -> ToolRegistry {
     }
     // 本地视觉（Apple Vision）不依赖插件开关：模型超额时兜底看图
     local_vision::register(&mut registry, paths.clone());
+    // 日志查询：顾清影自查故障（运行日志/活动记录）
+    logs::register(&mut registry, config.clone(), paths.clone());
+    // QQ 会话查看：主通道了解 QQ 平台动态（主人要求）
+    qq_view::register(&mut registry, config.clone(), paths.clone());
+    // 插件工具（好感度查询等）
+    crate::plugins::register_all_plugin_tools(&mut registry, paths);
     speech::register(&mut registry, paths.clone());
     if config.plugins.image_generation.enabled {
         image_generation::register(&mut registry, config.clone());

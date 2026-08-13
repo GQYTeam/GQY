@@ -77,6 +77,7 @@ GQY 的 CLI、REPL、配置 TUI 和工具状态支持英文与简体中文。在
 | `gqy memory stats` / `gqy memory remember <内容>` | 记忆查看 / 手动记忆 |
 | `gqy zsh-init` / `gqy remove-shell-hook` | 安装 / 移除终端自然语言 hook |
 | `gqy web` | 启动本地 Web 面板 |
+| `gqy qq` | 启动 QQ onebot 反向 WebSocket 监听（NapCat 接入） |
 | `gqy balance` | 查询 DeepSeek 账户余额 |
 | `gqy config set <key> <value>` / `gqy config get [key]` | 免交互读写配置（密钥脱敏） |
 | `gqy backup init` / `gqy backup now` / `gqy backup status` | 备份初始化 / 立即备份 / 状态 |
@@ -215,8 +216,30 @@ GQY 的 CLI、REPL、配置 TUI 和工具状态支持英文与简体中文。在
 
 - WebUI 用量分析
 
-  WebUI 右下角 📊 打开用量面板：GitHub 式贡献热力图、费用估算（按 provider 单价，
-  可配置）、token 构成堆叠柱、模型维度表、调用级明细。
+  WebUI 📊 用量面板：近 1 天/7 天/30 天/至今分段、GitHub 式热力图、缓存命中率、
+  按来源（智能体/QQ）与模型拆分的构成卡、调用级明细（来源/模型过滤）、
+  每条回复的耗时与费用估算（按 provider 单价，可配置）。
+
+- QQ 平台（onebot / NapCat）
+
+  `gqy qq` 反向 WebSocket 监听（默认 8300），NapCat 等 onebot v11 客户端连入即可收发 QQ：
+  文本/图片/文件/视频/语音双向、群名片与昵称（TTL 缓存）、群管指令（禁言/踢人/退群）、
+  引用消息（文本+图片）、好友/加群申请（主人自动通过、他人转告）、自身禁言感知、
+  会话并发闸、中间消息流式、@全体/唤醒关键词、消息撤回与进群欢迎通知、
+  按会话模型路由（`qq.conversations`）、转告主人（`notify_owner` 工具 + 事件转发）。
+  App 设置可开关并同启停；WebUI 设置页与 QQ 管理指令（`/mute` `/kick` `/conversations` 等）全覆盖。
+  macOS 上 NapCat 官方仅支持 Docker 方式，接入见 [NapCat 接入指南](gqy/src/scripts/napcat-setup.md)。
+
+- 插件框架 + 打扰判断（judge）
+
+  系统能力（watch 管家、好感度）收编为 `Plugin` trait（描述符/工具注册/轮次钩子/打扰判断），
+  新增能力 = 实现一个 Plugin 注册一行。系统主动事件（磁盘/进程提醒）投递前先走本地规则（深夜压制），
+  再由模型五维打分决定是否打扰，低于阈值不打扰。
+
+- 好感度
+
+  每轮对话后按内容与情境自动增减（深夜倾诉、任务利落加分，每日增减上限），
+  注入上下文让顾清影知道与你的亲疏；顶栏 chip + 设置详情页 + `/api/affection` + QQ `/affection` 指令。
 
 </details>
 

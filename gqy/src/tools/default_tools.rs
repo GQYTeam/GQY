@@ -1071,8 +1071,9 @@ mod tests {
 
     #[test]
     fn edit_file_replaces_lines() {
-        let cwd = std::env::current_dir().unwrap();
-        let temp = tempfile::tempdir_in(cwd).unwrap();
+        // 用系统临时目录而非 crate 根：源码构建时 cwd 在项目源码目录内，
+        // 写文件会命中 path_guard（GQY_ALLOW_PROJECT_WRITES 未设时）。
+        let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("sample.txt");
         std::fs::write(&path, "one\ntwo\nthree\n").unwrap();
         let result = edit_file(
@@ -1190,8 +1191,8 @@ mod tests {
 
     #[test]
     fn trash_path_moves_file_to_trash() {
-        let cwd = std::env::current_dir().unwrap();
-        let temp = tempfile::tempdir_in(cwd).unwrap();
+        // 系统临时目录而非 crate 根：源码构建时 cwd 在项目内，会命中 path_guard
+        let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("trash-me.txt");
         std::fs::write(&path, "bye").unwrap();
         let result = fake_trash_path(json!({"path": path.display().to_string()})).unwrap();
@@ -1204,8 +1205,8 @@ mod tests {
 
     #[test]
     fn trash_path_moves_directory_to_trash() {
-        let cwd = std::env::current_dir().unwrap();
-        let temp = tempfile::tempdir_in(cwd).unwrap();
+        // 系统临时目录而非 crate 根：源码构建时 cwd 在项目内，会命中 path_guard
+        let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("trash-dir");
         std::fs::create_dir(&path).unwrap();
         std::fs::write(path.join("child.txt"), "bye").unwrap();
