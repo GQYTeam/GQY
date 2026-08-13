@@ -8,12 +8,18 @@ final class ShellViewModel: ObservableObject {
     @Published var connection: Connection = .offline
     @Published var message: String?
 
-    let baseURL: URL
-    private let client: APIClient
+    var baseURL: URL
+    private var client: APIClient
     private var healthTask: Task<Void, Never>?
     private var backendProcess: Process?
     private var lanMode = false
     private var lanPassword: String?
+
+    /// 远程模式：baseURL 指向非本机地址（设置里填的服务器），不拉起本地后端
+    var remoteMode: Bool {
+        guard let host = baseURL.host else { return true }
+        return host != "127.0.0.1" && host != "localhost"
+    }
 
     /// App 退出时终止后端进程，避免 gqy 残留占端口（否则重开 App 拉不起新进程）
     func stopBackend() {
@@ -68,12 +74,30 @@ final class ShellViewModel: ObservableObject {
         startBackend()
     }
 
+    /// 切换远程/本地地址并重连（设置里保存后调用）
+    func applyRemote(urlString: String) {
+        UserDefaults.standard.set(urlString, forKey: "remoteURL")
+        let trimmed = urlString.trimmingCharacters(in: .whitespaces)
+        baseURL = trimmed.isEmpty ? URL(string: "http://127.0.0.1:4096")! : (URL(string: trimmed) ?? URL(string: "http://127.0.0.1:4096")!)
+        client = APIClient(baseURL: baseURL)
+        stopBackend()
+        connection = .offline
+        message = nil
+        start()
+    }
+
     func startBackend() {
         // 已有服务在跑（残留/外部启动）→ 直接复用，不再拉起新进程
         Task { [weak self] in
             guard let self else { return }
             if await self.client.health() {
                 self.connection = .ready
+                return
+            }
+            // 远程模式：不拉起本地进程，探活失败直接报错
+            if self.remoteMode {
+                self.connection = .offline
+                self.message = "远程服务器 \(self.baseURL.absoluteString) 连不上，检查地址或服务器状态"
                 return
             }
             self.launchBackendProcess()
@@ -162,6 +186,8 @@ final class ShellViewModel: ObservableObject {
                         let ip = Self.lanIP()
                         let port = ProcessInfo.processInfo.environment["GQY_WEB_PORT"] ?? "4096"
                         self.message = "📱 手机访问（同一 Wi-Fi）：\nhttp://\(ip):\(port)\n密码：\(self.lanPassword ?? "")"
+                    } else if self.remoteMode {
+                        self.message = "已连接远程：\(self.baseURL.absoluteString)"
                     }
                     return
                 }

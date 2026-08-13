@@ -5,6 +5,7 @@ import WebKit
 
 struct ContentView: View {
     @EnvironmentObject var vm: ShellViewModel
+    @State private var showSettings = false
 
     var body: some View {
         Group {
@@ -14,9 +15,24 @@ struct ContentView: View {
             case .ready: WebShellView(url: vm.baseURL)
             }
         }
+        .id(vm.baseURL) // 切换远程/本地地址时重建 WebView
         .frame(minWidth: 820, minHeight: 600)
         .tint(Color(red: 0.384, green: 0.784, blue: 0.569))
         .preferredColorScheme(.dark)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    showSettings = true
+                } label: {
+                    Label("设置", systemImage: "gearshape")
+                }
+                .help("连接设置")
+            }
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
+                .environmentObject(vm)
+        }
         .alert("提示", isPresented: Binding(
             get: { vm.message != nil },
             set: { if !$0 { vm.message = nil } }
