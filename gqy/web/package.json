@@ -2,7 +2,7 @@
   "name": "gqy-webui",
   "type": "module",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "顾清影 WebUI。构建产物 app.js 由 Rust include_str 嵌入，提交进 git；cargo build 不依赖 node。",
   "scripts": {
     "build": "esbuild src/main.js --bundle --format=iife --outfile=app.js --sourcemap=inline",
