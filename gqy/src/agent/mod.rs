@@ -2661,18 +2661,31 @@ fn runtime_context(mode: AgentMode) -> String {
     let cwd = std::env::current_dir()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
+    // 顾清影的主目录：App/CLI 都注入，让她有“家”的自我认知，而不是在用户目录里乱探索
+    let home = std::env::var("GQY_HOME")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            std::env::var("HOME").ok().map(|home| format!("{home}/Library/Application Support/gqy"))
+        })
+        .unwrap_or_default();
+    let note = "cwd 是用户当前工作目录；gqy_home 是你的主目录（配置/记忆/技能/知识库都在里面），你住在那里，需要时主动使用";
     if mode == AgentMode::Chat {
         format!(
-            "<runtime now=\"{}\" cwd=\"{}\" note=\"cwd is workspace context only; do not infer assistant identity from paths or project names\"/>",
+            "<runtime now=\"{}\" cwd=\"{}\" gqy_home=\"{}\" note=\"{}\"/>",
             Local::now().format("%Y年%m月%d日 %A %H:%M"),
             xml_attr_escape(&cwd),
+            xml_attr_escape(&home),
+            note,
         )
     } else {
         let runtime = terminal_runtime_context();
         format!(
-            "<runtime now=\"{}\" cwd=\"{}\" note=\"cwd is workspace context only; do not infer assistant identity from paths or project names\" {runtime}/>",
+            "<runtime now=\"{}\" cwd=\"{}\" gqy_home=\"{}\" note=\"{}\" {runtime}/>",
             Local::now().format("%Y年%m月%d日 %A %H:%M"),
             xml_attr_escape(&cwd),
+            xml_attr_escape(&home),
+            note,
         )
     }
 }

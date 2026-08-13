@@ -40,12 +40,22 @@ The `o200k_base.tiktoken` file is ~200k tokens and takes a few seconds to proces
 
 ### State directory
 
-All runtime state lives in `$GQY_HOME` (default `~/Library/Application Support/gqy`):
-- `config.jsonc` — JSON-with-comments configuration
-- `conversation.db` — SQLite WAL-mode turn storage (`channel_id` + `mode` columns for isolation)
-- `memory.db` — long-term memory
-- `prompts/` — personality files
-- `sessions/` — session state
+`GQY_HOME` 是 gqy 的独立数据根（默认 `~/Library/Application Support/gqy`）。设置后走**隔离布局**，全部状态收在 `$GQY_HOME` 下；未设置时兼容系统目录布局（macOS 下散在 `~/Library/Application Support/gqy` 根目录，config.jsonc 直接在根）。
+
+隔离布局（App 与推荐用法）：
+
+```text
+$GQY_HOME/
+├── config/config.jsonc     — JSON-with-comments 配置（注意：不是 $GQY_HOME/config.jsonc）
+├── config/prompts/         — 人格文件
+├── state/conversation.db   — SQLite WAL 回合存储（channel_id + mode 列隔离）
+├── data/personas/<persona>/memory/memory.db — 长期记忆（按人格分目录）
+├── sessions/               — 会话状态
+├── cache/logs/             — 日志
+└── backup/                 — Git 快照仓库
+```
+
+`config.jsonc` 有两份并存时，以 `$GQY_HOME/config/config.jsonc`（隔离布局）为准，根目录那份是旧布局遗留，仅 CLI（未设 GQY_HOME）会读。
 
 ### Source layout (`gqy/src/`)
 
@@ -68,7 +78,7 @@ Three modes with history isolation (v0.8.2+): `Normal` (full tools), `Plan` (rea
 
 ### Provider hot-swap
 
-`gqy provider add <url> --api-key <key>` auto-discovers models via `GET /models`. The WebUI watches `config.jsonc` mtime for changes and hot-reloads without restart.
+`gqy provider add <url> --api-key <key>` auto-discovers models via `GET /models`. The WebUI watches `$GQY_HOME/config/config.jsonc` mtime for changes and hot-reloads without restart.
 
 ### WebUI frontend
 

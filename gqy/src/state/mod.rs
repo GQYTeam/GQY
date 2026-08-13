@@ -15,7 +15,7 @@ use std::sync::Arc;
 #[allow(unused_imports)]
 pub use conversation_db::{
     interrupted_text, pending_placeholder, ChannelSummary, ConversationDb, ConversationSummary,
-    ImageAsset, ImageAssetData, QueuedPrompt, QueuedPromptAttachment, Turn, TurnFollowup,
+    HistoryHit, ImageAsset, ImageAssetData, QueuedPrompt, QueuedPromptAttachment, Turn, TurnFollowup,
     TurnStatus,
 };
 pub use usage::UsageSnapshot;

@@ -4,7 +4,7 @@
 //! （write_file / edit_string / apply_patch）在落盘前都会经过本模块检查。
 //!
 //! 环境变量：
-//! - `GQY_PROJECT_DIR`：项目源码目录（默认 `~/GQY`）
+//! - `GQY_PROJECT_DIR`：项目源码目录（默认 `~/Desktop/GQY`，见 docs/01-指南/自主行为规范.md）
 //! - `GQY_WORKSPACE`：她的临时工作区（默认 `~/gqy-workspace`）
 //! - `GQY_ALLOW_PROJECT_WRITES=1`：开发模式，放行项目目录写入（主人专用）
 
@@ -27,9 +27,18 @@ pub fn project_dir() -> PathBuf {
             }
         }
     }
-    directories::BaseDirs::new()
-        .map(|dirs| dirs.home_dir().join("GQY"))
-        .unwrap_or_else(|| PathBuf::from("/Users/Shared/GQY"))
+    // App bundle / Homebrew 装的二进制推不出源码位置（exe 在 Contents/Resources 或
+    // brew cellar 下），上面两步都会落空。此时按规范的默认位置找：命中哪个用哪个，
+    // 都不存在就返回规范默认值（护栏对不存在的目录等于空转，需要时用 GQY_PROJECT_DIR 指定）。
+    let home = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf());
+    let Some(home) = home else {
+        return PathBuf::from("/Users/Shared/GQY");
+    };
+    let documented = home.join("Desktop/GQY");
+    [documented.clone(), home.join("GQY")]
+        .into_iter()
+        .find(|candidate| candidate.is_dir())
+        .unwrap_or(documented)
 }
 
 /// 她的临时工作区：下载、解压、草稿等临时文件放这里。
@@ -158,5 +167,27 @@ mod tests {
         assert!(message.contains("受保护"));
 
         std::fs::remove_dir_all(&temp).ok();
+    }
+
+    /// 回归：App bundle / brew 装的二进制推不出源码位置，兜底默认值曾是 `~/GQY`
+    /// ——那个目录通常不存在，于是 is_inside 永远 false，护栏在 App 模式下完全空转。
+    /// 兜底必须落在规范写明的 `~/Desktop/GQY`（或另一个真实存在的候选）上。
+    #[test]
+    fn fallback_default_matches_documented_location() {
+        let Some(home) = directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf()) else {
+            return;
+        };
+        unsafe { std::env::remove_var("GQY_PROJECT_DIR") };
+        let resolved = project_dir();
+        // 源码构建时 exe 推断会命中真实仓库根，那也是正确答案
+        let inferred_from_exe = resolved.join("Cargo.toml").is_file();
+        assert!(
+            inferred_from_exe
+                || resolved == home.join("Desktop/GQY")
+                || resolved == home.join("GQY"),
+            "兜底解析到意外位置：{}",
+            resolved.display()
+        );
+        assert_ne!(resolved, home, "兜底不能退化成整个 home 目录");
     }
 }

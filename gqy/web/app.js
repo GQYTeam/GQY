@@ -3315,6 +3315,10 @@
     return ["hidden", "summary", "full"].includes(state.display?.reasoning) ? state.display.reasoning : "summary";
   }
 
+  function toolCallDisplayMode() {
+    return ["hidden", "summary", "full"].includes(state.display?.tool_calls) ? state.display.tool_calls : "summary";
+  }
+
   function normalizeReasoningTitle(value) {
     const title = String(value || "").trim().replace(/^[*#\s]+|[*#\s]+$/g, "");
     if (!title || /^正在(?:思考)?(?:\.{3}|…+)?$/u.test(title)) return "";
@@ -4184,6 +4188,11 @@
     const realName = document.createElement("small");
     realName.className = "tool-technical-name";
     realName.textContent = String(data?.name || "");
+    // readable_tool_names=false：主标题改技术名，去掉小字（曾长期不消费此配置）
+    if (state.display?.readable_tool_names === false) {
+      displayName.textContent = String(data?.name || "工具");
+      realName.hidden = true;
+    }
     const summary = document.createElement("small");
     summary.className = "tool-summary";
     title.append(displayName, realName, summary);
@@ -4268,8 +4277,12 @@
     });
     updateToolSummary(tool);
     live.tools.set(toolId, tool);
-    live.blocks.appendChild(card);
-    contentAdded();
+    // 隐藏模式：卡片对象照常构建/注册（进度、结果、图生图资产等状态完整），
+    // 只是不挂进 DOM —— 工具照跑，界面像人直接说话，不露后台过程。
+    if (toolCallDisplayMode() !== "hidden") {
+      live.blocks.appendChild(card);
+      contentAdded();
+    }
     return tool;
   }
 

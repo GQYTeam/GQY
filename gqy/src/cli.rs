@@ -1828,23 +1828,44 @@ fn run_watch(paths: &GqyPaths, args: WatchArgs) -> Result<()> {
         };
         if crate::watch::should_alert(&sample) {
             let message = crate::watch::alert_message(&sample);
-            let delivered = crate::watch::enqueue_alert(paths, &message)?;
-            if delivered {
-                println!(
-                    "{}",
-                    t(
-                        "watch: anomaly detected, alert queued to the running session",
-                        "监控：检测到异常，已给运行中的会话入队主动提醒"
-                    )
-                );
-            } else {
-                println!(
-                    "{}",
-                    t(
-                        "watch: anomaly detected (WebUI not running, alert skipped)",
-                        "监控：检测到异常（WebUI 未运行，跳过提醒）"
-                    )
-                );
+            match crate::watch::enqueue_alert(paths, &message)? {
+                crate::watch::AlertOutcome::Delivered => {
+                    println!(
+                        "{}",
+                        t(
+                            "watch: anomaly detected, alert queued to the running session",
+                            "监控：检测到异常，已给运行中的会话入队主动提醒"
+                        )
+                    );
+                }
+                crate::watch::AlertOutcome::Cooldown => {}
+                crate::watch::AlertOutcome::WebUiUnreachable => {
+                    println!(
+                        "{}",
+                        t(
+                            "watch: anomaly detected (WebUI not running, alert skipped)",
+                            "监控：检测到异常（WebUI 未运行，跳过提醒）"
+                        )
+                    );
+                }
+                crate::watch::AlertOutcome::NoRunningTurn => {
+                    println!(
+                        "{}",
+                        t(
+                            "watch: anomaly detected (WebUI up but no active turn, alert skipped)",
+                            "监控：检测到异常（WebUI 运行中但无进行中的会话，提醒无处投递）"
+                        )
+                    );
+                }
+                crate::watch::AlertOutcome::Rejected => {
+                    println!(
+                        "{}",
+                        t(
+                            "watch: anomaly detected (WebUI rejected the alert)",
+                            "监控：检测到异常（WebUI 拒绝入队，跳过提醒）"
+                        )
+                    );
+                }
             }
         }
         if args.once {

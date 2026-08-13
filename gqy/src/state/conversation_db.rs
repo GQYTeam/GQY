@@ -38,6 +38,15 @@ impl TurnStatus {
     }
 }
 
+/// 历史对话搜索命中（search_history 工具用）：时间 + 双方内容摘要。
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct HistoryHit {
+    pub timestamp: String,
+    pub user_content: String,
+    pub assistant_content: String,
+}
+
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct Turn {
@@ -147,8 +156,7 @@ impl std::fmt::Debug for ConversationDb {
 impl ConversationDb {
     pub fn open(state_dir: &Path) -> Result<Self> {
         std::fs::create_dir_all(state_dir)?;
-        let db_path = state_dir.join("conversation.db");
-        let conn = Connection::open(&db_path)
+        let db_path = state_dir.join("conversation.db");        let conn = Connection::open(&db_path)
             .with_context(|| format!("failed to open conversation db: {}", db_path.display()))?;
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
@@ -787,6 +795,53 @@ impl ConversationDb {
             .collect::<std::result::Result<Vec<_>, _>>()?;
         attach_turn_children_locked(&conn, &mut turns)?;
         Ok(turns)
+    }
+
+    /// 按关键词搜索本通道的完整对话历史（含已移出上下文窗口的旧轮次），
+    /// 按时间倒序返回。分词后逐词 LIKE 匹配 user/assistant 内容；
+    /// 仅给模型做“翻旧账”用，只读不改。
+    pub fn search_history(&self, query: &str, limit: usize) -> Result<Vec<HistoryHit>> {
+        let conn = self.conn.lock().unwrap();
+        let tokens: Vec<String> = query
+            .split(|ch: char| ch.is_whitespace() || ch.is_ascii_punctuation())
+            .map(str::trim)
+            .filter(|token| token.chars().count() >= 2)
+            .map(str::to_lowercase)
+            .collect();
+        if tokens.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut sql = String::from(
+            "SELECT user_timestamp, user_content, assistant_content FROM turns WHERE channel = ?1 AND (",
+        );
+        let mut params: Vec<String> = vec![self.channel.clone()];
+        for (index, token) in tokens.iter().enumerate() {
+            if index > 0 {
+                sql.push_str(" OR ");
+            }
+            sql.push_str(&format!(
+                "(lower(user_content) LIKE ?{} OR lower(assistant_content) LIKE ?{})",
+                2 + index * 2,
+                3 + index * 2
+            ));
+            params.push(format!("%{token}%"));
+            params.push(format!("%{token}%"));
+        }
+        sql.push_str(&format!(
+            ") ORDER BY seq DESC LIMIT ?{}",
+            2 + tokens.len() * 2
+        ));
+        params.push(limit.to_string());
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            Ok(HistoryHit {
+                timestamp: row.get(0)?,
+                user_content: row.get(1)?,
+                assistant_content: row.get(2)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 
     #[allow(dead_code)]
@@ -2059,5 +2114,36 @@ impl ConversationDb {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch("PRAGMA incremental_vacuum;")?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod search_history_tests {
+    use super::*;
+
+    #[test]
+    fn search_history_finds_old_turns_by_keyword() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = ConversationDb::open(temp.path()).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(
+                "INSERT INTO turns (turn_id, seq, user_content, user_timestamp, assistant_content, status, tool_reports, hidden, is_summary, token_total, token_usage_estimated, channel) VALUES
+                 ('t1', 1, '我们聊过抓包的事', '2026-08-02T10:00:00+00:00', '对，抓包那事我记得', 'completed', '[]', 0, 0, 0, 0, 'webui'),
+                 ('t2', 2, '今天天气不错', '2026-08-10T10:00:00+00:00', '是啊', 'completed', '[]', 0, 0, 0, 0, 'webui');",
+            )
+            .unwrap();
+        }
+        let hits = db.search_history("抓包", 5).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].user_content.contains("抓包"));
+
+        let hits = db.search_history("天气", 5).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].timestamp, "2026-08-10T10:00:00+00:00");
+
+        // 无命中返回空
+        let hits = db.search_history("不存在的词", 5).unwrap();
+        assert!(hits.is_empty());
     }
 }

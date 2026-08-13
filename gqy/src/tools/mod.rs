@@ -2,6 +2,7 @@ mod alarm;
 mod apply_patch;
 mod ask_question;
 mod calculator;
+mod chat_history;
 mod clipboard;
 mod deep_research;
 mod deepseek_status;
@@ -242,6 +243,7 @@ pub fn builtin_registry(config: &AppConfig, paths: &GqyPaths) -> ToolRegistry {
     }
     moegirl::register(&mut registry);
     hash_codec::register(&mut registry);
+    chat_history::register(&mut registry, paths.clone());
     calculator::register(&mut registry);
     deepseek_status::register(&mut registry);
     vision::register_print(&mut registry, config.clone());
