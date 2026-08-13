@@ -17,7 +17,7 @@ use axum::http::header::{
     CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, COOKIE, HOST, ORIGIN, REFERRER_POLICY,
     RETRY_AFTER, SET_COOKIE, X_CONTENT_TYPE_OPTIONS,
 };
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
@@ -80,6 +80,8 @@ struct WebState {
     /// 监听端口与局域网 IP（扫码登录二维码用）
     web_port: u16,
     lan_ip: Option<String>,
+    /// 预览模式：免密公开浏览界面，禁所有写操作
+    preview: bool,
 }
 
 #[derive(Clone)]
@@ -927,6 +929,8 @@ struct BootstrapResponse {
     /// 引擎标识：`pi`（pi 底座）或 provider id
     engine: String,
     capabilities: Capabilities,
+    /// 预览模式标记：前端据此隐藏设置、禁用输入
+    preview: bool,
 }
 
 #[derive(Serialize)]
@@ -1051,10 +1055,14 @@ pub async fn run(paths: GqyPaths, args: WebArgs) -> Result<()> {
     }
     AppConfig::init_files(&paths)?;
     let config = AppConfig::load_or_default(&paths)?;
-    // 密码：命令行 > 配置文件 web_ui.password
-    let password = match resolve_web_password(&args)? {
-        Some(p) => Some(p),
-        None => config.web_ui.password.clone(),
+    // 密码：命令行 > 配置文件 web_ui.password；预览模式强制免密
+    let password = if args.preview {
+        None
+    } else {
+        match resolve_web_password(&args)? {
+            Some(p) => Some(p),
+            None => config.web_ui.password.clone(),
+        }
     };
     let bind_ip: IpAddr = args
         .host
@@ -1127,6 +1135,7 @@ pub async fn run(paths: GqyPaths, args: WebArgs) -> Result<()> {
         shutdown: Arc::new(tokio::sync::Notify::new()),
         web_port: port,
         lan_ip: lan_ip(),
+        preview: args.preview,
     };
     let shutdown_notify = state.shutdown.clone();
     let app = router(state);
@@ -1206,18 +1215,43 @@ fn router(state: WebState) -> Router {
         .route("/api/alarms/{alarm_id}", delete(cancel_alarm_web))
         .layer(DefaultBodyLimit::max(JSON_BODY_LIMIT))
         .layer(axum::middleware::from_fn_with_state(state.clone(), loopback_autofill))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), preview_readonly))
         .with_state(state)
+}
+
+/// 预览模式：拦截所有非只读方法（POST/PUT/DELETE…），公开浏览界面但不可操作
+async fn preview_readonly(
+    State(state): State<WebState>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    if state.preview
+        && request.method() != Method::GET
+        && request.method() != Method::HEAD
+        && request.method() != Method::OPTIONS
+    {
+        return ApiError::new(
+            StatusCode::FORBIDDEN,
+            "预览模式：聊天与设置不可用",
+        )
+        .into_response();
+    }
+    next.run(request).await
 }
 
 /// 本机回环免密：来自 127.0.0.1 的请求自动带上 loopback session，
 /// 电脑上打开 App / 浏览器直接进入；手机（局域网）仍需密码/扫码。
+/// 经反向代理（Caddy/nginx）转发的请求带 X-Forwarded-For，来源并非真正回环，
+/// 不享受免密——否则外部流量被代理“洗成” 127.0.0.1 全部免密。
 async fn loopback_autofill(
     State(state): State<WebState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     mut request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Response {
-    if peer.ip().is_loopback() {
+    let proxied = request.headers().contains_key("x-forwarded-for")
+        || request.headers().contains_key("x-real-ip");
+    if peer.ip().is_loopback() && !proxied {
         if let Some(session) = state.auth.loopback_session.clone() {
             let cookie = format!("{AUTH_COOKIE}={session}");
             if let Ok(value) = HeaderValue::from_str(&cookie) {
@@ -2148,6 +2182,7 @@ async fn bootstrap(
             attachments: true,
             queue: true,
         },
+        preview: state.preview,
     })
     .into_response();
     response
@@ -4568,6 +4603,12 @@ fn require_auth(headers: &HeaderMap, state: &WebState) -> std::result::Result<()
 }
 
 fn require_mutation(headers: &HeaderMap, state: &WebState) -> std::result::Result<(), ApiError> {
+    if state.preview {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "预览模式：聊天与设置不可用",
+        ));
+    }
     require_auth(headers, state)?;
     if origin_is_allowed(headers) {
         Ok(())
@@ -4607,8 +4648,12 @@ fn origin_is_allowed(headers: &HeaderMap) -> bool {
     let Some(host) = headers.get(HOST).and_then(|host| host.to_str().ok()) else {
         return false;
     };
-    let expected = format!("http://{host}");
-    origin.to_str().is_ok_and(|origin| origin == expected)
+    // Origin 形如 <scheme>://<host[:port]>，比较 host 部分（http/https 都算同源）：
+    // 经 HTTPS 反向代理时浏览器 Origin 是 https://host，而 Host 头保持 host，写死 http 会误拒。
+    let Ok(origin_str) = origin.to_str() else {
+        return false;
+    };
+    origin_str.split_once("://").map(|(_, rest)| rest).unwrap_or_default() == host
 }
 
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {

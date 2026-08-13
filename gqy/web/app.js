@@ -192,6 +192,7 @@
     contextTrack: document.getElementById("contextTrack"),
     contextBar: document.getElementById("contextBar"),
     settingsButton: document.getElementById("settingsButton"),
+    previewBanner: document.getElementById("previewBanner"),
     sidebarThemeButton: document.getElementById("sidebarThemeButton"),
     sidebarCollapseButton: document.getElementById("sidebarCollapseButton"),
     conversationTitle: document.getElementById("conversationTitle"),
@@ -5401,6 +5402,8 @@
     state.usage = snapshot?.usage && typeof snapshot.usage === "object" ? snapshot.usage : {};
     state.capabilities = snapshot?.capabilities && typeof snapshot.capabilities === "object" ? snapshot.capabilities : {};
     state.engine = String(snapshot?.engine || "");
+    state.preview = Boolean(snapshot?.preview);
+    applyPreviewMode();
     state.version = snapshot?.version ?? null;
     state.activeRunId = typeof snapshot?.active_run_id === "string" && snapshot.active_run_id ? snapshot.active_run_id : null;
     state.externalRunningTurnId = !state.activeRunId && typeof snapshot?.running_turn_id === "string" && snapshot.running_turn_id
@@ -5448,6 +5451,26 @@
     updateConversationChrome();
     updateControlState();
     scheduleExternalSync();
+  }
+
+  // 预览模式：公开浏览界面，隐藏设置、禁用输入
+  function applyPreviewMode() {
+    if (!state.preview) return;
+    if (elements.previewBanner) elements.previewBanner.hidden = false;
+    if (elements.settingsButton) elements.settingsButton.hidden = true;
+    if (elements.composerInput) {
+      elements.composerInput.disabled = true;
+      elements.composerInput.placeholder = "预览模式：聊天已禁用";
+    }
+    if (elements.sendButton) elements.sendButton.disabled = true;
+    if (elements.modeSwitch) {
+      elements.modeSwitch.querySelectorAll("button").forEach((button) => {
+        button.disabled = true;
+      });
+    }
+    if (elements.stopButton) elements.stopButton.hidden = true;
+    const stateLabel = document.getElementById("composerState");
+    if (stateLabel) stateLabel.textContent = "预览模式";
   }
 
   async function loadBootstrap() {

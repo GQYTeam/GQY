@@ -869,6 +869,10 @@ pub struct WebArgs {
 
     #[arg(long, value_name = "PATH", conflicts_with = "password")]
     pub password_file: Option<PathBuf>,
+
+    /// 预览模式：免密公开浏览界面，但禁用聊天与所有写操作（设置/模型/对话）
+    #[arg(long)]
+    pub preview: bool,
 }
 
 impl std::fmt::Debug for WebArgs {
@@ -880,6 +884,7 @@ impl std::fmt::Debug for WebArgs {
             .field("no_open", &self.no_open)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
             .field("password_file", &self.password_file)
+            .field("preview", &self.preview)
             .finish()
     }
 }

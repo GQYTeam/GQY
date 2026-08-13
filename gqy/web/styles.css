@@ -123,6 +123,22 @@ textarea:disabled {
   height: 100dvh;
 }
 
+/* 预览模式横幅：顶部通栏提示 */
+.preview-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  padding: 8px 16px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0e1210;
+  background: linear-gradient(90deg, #62c891, #7fe0ab);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, .35);
+}
+
 .icon-slot {
   display: inline-grid;
   width: 18px;
