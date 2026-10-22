@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<meta name="description" content="顾清影 · 一个纯前端演示的 AI 对话窗口。">
+<meta name="theme-color" content="#fcfcfb">
+<title>顾清影 · AI 对话</title>
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="stylesheet" href="styles/base.css">
+<link rel="stylesheet" href="styles/shell.css">
+<link rel="stylesheet" href="styles/chat.css">
+<link rel="stylesheet" href="styles/ui.css">
+<link rel="stylesheet" href="styles/pages.css">
+<link rel="stylesheet" href="styles/panels.css">
+<link rel="stylesheet" href="styles/media.css">
+<link rel="stylesheet" href="styles/settings.css">
+<link rel="stylesheet" href="styles/board.css">
+<link rel="stylesheet" href="styles/responsive.css">
+</head>
+<body>
+<a class="skip-link" href="#composerInput">跳到输入框</a>
+
+<svg class="sprite" width="0" height="0" aria-hidden="true" focusable="false">
+  <symbol id="i-spark" viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+    <path d="M20 20h15.5M20 20l7.75 13.42M20 20l-7.75 13.42M20 20h-15.5M20 20l-7.75-13.42M20 20l7.75-13.42M20 20l9.65 5.57M20 20v11.14M20 20l-9.65 5.57M20 20l-9.65-5.57M20 20v-11.14M20 20l9.65-5.57"/>
+  </symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 19.4h3.2L19 8.2a2.3 2.3 0 0 0-3.2-3.2L4.6 16.2Z"/><path d="M15.8 5l3.2 3.2"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13.4 2.8 5.4 13.6h5.3l-1.1 7.6 7.8-10.9h-5z"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.2" y="4.2" width="17.6" height="15.6" rx="3"/><path d="M9.6 4.2v15.6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5.5v13M5.5 12h13"/></symbol>
+  <symbol id="i-folder-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.6 7.6a2 2 0 0 1 2-2h3.5l2 2.2h7.3a2 2 0 0 1 2 2v7.7a2 2 0 0 1-2 2H5.6a2 2 0 0 1-2-2Z"/><path d="M12 11.4v5M9.5 13.9h5"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.6 7.6a2 2 0 0 1 2-2h3.5l2 2.2h7.3a2 2 0 0 1 2 2v7.7a2 2 0 0 1-2 2H5.6a2 2 0 0 1-2-2Z"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.6 11a6.4 6.4 0 0 0 12.8 0M12 17.4V21M9 21h6"/></symbol>
+  <symbol id="i-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8.6 3.6H5.2a1.6 1.6 0 0 0-1.6 1.6v3.4M15.4 3.6h3.4a1.6 1.6 0 0 1 1.6 1.6v3.4M20.4 15.4V18.8a1.6 1.6 0 0 1-1.6 1.6h-3.4M3.6 15.4v3.4a1.6 1.6 0 0 0 1.6 1.6h3.4"/></symbol>
+  <symbol id="i-shrink" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3.6V7a2 2 0 0 1-2 2H3.6M15 3.6V7a2 2 0 0 0 2 2h3.4M20.4 15H17a2 2 0 0 0-2 2v3.4M3.6 15H7a2 2 0 0 1 2 2v3.4"/></symbol>
+  <symbol id="i-person" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.4" r="3.4"/><path d="M5.4 19.6c.8-3.5 3.4-5.3 6.6-5.3s5.8 1.8 6.6 5.3"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 3.4v2.2M12 18.4v2.2M3.4 12h2.2M18.4 12h2.2M5.9 5.9l1.6 1.6M16.5 16.5l1.6 1.6M18.1 5.9l-1.6 1.6M7.5 16.5l-1.6 1.6"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2.6"/><path d="M15 6.4A2.4 2.4 0 0 0 12.6 4h-6A2.6 2.6 0 0 0 4 6.6v6A2.4 2.4 0 0 0 6.4 15"/></symbol>
+  <symbol id="i-retry" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4.6V10h-5.4"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 7h14.8M9.4 7V5.3A1.3 1.3 0 0 1 10.7 4h2.6a1.3 1.3 0 0 1 1.3 1.3V7M6.4 7l.8 11.1A1.9 1.9 0 0 0 9.1 20h5.8a1.9 1.9 0 0 0 1.9-1.9L17.6 7"/></symbol>
+  <symbol id="i-wrap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h13M4 18h9"/><path d="m16.5 15.5 2.5 2.5-2.5 2.5"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13.6 3.6H7.4a2 2 0 0 0-2 2v12.8a2 2 0 0 0 2 2h9.2a2 2 0 0 0 2-2V8.6Z"/><path d="M13.6 3.6v5h5"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.4"/><path d="M9.6 9.5c.2-1.5 1.3-2.4 2.7-2.4 1.5 0 2.5 1 2.5 2.2 0 1.2-.8 1.8-1.8 2.3-.8.4-1.1.9-1.1 1.8v.3"/><path d="M12 17.1h.01"/></symbol>
+  <symbol id="i-board" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.2" y="4.4" width="5.2" height="15.2" rx="1.6"/><rect x="9.4" y="4.4" width="5.2" height="10.4" rx="1.6"/><rect x="15.6" y="4.4" width="5.2" height="13" rx="1.6"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.6" width="18" height="14.8" rx="3"/><path d="M7.2 9.6 10 12.2l-2.8 2.6M12.6 15h4.2"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5.5 16 12l-6.5 6.5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.6 9.8 17.4 19.4 7"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="11" r="6.4"/><path d="m16 16 4.4 4.4"/></symbol>
+  <symbol id="i-paperclip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8.6 12.4l6.2-6.2a3.2 3.2 0 0 1 4.5 4.5l-7.5 7.5a5 5 0 0 1-7.1-7.1l7.2-7.2"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.6" y="4.6" width="16.8" height="14.8" rx="2.4"/><circle cx="9" cy="10" r="1.6"/><path d="m4.6 17 4.6-4.5a2 2 0 0 1 2.8 0l1.5 1.5 2.4-2.4a2 2 0 0 1 2.8 0l2 2"/></symbol>
+  <symbol id="i-stop-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8.4"/><rect x="9.2" y="9.2" width="5.6" height="5.6" rx="1.2" fill="currentColor" stroke="none"/></symbol>
+</svg>
+
+<div class="app" id="app" data-sidebar="open">
+  <aside class="sidebar" id="sidebar" aria-label="侧边栏">
+    <div class="sidebar-inner">
+      <div class="side-top">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"><img src="assets/avatar.png" alt=""></span>
+          <img class="brand-word" src="assets/wordmark.png" alt="顾清影">
+        </div>
+        <button class="icon-btn side-toggle" id="collapseBtn" type="button" aria-label="收起侧边栏" title="收起侧边栏">
+          <svg class="ico" aria-hidden="true"><use href="#i-panel"/></svg>
+        </button>
+      </div>
+
+      <nav class="side-actions" aria-label="主导航">
+        <button class="side-action" id="newChatBtn" type="button">
+          <span class="newmark" aria-hidden="true"><svg class="ico"><use href="#i-plus"/></svg></span>
+          <span>新会话</span>
+        </button>
+        <button class="side-action" id="boardNavBtn" type="button">
+          <span class="side-ico" aria-hidden="true"><svg class="ico"><use href="#i-board"/></svg></span>
+          <span>看板</span>
+        </button>
+      </nav>
+
+      <div class="ws-head">
+        <span class="ws-label">工作区</span>
+        <div class="ws-tools">
+          <button class="icon-btn sm" id="searchBtn" type="button" aria-label="搜索对话" title="搜索对话" aria-expanded="false">
+            <svg class="ico" aria-hidden="true"><use href="#i-search"/></svg>
+          </button>
+          <button class="icon-btn sm" id="newWsBtn" type="button" aria-label="新建工作区" title="新建工作区">
+            <svg class="ico" aria-hidden="true"><use href="#i-folder-plus"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="search-wrap" id="searchWrap" hidden>
+        <svg class="ico search-ico" aria-hidden="true"><use href="#i-search"/></svg>
+        <input id="searchInput" type="search" placeholder="搜索对话" aria-label="搜索对话" autocomplete="off">
+      </div>
+      <div class="ws-scroll" id="wsList"></div>
+
+      <div class="side-bottom">
+        <button class="account" id="accountBtn" type="button" aria-haspopup="dialog" title="设置">
+          <span class="avatar" aria-hidden="true"><svg class="ico"><use href="#i-person"/></svg><i class="status-dot"></i></span>
+          <span class="account-text"><b>gqy</b><small>个人空间</small></span>
+          <svg class="ico account-gear" aria-hidden="true"><use href="#i-gear"/></svg>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <div class="scrim" id="scrim" aria-hidden="true"></div>
+
+  <main class="main" id="main">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="icon-btn" id="openSideBtn" type="button" aria-label="展开侧边栏" title="展开侧边栏">
+          <svg class="ico" aria-hidden="true"><use href="#i-panel"/></svg>
+        </button>
+        <h1 class="topbar-title" id="topbarTitle" hidden></h1>
+      </div>
+      <div class="topbar-right">
+        <button class="icon-btn" id="fullBtn" type="button" aria-label="进入全屏" title="进入全屏">
+          <svg class="ico" aria-hidden="true"><use href="#i-expand"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="main-row" id="mainRow">
+    <div class="body is-empty" id="body">
+      <div class="scroller" id="scroller">
+        <div class="hero" id="hero">
+          <span class="hero-mark" aria-hidden="true"><img src="assets/avatar.png" alt=""></span>
+          <h2 class="hero-title">说说你想做的事</h2>
+          <p class="hero-sub">顾清影在。写代码、读材料、改页面，从一句话开始。</p>
+        </div>
+        <div class="thread" id="thread" aria-live="off"></div>
+      </div>
+
+      <div class="composer-area" id="composerArea">
+        <div class="composer-wrap">
+          <div class="suggests" id="suggests" aria-label="示例问题">
+            <button class="suggest" type="button" data-suggest="写一个 debounce 函数，并说明容易踩的坑">写个 debounce 函数</button>
+            <button class="suggest" type="button" data-suggest="创建一个 PyTorch 数据集实例，读取按文件夹分类的图片，并拆出验证集">PyTorch 图片数据集</button>
+            <button class="suggest" type="button" data-suggest="用一句话解释 RAG 是什么，它解决什么问题">解释一下 RAG</button>
+          </div>
+          <form class="composer" id="composerForm" autocomplete="off" novalidate>
+            <div class="clawd" id="clawd" aria-hidden="true"><i class="clawd-body"></i><i class="clawd-ink"></i></div>
+            <div class="attach-row" id="attachRow" hidden></div>
+            <div class="composer-input-wrap">
+              <label class="sr-only" for="composerInput">输入消息</label>
+              <textarea id="composerInput" class="composer-input" rows="1" placeholder="发消息给顾清影…" maxlength="8000" spellcheck="false"></textarea>
+              <button class="send-btn" id="sendBtn" type="submit" aria-label="发送" title="发送" disabled>
+                <svg class="ico" aria-hidden="true"><use href="#i-arrow-up"/></svg>
+              </button>
+            </div>
+            <div class="composer-bar">
+              <div class="bar-left">
+                <button class="icon-btn round" id="plusBtn" type="button" aria-label="添加文件" title="添加文件">
+                  <svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg>
+                </button>
+              </div>
+              <div class="bar-right">
+                <button class="model-btn" id="modelBtn" type="button" aria-haspopup="menu" aria-expanded="false" title="切换模型与推理强度">
+                  <span class="model-name" id="modelName">DeepSeek-V4.1-Flash</span>
+                  <span class="model-effort" id="modelEffort">High</span>
+                  <svg class="ico model-chev" aria-hidden="true"><use href="#i-chevron"/></svg>
+                </button>
+                <button class="icon-btn round" id="micBtn" type="button" aria-label="语音输入" title="语音输入" aria-pressed="false">
+                  <svg class="ico" aria-hidden="true"><use href="#i-mic"/></svg>
+                </button>
+                <button class="usage-btn" id="usageBtn" type="button" aria-haspopup="dialog" aria-expanded="false" title="上下文用量">
+                  <svg class="usage-pie" viewBox="0 0 16 16" aria-hidden="true">
+                    <circle cx="8" cy="8" r="6.4" fill="#e6e6e5"/>
+                    <path id="usageWedge" d="" fill="#6f8a76"/>
+                  </svg>
+                  <span id="usagePct">0%</span>
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div class="fp-resize" id="filesResize" role="separator" aria-orientation="vertical" aria-label="调整文件面板宽度" hidden></div>
+    <aside class="files-panel" id="filesPanel" aria-labelledby="filesTitle" aria-hidden="true" inert>
+      <header class="fp-head">
+        <span class="fp-ico" aria-hidden="true"><svg class="ico"><use href="#i-folder"/></svg></span>
+        <div class="fp-title"><b id="filesTitle">项目文件</b><small id="filesRoot">~/项目</small></div>
+        <button class="icon-btn" id="filesTreeBtn" type="button" title="文件列表" aria-label="文件列表" aria-pressed="false">
+          <svg class="ico" aria-hidden="true"><use href="#i-panel"/></svg>
+        </button>
+        <button class="icon-btn" id="filesExpand" type="button" title="全屏查看" aria-label="全屏查看">
+          <svg class="ico" aria-hidden="true"><use href="#i-expand"/></svg>
+        </button>
+        <button class="icon-btn" id="filesClose" type="button" title="收起面板" aria-label="收起面板">
+          <svg class="ico" aria-hidden="true"><use href="#i-x"/></svg>
+        </button>
+      </header>
+      <div class="fp-tree" id="filesTree" role="tree" aria-label="项目文件"></div>
+      <div class="fp-tree-foot" id="filesTreeFoot"></div>
+      <div class="fp-code" id="filesCodePane">
+        <div class="fp-bar">
+          <span class="fp-name" id="filesName">—</span>
+          <span class="fp-stat" id="filesStat"></span>
+          <span class="fp-actions">
+            <button class="code-tool" id="filesCopy" type="button" title="复制文件" aria-label="复制文件">
+              <svg class="ico" aria-hidden="true"><use href="#i-copy"/></svg>
+            </button>
+          </span>
+        </div>
+        <div class="fp-scroll">
+          <pre class="fp-gutter" id="filesGutter" aria-hidden="true"></pre>
+          <pre class="fp-src"><code id="filesCode"></code></pre>
+        </div>
+      </div>
+    </aside>
+    </div>
+    <!-- 设置改为浮层窗口，见页面底部 settingsLayer -->
+
+    <section class="view board-view" id="boardView" hidden aria-labelledby="boardTitle">
+      <div class="view-head">
+        <div class="v-title">
+          <h2 id="boardTitle">看板</h2>
+          <p class="view-sub" id="boardDateText">本机模拟数据 · 天气 / 建议 / 日程 / 进度</p>
+        </div>
+        <button class="btn" id="boardBack" type="button">返回对话</button>
+      </div>
+      <div class="view-scroll">
+        <div class="dash">
+          <article class="dash-card span2 weather">
+            <div class="dash-head"><span>天气</span><b>杭州 · 西湖区 · 12:40 更新</b></div>
+            <div class="w-main">
+              <b class="w-temp">24°</b>
+              <div class="w-copy">
+                <b>多云转晴</b>
+                <small>体感 25° · 紫外线中等 · 东南风 2 级</small>
+              </div>
+              <span class="w-badge">适宜外出</span>
+            </div>
+            <svg class="w-chart" viewBox="0 0 340 92" preserveAspectRatio="none" aria-hidden="true">
+              <defs>
+                <linearGradient id="wFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#d97757" stop-opacity=".26"/>
+                  <stop offset="1" stop-color="#d97757" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <path d="M0 62 L48 56 L97 48 L146 40 L195 26 L243 22 L292 30 L340 44 L340 92 L0 92 Z" fill="url(#wFill)"/>
+              <polyline points="0,62 48,56 97,48 146,40 195,26 243,22 292,30 340,44" fill="none" stroke="#c96a4a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+              <circle cx="195" cy="26" r="4" fill="#fff" stroke="#c96a4a" stroke-width="2"/>
+              <text x="182" y="16" class="w-tip">25°</text>
+              <text x="4" y="86" class="w-axis">12:00</text>
+              <text x="150" y="86" class="w-axis">15:00</text>
+              <text x="296" y="86" class="w-axis">19:00</text>
+            </svg>
+            <div class="w-stats">
+              <div><small>湿度</small><b>62%</b></div>
+              <div><small>降水</small><b>10%</b></div>
+              <div><small>能见度</small><b>18km</b></div>
+              <div><small>空气</small><b>优 32</b></div>
+            </div>
+          </article>
+
+          <article class="dash-card advice">
+            <div class="dash-head"><span>明天建议</span><b>周三</b></div>
+            <ul class="advice-list">
+              <li><span class="adv-ico" data-kind="wear">衣</span><div><b>薄长袖 + 外套</b><small>早晚 18°，中午回温到 26°</small></div></li>
+              <li><span class="adv-ico" data-kind="rain">伞</span><div><b>上午带伞</b><small>08:00–10:00 有短时阵雨</small></div></li>
+              <li><span class="adv-ico" data-kind="run">跑</span><div><b>傍晚适合跑步</b><small>19:00 后 21°，风小</small></div></li>
+            </ul>
+          </article>
+
+          <article class="dash-card schedule">
+            <div class="dash-head"><span>今日日程</span><b>3 项</b></div>
+            <ol class="timeline">
+              <li><time>09:30</time><div><b>站会</b><small>15 分钟 · 线上</small></div><span class="tl-dot"></span></li>
+              <li><time>14:00</time><div><b>设计评审</b><small>看板信息层级</small></div><span class="tl-dot"></span></li>
+              <li><time>19:30</time><div><b>跑步</b><small>西湖 5km</small></div><span class="tl-dot"></span></li>
+            </ol>
+          </article>
+
+          <article class="dash-card progress">
+            <div class="dash-head"><span>任务进度</span><b>本周</b></div>
+            <div class="ring-wrap">
+              <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+                <circle cx="60" cy="60" r="48" fill="none" stroke="#efeade" stroke-width="10"/>
+                <circle class="ring-val" id="boardRing" cx="60" cy="60" r="48" fill="none" stroke="#c96a4a" stroke-width="10" stroke-linecap="round"
+                        stroke-dasharray="201.6 301.6" transform="rotate(-90 60 60)"/>
+              </svg>
+              <div class="ring-copy"><b><span id="boardRingDone">6</span><span id="boardRingTotal">/9</span></b><small>已完成</small></div>
+            </div>
+            <div class="ring-legend"><span><i class="dot done"></i><span id="boardDoneCount">完成 6</span></span><span><i class="dot doing"></i><span id="boardDoingCount">进行中 2</span></span><span><i class="dot todo"></i><span id="boardTodoCount">待办 1</span></span></div>
+          </article>
+
+          <article class="dash-card focus">
+            <div class="dash-head"><span>专注时长</span><b>本周 17.6h</b></div>
+            <svg class="bars" viewBox="0 0 280 110" preserveAspectRatio="none" aria-hidden="true">
+              <g class="bar-g">
+                <rect x="6"   y="52" width="24" height="48" rx="6" fill="#dfd7c8"/>
+                <rect x="44"  y="30" width="24" height="70" rx="6" fill="#c96a4a" opacity=".8"/>
+                <rect x="82"  y="72" width="24" height="28" rx="6" fill="#dfd7c8"/>
+                <rect x="120" y="24" width="24" height="76" rx="6" fill="#c96a4a"/>
+                <rect x="158" y="44" width="24" height="56" rx="6" fill="#c96a4a" opacity=".7"/>
+                <rect x="196" y="84" width="24" height="16" rx="6" fill="#dfd7c8"/>
+                <rect x="234" y="60" width="24" height="40" rx="6" fill="#dfd7c8"/>
+              </g>
+              <text x="120" y="16" class="bar-tip">4.1h</text>
+            </svg>
+            <div class="bar-axis"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+          </article>
+
+          <article class="dash-card span2 tasks-card">
+            <div class="dash-head"><span>本周任务</span><button class="dash-reset" id="boardResetTasks" type="button">重置清单</button></div>
+            <div class="task-summary">
+              <div class="task-bar" aria-hidden="true"><i id="boardTaskBar"></i></div>
+              <span id="boardTaskMeta">6 / 9 完成</span>
+            </div>
+            <div class="task-list" id="boardTaskList"></div>
+          </article>
+
+          <article class="dash-card recent-card">
+            <div class="dash-head"><span>最近对话</span><b>本机</b></div>
+            <div class="recent-list" id="boardRecent"></div>
+          </article>
+        </div>
+        <p class="board-note">看板数据是本机模拟的；后续可以接天气、日历和任务接口，把这里做成真正的中控台。</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<dialog class="modal" id="wsDialog" aria-labelledby="wsDialogTitle">
+  <form class="modal-body" id="wsForm" novalidate>
+    <h2 id="wsDialogTitle">新建工作区</h2>
+    <p class="modal-sub">把同一个项目的对话放在一起，方便随时找回。</p>
+    <label class="field" for="wsName">
+      <span>名称</span>
+      <input id="wsName" type="text" maxlength="40" placeholder="例如：website-redesign" required>
+    </label>
+    <div class="modal-actions">
+      <button class="btn" type="button" data-close="wsDialog">取消</button>
+      <button class="btn btn-primary" type="submit">创建工作区</button>
+    </div>
+  </form>
+</dialog>
+
+
+
+<div class="lightbox" id="lightbox" hidden>
+  <div class="lb-scrim" data-lb-close></div>
+  <div class="lb-panel" role="dialog" aria-modal="true" aria-labelledby="lbTitle" tabindex="-1">
+    <header class="lb-top">
+      <span class="lb-fileicon" aria-hidden="true"><svg class="ico"><use href="#i-file"/></svg></span>
+      <div class="lb-path">
+        <b id="lbTitle">dataset.py</b>
+        <small id="lbPath">~/项目</small>
+      </div>
+      <span class="lb-chip" id="lbLang">python</span>
+      <span class="lb-chip" id="lbLines">0 行</span>
+      <span class="lb-actions">
+        <button class="lb-btn" id="lbCopy" type="button">
+          <svg class="ico" aria-hidden="true"><use href="#i-copy"/></svg><span>复制</span>
+        </button>
+        <button class="lb-icon" type="button" data-lb-close aria-label="关闭" title="关闭">
+          <svg class="ico" aria-hidden="true"><use href="#i-x"/></svg>
+        </button>
+      </span>
+    </header>
+    <div class="lb-bar">
+      <span class="lb-bar-name" id="lbBarName">dataset.py</span>
+      <span class="lb-bar-stat"><i>+</i><span id="lbAdded">0</span></span>
+      <span class="lb-bar-tag">新增文件</span>
+    </div>
+    <div class="lb-code" id="lbCode">
+      <pre class="lb-gutter" aria-hidden="true"></pre>
+      <pre class="lb-src"><code></code></pre>
+    </div>
+    <footer class="lb-foot">
+      <span id="lbFootLang">Python</span>
+      <span>UTF-8</span>
+      <span>LF</span>
+      <span class="lb-foot-right">只读 · 由顾清影生成</span>
+    </footer>
+  </div>
+</div>
+
+<div class="dropzone" id="dropzone" hidden>
+  <div class="dropzone-card">
+    <span class="dropzone-icon" aria-hidden="true"><svg class="ico"><use href="#i-paperclip"/></svg></span>
+    <b>松开，把文件交给顾清影</b>
+    <small>图片、PDF、代码或文本 · 一次最多 10 个</small>
+  </div>
+</div>
+
+<div class="imgbox" id="imgbox" hidden>
+  <div class="imgbox-scrim" data-img-close></div>
+  <div class="imgbox-panel" role="dialog" aria-modal="true" aria-labelledby="imgboxTitle" tabindex="-1">
+    <header class="imgbox-head">
+      <span class="imgbox-icon" aria-hidden="true"><svg class="ico"><use href="#i-image"/></svg></span>
+      <div class="imgbox-title"><b id="imgboxTitle">图片预览</b><small id="imgboxMeta"></small></div>
+      <div class="imgbox-actions">
+        <a class="lb-btn" id="imgboxSource" href="#" target="_blank" rel="noopener">原图</a>
+        <button class="lb-icon" type="button" data-img-close aria-label="关闭图片预览" title="关闭">
+          <svg class="ico" aria-hidden="true"><use href="#i-x"/></svg>
+        </button>
+      </div>
+    </header>
+    <div class="imgbox-stage">
+      <button class="imgbox-nav prev" id="imgboxPrev" type="button" aria-label="上一张">
+        <svg class="ico" aria-hidden="true"><use href="#i-chevron"/></svg>
+      </button>
+      <img id="imgboxImg" alt="">
+      <button class="imgbox-nav next" id="imgboxNext" type="button" aria-label="下一张">
+        <svg class="ico" aria-hidden="true"><use href="#i-chevron"/></svg>
+      </button>
+    </div>
+    <footer class="imgbox-foot">
+      <span id="imgboxCount">1 / 1</span>
+      <span class="imgbox-hint">Esc 关闭 · ← → 切换</span>
+      <span class="imgbox-note">仅在本机预览</span>
+    </footer>
+  </div>
+</div>
+
+<div class="settings-layer" id="settingsLayer" hidden>
+  <div class="settings-backdrop" data-settings-close></div>
+  <section class="settings-window" id="settingsWindow" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" tabindex="-1">
+    <header class="settings-titlebar" id="settingsTitlebar">
+      <div class="traffic" aria-hidden="true">
+        <button class="tl tl-close" type="button" data-settings-close aria-label="关闭设置" title="关闭"></button>
+        <span class="tl tl-min"></span>
+        <span class="tl tl-max"></span>
+      </div>
+      <span class="settings-window-title" id="settingsTitle">设置</span>
+      <span class="settings-window-hint">拖动标题栏移动窗口</span>
+    </header>
+    <div class="settings-body">
+      <aside class="settings-sidebar">
+        <div class="settings-profile">
+          <span class="settings-avatar"><img src="assets/avatar.png" alt=""></span>
+          <span class="settings-profile-text"><b>gqy</b><small>个人空间 · 本机数据</small></span>
+        </div>
+        <nav class="settings-tabs" role="tablist" aria-orientation="vertical" aria-label="设置分类">
+          <button class="settings-tab is-active" id="settings-tab-appearance" type="button" role="tab" aria-selected="true" aria-controls="settings-panel-appearance" data-settings-tab="appearance">
+            <svg class="ico" aria-hidden="true"><use href="#i-image"/></svg><span>外观</span>
+          </button>
+          <button class="settings-tab" id="settings-tab-chat" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-chat" data-settings-tab="chat" tabindex="-1">
+            <svg class="ico" aria-hidden="true"><use href="#i-spark"/></svg><span>对话</span>
+          </button>
+          <button class="settings-tab" id="settings-tab-data" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-data" data-settings-tab="data" tabindex="-1">
+            <svg class="ico" aria-hidden="true"><use href="#i-folder"/></svg><span>数据</span>
+          </button>
+          <button class="settings-tab" id="settings-tab-usage" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-usage" data-settings-tab="usage" tabindex="-1">
+            <svg class="ico" aria-hidden="true"><use href="#i-bolt"/></svg><span>用量</span>
+            <span class="settings-tab-badge" id="usageBadge">0 KB</span>
+          </button>
+          <button class="settings-tab" id="settings-tab-about" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-about" data-settings-tab="about" tabindex="-1">
+            <svg class="ico" aria-hidden="true"><use href="#i-help"/></svg><span>关于</span>
+          </button>
+        </nav>
+        <div class="settings-mini-usage">
+          <div class="mini-usage-head"><span>本地存储</span><b id="miniUsageText">—</b></div>
+          <div class="mini-usage-bar"><i id="miniUsageBar"></i></div>
+          <small>上限约 5 MB · 不上传</small>
+        </div>
+      </aside>
+      <div class="settings-content" id="settingsContent">
+        <section class="settings-panel is-active" id="settings-panel-appearance" role="tabpanel" aria-labelledby="settings-tab-appearance" data-settings-panel="appearance">
+          <header class="panel-head">
+            <h2>外观</h2>
+            <p>控制阅读密度、动效，以及下次打开时的默认状态。</p>
+          </header>
+          <div class="panel-card">
+            <div class="setting-row">
+              <div class="setting-copy"><b>减少动效</b><small>关闭淡入、打字光标与过渡动画</small></div>
+              <button class="switch" id="motionSwitch" type="button" role="switch" aria-checked="false" aria-label="减少动效"></button>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy"><b>收起侧边栏</b><small>下次打开时保持收起，专注当前对话</small></div>
+              <button class="switch" id="sideSwitch" type="button" role="switch" aria-checked="false" aria-label="收起侧边栏"></button>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy"><b>正文字号</b><small>回复正文与代码一起缩放</small></div>
+              <div class="seg" id="fontSeg" role="group" aria-label="正文字号">
+                <button type="button" data-font="small" aria-pressed="false">小</button>
+                <button type="button" data-font="normal" aria-pressed="true">中</button>
+                <button type="button" data-font="large" aria-pressed="false">大</button>
+              </div>
+            </div>
+          </div>
+          <p class="panel-note">首屏动效只在打开空对话时出现；关闭后更安静。</p>
+        </section>
+
+        <section class="settings-panel" id="settings-panel-chat" role="tabpanel" aria-labelledby="settings-tab-chat" data-settings-panel="chat" hidden>
+          <header class="panel-head">
+            <h2>对话</h2>
+            <p>调整演示回复的节奏，以及思考过程如何保留。</p>
+          </header>
+          <div class="panel-card">
+            <div class="setting-row">
+              <div class="setting-copy"><b>流式速度</b><small>演示回复的打字与工具调用节奏</small></div>
+              <div class="seg" id="speedSeg" role="group" aria-label="流式速度">
+                <button type="button" data-speed="slow" aria-pressed="false">慢</button>
+                <button type="button" data-speed="normal" aria-pressed="true">正常</button>
+                <button type="button" data-speed="fast" aria-pressed="false">快</button>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy"><b>展开思考过程</b><small>回复结束后保留思考内容，不自动折叠</small></div>
+              <button class="switch" id="thinkSwitch" type="button" role="switch" aria-checked="false" aria-label="展开思考过程"></button>
+            </div>
+          </div>
+          <div class="panel-card panel-list">
+            <div class="panel-list-row"><span>当前模型</span><b id="aboutModelInline">DeepSeek-V4.1-Flash</b></div>
+            <div class="panel-list-row"><span>推理强度</span><b id="aboutEffortInline">High</b></div>
+          </div>
+        </section>
+
+        <section class="settings-panel" id="settings-panel-data" role="tabpanel" aria-labelledby="settings-tab-data" data-settings-panel="data" hidden>
+          <header class="panel-head">
+            <h2>数据</h2>
+            <p>对话只保存在本机浏览器，回复由本地脚本模拟，不会发送到任何服务器。</p>
+          </header>
+          <div class="panel-card panel-data">
+            <p class="set-note">导出会包含所有工作区、会话与消息；恢复示例会覆盖当前对话。</p>
+            <div class="set-actions">
+              <button class="btn" id="exportData" type="button">导出对话 JSON</button>
+              <button class="btn" id="seedReset" type="button">恢复示例对话</button>
+              <button class="btn btn-danger" id="clearAll" type="button">清空全部</button>
+            </div>
+          </div>
+          <p class="panel-note">清理浏览器站点数据也会删除这里的全部内容。</p>
+        </section>
+
+        <section class="settings-panel" id="settings-panel-usage" role="tabpanel" aria-labelledby="settings-tab-usage" data-settings-panel="usage" hidden>
+          <header class="panel-head">
+            <h2>用量</h2>
+            <p>本机保存的数据规模与最近活跃度，全部离线统计。</p>
+          </header>
+          <div class="usage-top">
+            <div class="usage-ring-card">
+              <div class="usage-ring-wrap">
+                <svg viewBox="0 0 120 120" class="usage-ring" aria-hidden="true">
+                  <circle cx="60" cy="60" r="48" class="usage-ring-track"></circle>
+                  <circle cx="60" cy="60" r="48" class="usage-ring-val" id="usageRing"></circle>
+                </svg>
+                <div class="usage-ring-copy"><b id="usageStorageText">0 KB</b><small id="usageStoragePercent">0%</small></div>
+              </div>
+              <p class="usage-ring-label">localStorage 占用</p>
+              <span class="usage-ring-note">上限约 5 MB · 仅存本机</span>
+            </div>
+            <div class="usage-tiles">
+              <div class="usage-tile"><span>工作区</span><b id="usageWorkspaces">0</b></div>
+              <div class="usage-tile"><span>会话</span><b id="usageConvs">0</b></div>
+              <div class="usage-tile"><span>消息</span><b id="usageMessages">0</b></div>
+              <div class="usage-tile"><span>产物 / 附件</span><b id="usageAssets">0</b></div>
+            </div>
+          </div>
+          <div class="usage-card">
+            <div class="usage-card-head"><b>最近 7 天消息量</b><span id="usageWeekTotal">0 条</span></div>
+            <div class="usage-bars" id="usageBars" role="img" aria-label="最近 7 天消息量柱状图"></div>
+            <div class="usage-axis" id="usageAxis"></div>
+          </div>
+          <p class="usage-note">演示 Token 约 <b id="usageTokens">0</b>（按字符数估算），只用于观察节奏，不会产生真实请求。</p>
+        </section>
+
+        <section class="settings-panel" id="settings-panel-about" role="tabpanel" aria-labelledby="settings-tab-about" data-settings-panel="about" hidden>
+          <header class="panel-head">
+            <h2>关于</h2>
+            <p>一个纯前端的对话与看板演示，没有后端。</p>
+          </header>
+          <div class="panel-card">
+            <div class="about-row"><span>名称</span><b>顾清影</b></div>
+            <div class="about-row"><span>版本</span><b>0.5.0 · 纯前端演示</b></div>
+            <div class="about-row"><span>模型</span><b class="about-model">DeepSeek-V4.1-Flash</b></div>
+            <div class="about-row"><span>能力</span><b>思考 · 工具调用 · 产物灯箱 · 附件 · Markdown</b></div>
+            <div class="about-row"><span>存储</span><b>localStorage · 不联网</b></div>
+          </div>
+          <p class="panel-note">界面参考 Claude 桌面端；看板与用量均为本机模拟数据。</p>
+        </section>
+      </div>
+    </div>
+  </section>
+</div>
+
+<input type="file" id="fileInput" multiple hidden>
+<script src="js/core.js" defer></script>
+<script src="js/markdown.js" defer></script>
+<script src="js/replies.js" defer></script>
+<script src="js/samples.js" defer></script>
+<script src="js/clawd.js" defer></script>
+<script src="app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "guqingying-chat",
+  "version": "0.4.0",
+  "private": true,
+  "description": "顾清影 · 纯前端 AI 对话演示（无构建、无第三方依赖）",
+  "scripts": {
+    "dev": "python3 -m http.server 5173",
+    "start": "npm run dev",
+    "check": "node --check js/core.js && node --check js/markdown.js && node --check js/replies.js && node --check js/samples.js && node --check js/clawd.js && node --check app.js",
+    "files": "find . -maxdepth 2 -type f -not -path './.git/*' -not -name '.DS_Store' | sort"
+  }
+}
