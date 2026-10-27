@@ -2,7 +2,7 @@
 
 | 区域 | 标记 | 样式 | 逻辑 |
 | --- | --- | --- | --- |
-| 侧栏 | `aside.sidebar` | `styles/shell.css` | `renderSidebar()`、搜索、工作区、扩展入口 |
+| 侧栏 | `aside.sidebar` | `styles/shell.css` | `renderSidebar()`、搜索、工作区、会话管理、扩展入口 |
 | 顶栏 | `header.topbar` | `styles/shell.css` | `renderThread()` 标题、用量按钮、全屏 |
 | 对话 | `#body` / `#thread` | `styles/chat.css` | `renderThread()`、`messageHTML()` |
 | 输入框 | `#composerForm` | `styles/chat.css` | `handleSend()`、模型菜单、附件、语音、上下文用量 |
@@ -10,7 +10,7 @@
 | 用量浮层 | `#usageLayer` | `styles/settings.css` | `openUsage()`、`refreshUsage()` |
 | 扩展浮层 | `#extensionsLayer` | `styles/settings.css` | `openExtensions()`、GitHub 连接/断开 |
 | 文件面板 | `#filesPanel` | `styles/panels.css` | `openFilesPanel()`、树/代码/拖宽 |
-| 代码灯箱 | `#lightbox` | `styles/panels.css` | `openViewer()` |
+| 代码灯箱 | `#lightbox` | `styles/panels.css` | `openViewer()`、预览/源码切换、`openArtifact()` |
 | 图片灯箱 | `#imgbox` | `styles/media.css` | `openImgbox()` |
 | 消息菜单/推理滑块 | `.menu` / `.effort` | `styles/ui.css` | `openMenu()`、`mountEffort()` |
 | 上下文用量浮层 | `.usage-pop` | `styles/ui.css` | `openContextPanel()` |
@@ -18,6 +18,22 @@
 | 无障碍播报 | `#liveStatus` | — | `announce()` |
 
 服务归属：`store.js`（状态/DOM）、`render.js`（消息/侧栏/线程/上下文浮层）、`chat.js`（发送/流式/会话）、`files.js`（文件/灯箱/提问卡片）、`menu.js`（菜单/模型/附件/语音）、`settings.js`（设置/用量/导入导出/GitHub）。
+
+## 会话管理（侧栏）
+
+- 入口：会话行右侧「更多」按钮或右键菜单；双击标题直接行内重命名。
+- 重命名：Enter 保存、Esc 取消、失焦保存；trim 非空、上限 80。
+- 置顶：菜单「置顶 / 取消置顶」；置顶项稳定排在同工作区最前，`pinned` 持久化。
+- 批量删除：侧栏「管理」进入多选模式，支持全选 / 清空 / 计数 / 二次确认；流式中的会话禁止删除；当前会话被删时切到剩余首个或新建空会话。
+- 导出：会话菜单导出 JSON 或 Markdown，文件名会过滤路径分隔符与保留字符。
+
+## 产物预览（灯箱）
+
+- 可预览类型：Markdown、HTML、SVG；其他代码只显示源码。
+- 灯箱顶部「预览 / 源码」分段按钮，`aria-pressed` + 左右方向键切换；打开新文件重置状态。
+- HTML 用 `iframe sandbox="allow-scripts"`（绝不带 `allow-same-origin`）+ `srcdoc`，并注入 CSP；SVG 用无脚本 sandbox；Markdown 复用 `GQY.renderMarkdown` 与 `safeUrl`。
+- 超过 2 MB、空内容、二进制/非 UTF-8 自动降级为源码并在灯箱条显示原因；预览失败可随时切回源码。
+- 关闭灯箱会清空 `srcdoc` / Markdown DOM，避免残留执行环境。
 
 ## 设置 tab
 

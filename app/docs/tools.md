@@ -30,12 +30,30 @@ type Tool interface {
 
 | 工具 | Schema | 行为 | 限制 |
 | --- | --- | --- | --- |
-| `read` | `path` | 读文件；图片（png/jpg/jpeg/gif/webp）返回 base64 data URI | 无路径限制 |
-| `edit` | `path`, `content` | 覆盖写入，自动建父目录（0755 / 0644） | 无 diff、无追加模式 |
-| `shell` | `command` | `sh -c` 执行，合并 stdout+stderr | 输出截断到 16 KB；无超时、无沙箱 |
-| `list_dir` | `path`（默认 `.`） | 列目录，目录名以 `/` 结尾 | 不递归 |
+| `read` | `path` | 读文件；图片（png/jpg/jpeg/gif/webp）返回 base64 data URI | 仅允许根内；单文件 ≤ 10 MB |
+| `edit` | `path`, `content` | 覆盖写入，自动建父目录；同目录临时文件 + rename 原子替换 | 仅允许根内；无 diff、无追加模式 |
+| `shell` | `command` | 在 workspace 以 `sh -c` 执行，合并 stdout+stderr | 默认 60s 超时并杀进程组；输出 ≤ 16 KB；可选白名单 |
+| `list_dir` | `path`（默认 `.`） | 列目录，目录名以 `/` 结尾 | 仅允许根内；不递归 |
 | `websearch` | `query` | 占位：直接返回“尚未接入搜索后端” | 未实现 |
-| `ask_user` | `question`, `options?` | 中断 loop，向前端发提问卡片 | 见下节 |
+| `ask_user` | `question`, `options?` | 中断 loop，向前端发提问卡片 | 不受单工具超时约束 |
+
+## 权限、超时与配置
+
+文件类工具（`read` / `edit` / `list_dir`）统一走 `internal/tool/sandbox.go` 的 `Policy`：
+
+- 相对路径按 `GQY_WORKSPACE`（默认启动目录）解析，绝对路径也会做同样校验。
+- 默认允许根 = workspace + `$GQY_HOME/sessions`；`GQY_TOOL_ROOTS`（冒号或逗号分隔）可追加。
+- 已存在前缀做 `EvalSymlinks`，新建文件解析最近的已存在祖先；`..`、绝对越界、符号链接逃逸都会被拒绝。
+- `GQY_HOME/github_token.json` 即使落在允许根内也被 `Policy.Denied` 显式拒绝。
+- `edit` 用同目录临时文件 + `rename`，保留既有文件权限，不跟随最终符号链接写到根外。
+
+`shell` 额外受：
+
+- `GQY_SHELL_TIMEOUT`（默认 `60s`）：超时后 SIGKILL 整个进程组；`GQY_TOOL_MAX_OUTPUT`（默认 16384）限制合并输出。
+- `GQY_SHELL_ALLOWLIST` 非空时，按首 token basename 匹配；并拒绝 `; | & > < $ ( )`、反引号与换行等控制字符，避免 `echo x; rm ...` 绕过。白名单模式只接受单条简单命令。
+- 空 allowlist 表示不限制命令（兼容默认行为），此时 shell 仍能访问任意路径，不能当作沙箱。
+
+单工具超时由 `agent.Loop.ToolTimeout`（`GQY_TOOL_TIMEOUT`，默认 `120s`）控制，每次工具调用单独计时；超时错误回填后 loop 继续。
 
 ## 外部工具
 
@@ -66,6 +84,7 @@ messages（客户端历史）
 - usage 每轮累加，最终随 `done` 事件返回。
 - 参数不是合法 JSON 时用空 map 执行，让工具自己报错。
 - 未知工具返回“未知工具”，同样回填后继续。
+- 每次工具调用受 `ToolTimeout` 限制；工具不响应 context 也会按上限返回（后台 goroutine 自行结束）。
 - `ask_user` 返回 `ErrAskUser`：立即结束本轮，HTTP 层发 `question` + `end`。
 
 ## SSE 映射
@@ -115,8 +134,9 @@ messages（客户端历史）
 
 ## 已知缺口
 
-- 没有工具权限、审批或路径白名单；`shell` / `edit` 能改任意可写文件。
-- 没有单工具超时；只有请求 context 取消。
+- 没有交互式审批：`shell` 仍以服务端进程权限执行；非白名单模式可访问任意路径。需要强约束时设置 `GQY_SHELL_ALLOWLIST`。
+- 硬链接可以指向允许根外的文件内容；路径沙箱不覆盖硬链接。`Resolve` 与 `open` 之间仍有理论 TOCTOU（本机单用户场景风险低）。
+- 不响应 context 且永不返回的外部工具在超时后会泄漏一个 goroutine。
 - 工具执行是同步阻塞的，执行期间没有进度事件；结束后才发 `tool`。
 - 客户端只保存工具轨迹用于展示，`apiMessages()` 只发送文本，模型在下一轮看不到上一轮的工具调用记录（除非服务端回灌）。
 - `websearch` 未实现；`GQY_MOCK=1` 不经过 agent loop，工具不会执行。

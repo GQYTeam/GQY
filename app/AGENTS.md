@@ -41,7 +41,7 @@ internal/
   catalog/          models.dev 拉取、缓存、过滤、元数据（context/模态/成本）
   provider/         SSE 转发：chat / responses 两种协议 → 内部事件
   agent/            agent loop：工具调用、回填、usage 累加、轮次上限
-  tool/             工具契约 / 注册表 / 核心工具 read·edit·shell·list_dir·websearch·ask_user / 外部工具 provider_usage
+  tool/             工具契约 / 注册表 / 路径沙箱 / 核心工具 read·edit·shell·list_dir·websearch·ask_user / 外部工具 provider_usage
   session/          会话落盘（AboutProjectFile.md 目录规范）+ 用量聚合
   github/           GitHub OAuth 只读账户（token 只落服务端）
   httpapi/          路由、中间件、JSON、静态白名单
@@ -71,7 +71,7 @@ CSS 按 `index.html` 的顺序级联，新样式放在 `responsive.css` 之前�
 - **接入/调整模型**：只改 `internal/provider`（chat / responses 两种协议）与 `js/api.js` 的接口形状；渲染层（`render.js` 的 `messageHTML`、`chat.js` 的 `liveMsg` / `paintStream`）不要动。
 - **模型目录**：`internal/catalog` 负责拉取 models.dev 并缓存（TTL 6h）、过滤专用类型、补全 context / 模态 / 成本等元数据；前端 `openModelMenu` 消费 `/api/models` 做可搜索选择器。
 - **用量**：`internal/session` 聚合落盘会话里的真实 token 用量与消息量，`GET /api/usage` 暴露；前端 `refreshUsage` 消费。
-- **新增工具**：实现 `tool.Tool`（`Name/Description/Schema/Execute/Kind`）→ 在 `internal/httpapi.New` 注册；重名 `Register` 会报错，不要静默覆盖。核心工具默认注入，外部工具只在 `GQY_ENABLE_EXTERNAL=1` 时注入。详见 `docs/tools.md`。
+- **新增工具**：实现 `tool.Tool`（`Name/Description/Schema/Execute/Kind`）→ 在 `internal/httpapi.New` 注册；重名 `Register` 会报错，不要静默覆盖。核心工具默认注入，外部工具只在 `GQY_ENABLE_EXTERNAL=1` 时注入。文件类工具必须复用 `tool.Policy.Resolve`，不要直接拼路径；shell 类工具必须带超时与输出上限。详见 `docs/tools.md`。
 - **新增接口**：`internal/httpapi` 里注册 `METHOD /api/xxx` 路由，返回 JSON 或 SSE；静态文件只允许 `mimeTypes` 表里的扩展名，并记得给不支持的方法留 405。
 - **新增 SSE 事件**：`provider.Event` 加字段，`/api/chat` 里 `out.Send`，前端 `chat.js` 的 `startApiStream` 加分支，`finishStream` 决定是否落进消息。
 - **改 Go 代码后**：`gofmt -w ./cmd ./internal && go vet ./...`，再跑 `npm run smoke`。
@@ -94,7 +94,7 @@ CSS 按 `index.html` 的顺序级联，新样式放在 `responsive.css` 之前�
 
 - 插件系统只有最小模型：`tool.Tool` + 进程内注册表；`docs/AboutPlugin.md` 里的适配器、注册中心、子进程/远程运行时、契约测试都未实现。
 - `websearch` 是占位工具，调用直接返回“尚未接入搜索后端”。
-- 工具以服务端进程权限执行，`read` / `edit` / `shell` / `list_dir` 没有沙箱或路径白名单；`GQY_ENABLE_EXTERNAL` 只控制注入，不是权限开关。
+- 工具沙箱默认根 = workspace + `$GQY_HOME/sessions`，`GQY_TOOL_ROOTS` 可追加；`GQY_HOME/github_token.json` 显式拒绝。`shell` 有超时、输出上限与可选白名单，但空白名单时仍可访问任意路径；没有交互式审批。`GQY_ENABLE_EXTERNAL` 只控制注入，不是权限开关。
 - `ask_user` 的续跑是无状态的：服务端返回 `question` 后结束本轮，前端把回答作为新 user 消息再请求一次；工具调用历史不随回答回传。
 - `GQY_MOCK=1` 走模拟流，不经过 agent loop，工具不会执行；测工具链路要用假上游或真实模型。
 - 会话统计由服务端聚合落盘数据；localStorage 占用为前端本机实时值。

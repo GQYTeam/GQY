@@ -14,7 +14,7 @@
 {
   workspaces: [{
     id, name,
-    convs: [{ id, title, updatedAt, messages: [Message] }]
+    convs: [{ id, title, pinned, updatedAt, messages: [Message] }]
   }],
   activeWorkspaceId, activeConvId,
   model, effort,                 // 模型 id（空=服务端默认）/ 'Low' | 'Medium' | 'High'
@@ -27,6 +27,14 @@
 
 `loadState()` 对每个字段做白名单校验，非法值回落到默认。
 `reduceMotion` 没有存过时取系统 `prefers-reduced-motion`；`drafts` 只保留字符串值。
+
+会话字段的迁移规则：
+
+- `title`：trim 后非空、最长 80；旧数据缺失或非法时回落为「新会话」。
+- `pinned`：只接受布尔值，缺省 `false`；`sortConvs()` 把置顶会话稳定排在同工作区最前。
+- `updatedAt`：缺失或非有限数字时补当前时间。
+- 单会话删除会同时清理 `drafts[id]`，撤销删除时恢复草稿；批量删除直接清理，不可撤销。
+- 重命名 / 置顶 / 批量删除 / 导出都在前端完成；导出 JSON 包含 `id/title/pinned/updatedAt/messages/workspace/exportedAt`。
 
 ## 会话镜像（可选）
 
@@ -42,7 +50,7 @@ $GQY_HOME/sessions/<convId>/
   logs/tools/YYYY-MM-DD.jsonl    工具调用（参数脱敏，按消息日期分文件）
 ```
 
-镜像字段只包含 `mirrorSession()` 挑出来的 `id / role / ts / text / thinking / tools / artifact / usage`。`question`、`attachments` 和草稿不落服务端。
+镜像字段只包含 `mirrorSession()` 挑出来的 `id / role / ts / text / thinking / tools / artifact / usage`。`question`、`attachments`、`pinned` 和草稿不落服务端。
 镜像不参与前端恢复：刷新后仍以 localStorage 为准。删除会话不会删服务端目录（按 `docs/AboutProjectFile.md` 的 TTL 清理）。
 
 ## Message
