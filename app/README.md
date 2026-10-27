@@ -116,7 +116,7 @@ mkdir -p ~/.gqy/plugins
 cp -R plugins/echo ~/.gqy/plugins/echo
 ```
 
-也可以在侧栏「扩展 → 安装示例插件」，服务端会从仓库 `plugins/echo` 复制到 `$GQY_HOME/plugins/echo`。示例插件用 Node 写成，零依赖。设计见 `docs/design/PluginRuntime.md`。
+也可以在侧栏「扩展 → 安装示例插件」，服务端会复制 `plugins/echo`（原生）和 `plugins/mcp-echo`（MCP）到 `$GQY_HOME/plugins/`。示例插件用 Node 写成，零依赖。设计见 `docs/design/PluginRuntime.md`。
 
 ## 评测网关
 
@@ -229,7 +229,7 @@ npm start                 # cmd/gqy-server 自动读取 .env，真实环境变�
 | `POST` | `/api/files` | multipart `{session, file}`；写入 `$GQY_HOME/sessions/<id>/tmp/uploads/`，文本附件返回最多 2 万字符 |
 | `GET` | `/api/plugins` | 已发现插件、状态、actions、调用统计 |
 | `POST` | `/api/plugins/reload` | 重新扫描 manifest |
-| `POST` | `/api/plugins/install-example` | 把仓库 `plugins/echo` 复制到 `$GQY_HOME/plugins/echo` |
+| `POST` | `/api/plugins/install-example` | 复制 `plugins/echo` 与 `plugins/mcp-echo` 到 `$GQY_HOME/plugins/` |
 | `POST` | `/api/plugins/{id}/load` | 加载插件 |
 | `POST` | `/api/plugins/{id}/unload` | 卸载插件，回收进程组 |
 | `POST` | `/api/plugins/{id}/call` | `{ action, arguments }` 调试调用 |
@@ -302,7 +302,8 @@ js/
   onboarding.js         首次引导
 scripts/smoke.mjs       端到端冒烟（CDP，无依赖）
 skills/gh.md            给 agent 的 gh 命令参考（通过 shell 使用）
-plugins/echo/           示例插件
+plugins/echo/           原生 stdio 示例
+plugins/mcp-echo/       MCP stdio 示例
 evals/echo/             评测示例
 styles/                 base → shell → chat → ui → pages → panels → media → settings → features → responsive
 assets/                 头像、字标、favicon、封面、Clawd 精灵图

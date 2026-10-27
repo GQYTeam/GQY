@@ -66,7 +66,8 @@ js/glossary.js      关键词浮窗（本地术语表）
 js/board.js         看板
 js/onboarding.js    首次引导
 scripts/smoke.mjs   端到端冒烟（go build + CDP，无依赖）
-plugins/echo/       示例插件（原生 stdio JSON-RPC）
+plugins/echo/       原生 stdio 示例
+plugins/mcp-echo/   MCP stdio 示例
 evals/echo/         评测示例配置与用例
 skills/gh.md         agent 的 gh 命令参考（通过 shell 工具使用）
 plugins/            示例插件（echo：native stdio 协议）
@@ -86,7 +87,7 @@ CSS 按 `index.html` 的顺序级联，新样式放在 `responsive.css` 之前�
 - **用量**：`internal/session` 聚合落盘会话里的真实 token 用量与消息量，`GET /api/usage` 暴露；前端 `refreshUsage` 消费。
 - **新增工具**：实现 `tool.Tool`（`Name/Description/Schema/Execute/Kind`）→ 在 `internal/httpapi.New` 注册；重名 `Register` 会报错，不要静默覆盖。核心工具默认注入，外部工具只在 `GQY_ENABLE_EXTERNAL=1` 时注入。文件类工具必须复用 `tool.Policy.Resolve`，不要直接拼路径；shell 类工具必须带超时与输出上限。详见 `docs/tools.md`。
 - **网关**：provider 来自 `$GQY_HOME/providers.json` + 环境变量兜底；路由组在 `$GQY_HOME/routing.json`。设置页通过 `POST /api/providers`、`POST /api/routing/groups`、`PUT /api/routing/default` 管理；`UpsertProvider` 留空 key 表示保留。改解析/失败转移只动 `internal/gateway`，不要让 agent 感知 provider 细节。`/api/chat` 和 `/v1/*` 共用 `Router.Complete`。
-- **插件**：manifest 放 `$GQY_HOME/plugins/<id>/`；协议只加适配器（`plugin.Adapter`），生命周期、超时、进程回收留在 `Manager`。插件动作注册成 `KindExternal` 工具，默认不注入。扩展页的「安装示例」走 `POST /api/plugins/install-example`，从仓库 `plugins/echo` 复制。新增协议必须补 `internal/plugin` 单测。
+- **插件**：manifest 放 `$GQY_HOME/plugins/<id>/`；协议只加适配器（`plugin.Adapter`），生命周期、超时、进程回收留在 `Manager`。插件动作注册成 `KindExternal` 工具，默认不注入。扩展页的「安装示例」走 `POST /api/plugins/install-example`，从仓库复制 `plugins/echo` 与 `plugins/mcp-echo`。新增协议必须补 `internal/plugin` 单测。
 - **评测**：配置 JSON 在 `evals/<tool>/`；包结构 `internal/eval/{config,cases,matrix,runner,judge,result,recorder,report,replay,engine,host}`。宿主按 `config.tool` 前缀加载真实插件；改判定器要新开一轮，不能和旧 `runs.jsonl` 混比。命令见 `docs/eval.md`。
 - **新增设置页功能**：占位容器换成 `#xxxPanel` → `settings.js` 加 `renderXxxPanel()` → `openSettingsTab` 分发 → 表单用 `data-*` 事件委托。新字段同步 `store.js` 的 `seedState` / `loadState`。
 - **前端新视图**：`index.html` 加 `<section class="view">`，`setView` 加分派，Esc 关闭顺序与 `syncInert` 同步；看板是第二个视图。
