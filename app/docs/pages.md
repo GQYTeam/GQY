@@ -8,7 +8,7 @@
 | 输入框 | `#composerForm` | `styles/chat.css` | `handleSend()`、模型菜单、附件、语音、上下文用量 |
 | 设置 | `#settingsLayer` | `styles/settings.css` | `openSettings()`、10 个 tab、`filterSettings()` |
 | 用量浮层 | `#usageLayer` | `styles/settings.css` | `openUsage()`、`refreshUsage()` |
-| 扩展浮层 | `#extensionsLayer` | `styles/settings.css` | `openExtensions()`、GitHub、插件加载/卸载 |
+| 扩展浮层 | `#extensionsLayer` | `styles/settings.css` | `openExtensions()`、GitHub、插件加载/卸载、安装示例 |
 | 看板 | `#boardView` | `styles/features.css` | `renderBoard()`、任务卡增删/移动/关联会话 |
 | 首次引导 | `#onboarding` | `styles/features.css` | `onboarding.js`、工作区/模型/动效 |
 | 术语浮窗 | `#termPop` | `styles/features.css` | `glossary.js`、`GQY.glossary.decorate()` |

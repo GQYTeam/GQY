@@ -116,7 +116,7 @@ mkdir -p ~/.gqy/plugins
 cp -R plugins/echo ~/.gqy/plugins/echo
 ```
 
-示例插件用 Node 写成，零依赖。设计见 `docs/design/PluginRuntime.md`。
+也可以在侧栏「扩展 → 安装示例插件」，服务端会从仓库 `plugins/echo` 复制到 `$GQY_HOME/plugins/echo`。示例插件用 Node 写成，零依赖。设计见 `docs/design/PluginRuntime.md`。
 
 ## 评测网关
 
@@ -228,6 +228,7 @@ npm start                 # cmd/gqy-server 自动读取 .env，真实环境变�
 | `POST` | `/api/chat` | 请求 `{ messages, model, effort, session }`，返回 SSE：`thinking` / `tool` / `text` / `question` / `done` / `error` / `end` |
 | `GET` | `/api/plugins` | 已发现插件、状态、actions、调用统计 |
 | `POST` | `/api/plugins/reload` | 重新扫描 manifest |
+| `POST` | `/api/plugins/install-example` | 把仓库 `plugins/echo` 复制到 `$GQY_HOME/plugins/echo` |
 | `POST` | `/api/plugins/{id}/load` | 加载插件 |
 | `POST` | `/api/plugins/{id}/unload` | 卸载插件，回收进程组 |
 | `POST` | `/api/plugins/{id}/call` | `{ action, arguments }` 调试调用 |

@@ -139,6 +139,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/gateway/status", s.handleGatewayStatus)
 	mux.HandleFunc("GET /api/plugins", s.handlePluginList)
 	mux.HandleFunc("POST /api/plugins/reload", s.handlePluginReload)
+	mux.HandleFunc("POST /api/plugins/install-example", s.handlePluginInstallExample)
 	mux.HandleFunc("POST /api/plugins/{id}/load", s.handlePluginLoad)
 	mux.HandleFunc("POST /api/plugins/{id}/unload", s.handlePluginUnload)
 	mux.HandleFunc("POST /api/plugins/{id}/call", s.handlePluginCall)
@@ -174,6 +175,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/gateway/status", allow("GET"))
 	mux.HandleFunc("/api/plugins", allow("GET"))
 	mux.HandleFunc("/api/plugins/reload", allow("POST"))
+	mux.HandleFunc("/api/plugins/install-example", allow("POST"))
 	mux.HandleFunc("/api/plugins/{id}/load", allow("POST"))
 	mux.HandleFunc("/api/plugins/{id}/unload", allow("POST"))
 	mux.HandleFunc("/api/plugins/{id}/call", allow("POST"))
@@ -448,6 +450,52 @@ func (s *Server) handlePluginReload(w http.ResponseWriter, r *http.Request) {
 		msgs = append(msgs, err.Error())
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "errors": msgs, "plugins": s.Plugins.List()})
+}
+
+func (s *Server) handlePluginInstallExample(w http.ResponseWriter, r *http.Request) {
+	src := filepath.Join(s.Root, "plugins", "echo")
+	dst := filepath.Join(s.Cfg.Home, "plugins", "echo")
+	if _, err := os.Stat(dst); err == nil {
+		writeErr(w, http.StatusConflict, "already_installed", "示例插件已存在")
+		return
+	}
+	if _, err := os.Stat(src); err != nil {
+		writeErr(w, http.StatusNotFound, "example_missing", "仓库里没有 plugins/echo")
+		return
+	}
+	if err := copyPluginTree(src, dst); err != nil {
+		writeErr(w, http.StatusInternalServerError, "install_failed", err.Error())
+		return
+	}
+	_ = s.Plugins.Reload()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "plugins": s.Plugins.List()})
+}
+
+func copyPluginTree(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o700)
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+			return err
+		}
+		return os.WriteFile(target, b, 0o600)
+	})
 }
 
 func (s *Server) handlePluginLoad(w http.ResponseWriter, r *http.Request) {

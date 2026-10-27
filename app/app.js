@@ -159,6 +159,11 @@
   el.usageBtn.addEventListener('click', app.openContextPanel);
   if (el.usageTopBtn) el.usageTopBtn.addEventListener('click', app.openUsage);
   if (el.extensionsBtn) el.extensionsBtn.addEventListener('click', app.openExtensions);
+  if (el.installExampleBtn) el.installExampleBtn.addEventListener('click', () => {
+    if (!G.api || !G.api.installExample) return;
+    G.api.installExample().then(() => { app.refreshPlugins(); app.toast('示例插件已安装'); })
+      .catch((err) => app.toast(err.message));
+  });
   if (el.githubConnectBtn) el.githubConnectBtn.addEventListener('click', app.connectGithub);
   if (el.githubDisconnectBtn) el.githubDisconnectBtn.addEventListener('click', app.disconnectGithub);
   el.filesTree.addEventListener('click', (e) => {

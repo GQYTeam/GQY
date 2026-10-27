@@ -667,6 +667,7 @@ try {
   check('软件包页发现 / 加载 / 卸载插件',
     /Echo/.test(packagesBefore) && pluginLoaded.ready && pluginLoaded.unloaded,
     JSON.stringify({ packages: packagesBefore.slice(0, 80), pluginLoaded }));
+  check('扩展页有安装示例入口', await evaluate('!!document.querySelector("#installExampleBtn")') === true);
 
   await evaluate('document.querySelector(\'[data-settings-tab="usage"]\').click()');
   await sleep(400);

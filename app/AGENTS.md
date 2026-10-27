@@ -86,7 +86,7 @@ CSS 按 `index.html` 的顺序级联，新样式放在 `responsive.css` 之前�
 - **用量**：`internal/session` 聚合落盘会话里的真实 token 用量与消息量，`GET /api/usage` 暴露；前端 `refreshUsage` 消费。
 - **新增工具**：实现 `tool.Tool`（`Name/Description/Schema/Execute/Kind`）→ 在 `internal/httpapi.New` 注册；重名 `Register` 会报错，不要静默覆盖。核心工具默认注入，外部工具只在 `GQY_ENABLE_EXTERNAL=1` 时注入。文件类工具必须复用 `tool.Policy.Resolve`，不要直接拼路径；shell 类工具必须带超时与输出上限。详见 `docs/tools.md`。
 - **网关**：provider 来自 `$GQY_HOME/providers.json` + 环境变量兜底；路由组在 `$GQY_HOME/routing.json`。设置页通过 `POST /api/providers`、`POST /api/routing/groups`、`PUT /api/routing/default` 管理；`UpsertProvider` 留空 key 表示保留。改解析/失败转移只动 `internal/gateway`，不要让 agent 感知 provider 细节。`/api/chat` 和 `/v1/*` 共用 `Router.Complete`。
-- **插件**：manifest 放 `$GQY_HOME/plugins/<id>/`；协议只加适配器（`plugin.Adapter`），生命周期、超时、进程回收留在 `Manager`。插件动作注册成 `KindExternal` 工具，默认不注入。新增协议必须补 `internal/plugin` 单测。
+- **插件**：manifest 放 `$GQY_HOME/plugins/<id>/`；协议只加适配器（`plugin.Adapter`），生命周期、超时、进程回收留在 `Manager`。插件动作注册成 `KindExternal` 工具，默认不注入。扩展页的「安装示例」走 `POST /api/plugins/install-example`，从仓库 `plugins/echo` 复制。新增协议必须补 `internal/plugin` 单测。
 - **评测**：配置 JSON 在 `evals/<tool>/`；包结构 `internal/eval/{config,cases,matrix,runner,judge,result,recorder,report,replay,engine,host}`。宿主按 `config.tool` 前缀加载真实插件；改判定器要新开一轮，不能和旧 `runs.jsonl` 混比。命令见 `docs/eval.md`。
 - **新增设置页功能**：占位容器换成 `#xxxPanel` → `settings.js` 加 `renderXxxPanel()` → `openSettingsTab` 分发 → 表单用 `data-*` 事件委托。新字段同步 `store.js` 的 `seedState` / `loadState`。
 - **前端新视图**：`index.html` 加 `<section class="view">`，`setView` 加分派，Esc 关闭顺序与 `syncInert` 同步；看板是第二个视图。
@@ -102,7 +102,7 @@ CSS 按 `index.html` 的顺序级联，新样式放在 `responsive.css` 之前�
 ## 质量门槛（提交前）
 
 1. `npm run check` 全绿；`go test ./...` 全绿。
-2. `npm run smoke` 全绿（40 项：Go 编译、agent loop、网关、插件、模型目录、用量、流式、落盘、静态白名单、405、十个设置 tab、设置搜索、快捷键、导入、XSS、看板、引导、术语、人设/记忆/知识库、工具/插件页、provider/路由组增删）。
+2. `npm run smoke` 全绿（41 项：Go 编译、agent loop、网关、插件、模型目录、用量、流式、落盘、静态白名单、405、十个设置 tab、设置搜索、快捷键、导入、XSS、看板、引导、术语、人设/记忆/知识库、工具/插件页、provider/路由组增删、安装示例入口）。
 3. 浏览器控制台无报错；`js/api.js` 探测失败时优雅降级（不报错、不阻塞）。
 4. 键盘可用：Tab 能到所有控件，Esc 能关浮层（含搜索框），焦点不丢。
 5. 减少动效模式（设置 → 外观）下无闪烁、无无限动画；系统 `prefers-reduced-motion` 首次访问即生效。

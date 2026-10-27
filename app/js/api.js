@@ -165,6 +165,12 @@
   }
 
   /* 插件与工具 */
+  async function installExample() {
+    const res = await fetch('/api/plugins/install-example', { method: 'POST' });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || '安装示例失败');
+    return res.json();
+  }
+
   async function plugins() {
     const res = await fetch('/api/plugins', { headers: { accept: 'application/json' }, cache: 'no-store' });
     if (!res.ok) throw new Error('插件列表获取失败');
@@ -260,7 +266,7 @@
 
   G.api = {
     detect, available, info, chat, models, usage, providers,
-    plugins, pluginLoad, pluginUnload, pluginCall, tools, setExternal, gatewayStatus,
+    plugins, installExample, pluginLoad, pluginUnload, pluginCall, tools, setExternal, gatewayStatus,
     saveProvider, deleteProvider, saveGroup, deleteGroup, setDefault,
     syncSession, githubAuth, githubMe, githubDisconnect
   };
