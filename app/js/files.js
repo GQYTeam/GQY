@@ -373,31 +373,54 @@
       if (a && !arts.some((x) => x.title === a.title)) arts.push(a);
     });
     const first = arts[0];
-    const root = first && first.path ? first.path.replace(/\/[^/]+$/, '') : '~/项目';
+    const firstPath = first && first.files && first.files[0] ? first.files[0].path : (first && first.path);
+    const root = firstPath ? firstPath.replace(/\/[^/]+$/, '') : '~/项目';
     const files = [];
     arts.forEach((a, i) => {
+      if (Array.isArray(a.files) && a.files.length) {
+        a.files.forEach((f, j) => {
+          files.push({
+            id: 'art-' + i + '-' + j, name: f.path || a.title, path: f.path || root + '/' + a.title,
+            content: f.content, lines: String(f.content || '').split('\n').length,
+            artifact: true, artifactTitle: a.title
+          });
+        });
+        return;
+      }
       files.push({
         id: 'art-' + i, name: a.title, path: a.path || root + '/' + a.title,
-        lang: a.lang, content: a.content, lines: a.lines, artifact: true
+        lang: a.lang, content: a.content, lines: a.lines, artifact: true, artifactTitle: a.title
       });
     });
     return { root, files };
   }
 
   function buildTree(files) {
-    return [
-      {
-        kind: 'folder', key: 'data', name: 'data', children: [
-          {
-            kind: 'folder', key: 'data/train', name: 'train', children: [
-              { kind: 'folder', key: 'data/train/cats', name: 'cats' },
-              { kind: 'folder', key: 'data/train/dogs', name: 'dogs' },
-              { kind: 'folder', key: 'data/train/birds', name: 'birds' }
-            ]
-          }
-        ]
-      }
-    ].concat(files.map((f) => ({ kind: 'file', key: f.id, file: f })));
+    const root = { kind: 'folder', key: '', name: '', children: [] };
+    files.forEach((f) => {
+      const parts = String(f.path || f.name || '').split('/').filter(Boolean);
+      if (!parts.length) parts.push(f.name || 'file');
+      let node = root;
+      parts.forEach((part, i) => {
+        if (i === parts.length - 1) {
+          node.children.push({ kind: 'file', key: f.id, name: part, file: f });
+          return;
+        }
+        const key = parts.slice(0, i + 1).join('/');
+        let folder = node.children.find((c) => c.kind === 'folder' && c.key === key);
+        if (!folder) {
+          folder = { kind: 'folder', key: key, name: part, children: [] };
+          node.children.push(folder);
+        }
+        node = folder;
+      });
+    });
+    const sort = (nodes) => {
+      nodes.sort((a, b) => (a.kind === b.kind ? String(a.name).localeCompare(String(b.name)) : a.kind === 'folder' ? -1 : 1));
+      nodes.forEach((n) => { if (n.children) sort(n.children); });
+    };
+    sort(root.children);
+    return root.children;
   }
 
   function isFolderOpen(key) {
@@ -528,7 +551,7 @@
     el.filesPanel.inert = false;
     if (el.filesResize) el.filesResize.hidden = false;
     applyStoredFilesWidth();
-    const target = data.files.find((f) => f.artifact && f.name === m.artifact.title) || data.files[0];
+    const target = data.files.find((f) => f.artifactTitle === m.artifact.title) || data.files[0];
     if (target) selectFile(target.id);
   }
 
@@ -627,7 +650,14 @@
     const m = app.findMessage(mid);
     if (!m || !m.artifact) return;
     const a = m.artifact;
-    openViewer({ name: a.title, path: a.path, lang: a.lang, content: a.content, lines: a.lines }, trigger);
+    const f = Array.isArray(a.files) && a.files[0] ? a.files[0] : null;
+    openViewer({
+      name: f ? f.path : a.title,
+      path: f ? f.path : a.path,
+      lang: a.lang,
+      content: f ? f.content : a.content,
+      lines: f ? String(f.content || '').split('\n').length : a.lines
+    }, trigger);
   }
 
   function closeLightbox() {

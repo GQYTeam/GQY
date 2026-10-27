@@ -24,6 +24,31 @@ type Message struct {
 	Content    string     `json:"content"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
+	// Images 是 data URL；有图时请求体 content 会编码成 OpenAI 多模态数组。
+	Images []string `json:"images,omitempty"`
+}
+
+// MarshalJSON 把 Images 转成 OpenAI chat 的多模态 content 数组。
+func (m Message) MarshalJSON() ([]byte, error) {
+	type alias Message
+	if len(m.Images) == 0 {
+		return json.Marshal(alias(m))
+	}
+	parts := make([]any, 0, len(m.Images)+1)
+	if m.Content != "" {
+		parts = append(parts, map[string]any{"type": "text", "text": m.Content})
+	}
+	for _, img := range m.Images {
+		parts = append(parts, map[string]any{
+			"type": "image_url", "image_url": map[string]string{"url": img},
+		})
+	}
+	return json.Marshal(struct {
+		Role       string     `json:"role"`
+		Content    []any      `json:"content"`
+		ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+		ToolCallID string     `json:"tool_call_id,omitempty"`
+	}{m.Role, parts, m.ToolCalls, m.ToolCallID})
 }
 
 type ToolCall struct {

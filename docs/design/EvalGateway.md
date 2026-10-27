@@ -53,6 +53,7 @@
 - `max_rounds`：单次对话最多工具轮次。
 - `strict_schema`：参数校验失败时是否拦截执行。
 - `timeouts`：请求 / 工具 / 总超时与重试退避。
+- `judge_model`：可选模型裁判；规则判定仍是主判定，模型结果单独记录。
 - 输出目录不在配置里，由 CLI `-out` 必填（dry-run/replay 除外）。完整字段见 `docs/eval.md`。
 
 `cases.json`：

@@ -33,7 +33,8 @@ JS 都是经典脚本 IIFE，按固定顺序加载。`store.js` 建立 `window.G
 - `app.state` 由 `store.js` 的 `loadState()` 从 `localStorage['claude-webchat:v7']` 读取，失败则 `seedState()`。
 - 结构：`workspaces[] → convs[] → messages[]`，外加 `activeWorkspaceId / activeConvId / model / effort / fontSize / thinkOpen / sidebarCollapsed / reduceMotion / drafts`，以及 `onboarded / voiceEnabled / activePersonaId / personas / memories / knowledge / glossary / board`。
 - 任何写操作后调用 `app.save()`：写 localStorage → `refreshUsage()` → `mirrorSession()`（服务端可用时）。
-- 视图状态（`view`、`stream`、`filesState`、`menu`、`imgboxItems`、`usageData` 等）只在内存中，挂在 `app` 上。
+- 视图状态（`view`、`stream`、`filesState`、`menu`、`imgboxItems`、`usageData`、`renderLimit` 等）只在内存中，挂在 `app` 上。
+- `darkMode` 写 `data-theme`；`locale` 驱动 `js/i18n.js` 的导航/设置标签翻译。
 - `clearEverything` / `importData` 走 `resetState()` / `reloadState()` 重新建立 `app.state`。
 
 ## 视图路由
@@ -66,7 +67,8 @@ handleSend()
 - `stopStreaming()` 会 `AbortController.abort()` 并落库已生成内容；中断的请求不额外写内容。
 - 失败时消息挂 `error: { code, message }`，`messageHTML` 渲染错误卡片 + 重试（`retryMessage` 复用同一管线）。
 - `answerQuestion()` 把选择写进 `msg.question.answer`，再追加一条 user 消息并调用 `respond()` 发起新请求。
-- 附件：`handleSend` 把 File 交给 `respond`，先 `POST /api/files` 上传并拿回文本，再启动流式请求；`apiMessages()` 把文本附件拼进 user 消息，二进制只落盘。
+- 附件：`handleSend` 把 File 交给 `respond`，先 `POST /api/files` 上传；文本拼进 user 消息，图片以 data URL 放进 `provider.Message.Images`，序列化为多模态 content；其他二进制只落盘。
+- 多文件产物：`write_artifact` 工具把文件写进工作区，工具参数里保留内容；前端从 `tool` 事件生成 `artifact.files`，文件面板按真实路径建树。
 
 ## 后端
 
@@ -106,8 +108,9 @@ Go module（`gqy`，标准库，零第三方依赖），按 `cmd` / `internal` �
 
 - 候选来自 `providers.json` + 环境变量 provider；模型支持 `provider/model`、`group/<id>`、裸模型名。
 - 路由组 `routing.json`：order / rotate / usage；响应开始前失败转移，429 / 5xx / 连接错误冷却。
-- 每 provider 信号量 + 排队超时；会话 id 做亲和；请求日志 `$GQY_HOME/gateway/requests.jsonl`。
-- `GET /v1/models`、`GET /api/gateway/status` 暴露目录与健康。
+- 每 provider / 账号信号量 + 排队超时；会话 id 做亲和；请求日志 `$GQY_HOME/gateway/requests.jsonl`。
+- 一个 provider 可挂多个 `accounts`，按账号展开候选；`daily_token_limit` 用尽后跳过，次日重置（内存态）。
+- `GET /v1/models`、`GET /api/gateway/status` 暴露目录与健康；`POST /v1/messages`（Anthropic）与 `POST /v1beta/models/{model}:generateContent`（Gemini）做非流式协议翻译。
 - 设置页通过 `POST /api/providers`、`DELETE /api/providers/{id}`、`POST /api/routing/groups`、`PUT /api/routing/default` 管理 provider 与路由组；写回文件后立即生效。
 
 ### 插件
@@ -159,4 +162,5 @@ Go module（`gqy`，标准库，零第三方依赖），按 `cmd` / `internal` �
 - 无依赖：高亮、图表（SVG）、精灵播放、SSE 解析、冒烟测试都是手写。
 - 可访问性：浮层用 `inert` + 焦点回收；菜单/树有 aria；流式完成/失败通过 `#liveStatus` 播报；减少动效全局生效，并跟随系统 `prefers-reduced-motion`。
 - 数据安全：`save()` 遇到配额错误会提示，不再静默丢弃；导入只接受导出结构，导入前二次确认。
+- 可选鉴权：`GQY_AUTH_TOKEN` 非空时 `/api/*` 与 `/v1/*` 要求 Bearer / `X-GQY-Token` / HttpOnly cookie；`/api/auth` 负责换 cookie。
 - 工具安全：`read/edit/list_dir` 受路径沙箱限制（workspace + `$GQY_HOME/sessions`），`shell` 有超时、输出上限和可选白名单；插件以服务端用户权限运行。定位是本机单用户，不对外暴露。

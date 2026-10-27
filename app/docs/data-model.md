@@ -20,7 +20,7 @@
   model, effort,                 // 模型 id（空=服务端默认）/ 'Low' | 'Medium' | 'High'
   fontSize,                      // 'small' | 'normal' | 'large'
   thinkOpen,                     // 回复结束后是否保持思考展开
-  sidebarCollapsed, reduceMotion,
+  sidebarCollapsed, reduceMotion, darkMode, locale,  // locale: 'zh' | 'en'
   drafts: { [convId]: string },  // 每个会话的未发送草稿
 
   onboarded,                    // 首次引导是否完成
@@ -72,7 +72,8 @@ $GQY_HOME/sessions/<convId>/
 - `artifact.path` 决定文件面板里的目录根（取 dirname）。
 - `question.answer` 为 `{ picks: number[], custom: string }`；一旦存在即视为已回答。回答后还会追加一条 user 消息并触发新请求。
 - `usage` 来自服务端 `done` 事件，字段是 snake_case：`prompt_tokens` / `completion_tokens` / `total_tokens`。
-- 附件字段：`name / type / size / url`，上传后追加 `path / text / truncated`。`url` 可能是 `blob:`，序列化前剔除；`text` 最多 2 万字符，会拼进该条 user 消息发给模型。
+- 附件字段：`name / type / size / url`，上传后追加 `path / text / dataUrl / truncated`。`url` 可能是 `blob:`，序列化前剔除；`text` 最多 2 万字符；图片 `dataUrl` 随消息以多模态 content 发给模型。
+- `artifact.files` 是多文件产物：`[{path, content}]`；旧单文件 `artifact.content` 仍兼容。
 - 上传文件在 `$GQY_HOME/sessions/<id>/tmp/uploads/`，0600；镜像只记录 name/size/path/truncated，不重复存正文。
 
 ## 服务端持久化
@@ -80,8 +81,10 @@ $GQY_HOME/sessions/<convId>/
 - `github_token.json`：`$GQY_HOME/github_token.json`，0600，含 access token 与账户快照；`GET /api/github/me` 不返回 token。
 - `providers.json`：`$GQY_HOME/providers.json`，0600，由 `cmd/gqy-import` 从旧 `config.jsonc` 提取；`GET /api/providers` 只读返回脱敏条目；密钥为空时读 `GQY_PROVIDER_<ID>_API_KEY`。
 - `routing.json`：`$GQY_HOME/routing.json`，默认模型、路由组、失败次数、冷却与排队超时；缺失时只使用 providers 的第一个。
+- provider 的 `accounts`：`[{id,name,api_key,daily_token_limit,disabled}]`；配额用量只在内存，重启归零。
 - `gateway/requests.jsonl`：每次网关调用一行，字段 `ts / request_id / session / provider / model / status / error_code / duration_ms / attempt`，不落正文。
 - `plugins/<id>/manifest.json`：插件清单；`plugins/<id>.log`：stderr。插件动作注册成外部工具，不写入 localStorage。
+- `GQY_AUTH_TOKEN` 只从环境变量读取；前端通过 `/api/auth` 换 HttpOnly cookie，不写入 localStorage。
 - 评测结果在 CLI `-out` 目录：`configs/`、`runs/<round>-<ts>/{runs.jsonl,trace/}`、`report/`、`best/current.json`。
 - 写入统一走 `writeFileAtomic`：建父目录 → 写临时文件（0600）→ rename。
 - 会话 id 只接受 `^[A-Za-z0-9_-]{1,64}$`；产物文件名会过滤非 `A-Za-z0-9_.-` 字符。

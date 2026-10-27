@@ -20,7 +20,7 @@
 | 回到最新 | `#scrollBtn` | `styles/ui.css` | `updateScrollBtn()` |
 | 无障碍播报 | `#liveStatus` | — | `announce()` |
 
-服务归属：`store.js`（状态/DOM）、`render.js`（消息/侧栏/线程/上下文浮层）、`chat.js`（发送/流式/会话/system 上下文）、`files.js`（文件/灯箱/提问卡片）、`menu.js`（菜单/模型/附件/语音）、`settings.js`（设置/用量/人设/记忆/知识库/工具/插件/GitHub）、`glossary.js`（术语）、`board.js`（看板）、`onboarding.js`（引导）。
+服务归属：`store.js`（状态/DOM）、`render.js`（消息/侧栏/线程/上下文浮层/分页渲染）、`chat.js`（发送/流式/会话/system 上下文/附件/多文件产物）、`files.js`（文件/灯箱/提问卡片/多文件树）、`menu.js`（菜单/模型/附件/语音）、`settings.js`（设置/用量/人设/记忆/知识库/工具/插件/provider/账号/路由组/GitHub）、`glossary.js`（术语）、`board.js`（看板）、`onboarding.js`（引导）、`i18n.js`（中文/English 导航与设置标签）。
 
 ## 会话管理（侧栏）
 
@@ -44,7 +44,7 @@
 
 | tab | 内容 | 状态 |
 | --- | --- | --- |
-| `general` | 字号、减少动效、侧栏、思考展开、导入/导出、清空、关于 | 可用 |
+| `general` | 字号、减少动效、暗色主题、语言、侧栏、思考展开、导入/导出、清空、关于 | 可用 |
 | `models` | 当前模型 / 推理强度；provider CRUD；默认模型；路由组；网关健康 | 可用；密钥只写不读 |
 | `personas` | 人设 CRUD、当前人设 | 可用；system 随请求发送 |
 | `memory` | 记忆 CRUD、启用开关 | 可用；启用的记忆拼进 system |

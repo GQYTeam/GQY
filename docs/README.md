@@ -6,11 +6,11 @@
 
 | 文档 | 内容 | 落地状态 |
 | --- | --- | --- |
-| `AboutProjectFile.md` | Artifact / Runtime Files / Workspace / Session 边界，`$GQY_HOME/sessions/$SESSION_ID/{tmp,logs,io}` 目录规范 | 会话落盘与上传已实现；日志轮转、清理命令未做 |
+| `AboutProjectFile.md` | Artifact / Runtime Files / Workspace / Session 边界，`$GQY_HOME/sessions/$SESSION_ID/{tmp,logs,io}` 目录规范 | 会话落盘、上传、`gqy-clean` TTL 清理已实现；日志轮转未做 |
 | `AboutUiPages.md` | 页面清单：灯箱、设置、看板、用量、初始化引导、关键词浮窗 | 全部已做；看板为本机任务卡 |
 | `AboutAiOtput.md` | 输出与代码风格红线 | 持续遵守 |
-| `AboutPlugin.md` | 插件运行时 + 多社区适配器：分层、并发、远程、进程回收、契约测试 | 已落地统一模型、原生/MCP 适配器、进程回收与单测；远程与服务依赖未做 |
-| `AboutAitestCallToolOrPlugin.md` | 工具/插件调用评测网关：三维度实验矩阵、判定、落盘 | 已落地 `internal/eval` + `cmd/gqy-eval`，见 `app/docs/eval.md` |
+| `AboutPlugin.md` | 插件运行时 + 多社区适配器：分层、并发、远程、进程回收、契约测试 | 已落地统一模型、原生/MCP/unix/tcp 适配器、服务依赖、进程回收与单测；权限审批/崩溃重启未做 |
+| `AboutAitestCallToolOrPlugin.md` | 工具/插件调用评测网关：三维度实验矩阵、判定、落盘 | 已落地 `internal/eval` + `cmd/gqy-eval`，含模型裁判与真实插件宿主，见 `app/docs/eval.md` |
 
 ## 调研与设计
 

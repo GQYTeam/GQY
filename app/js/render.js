@@ -169,12 +169,18 @@
 
   function artifactHTML(m) {
     const a = m.artifact;
-    const preview = a.content.split('\n').slice(0, 4).join('\n');
+    const files = Array.isArray(a.files) ? a.files : [];
+    const first = files[0] || null;
+    const content = first ? first.content : (a.content || '');
+    const preview = content.split('\n').slice(0, 4).join('\n');
+    const meta = files.length
+      ? files.length + ' 个文件 · ' + files.slice(0, 3).map((f) => esc(f.path)).join(' · ')
+      : (esc(a.lang || 'code') + ' · ' + a.lines + ' 行 · 生成的产物');
     return '<button class="artifact" type="button" data-artifact="' + m.id + '" aria-label="打开产物 ' + esc(a.title) + '">' +
       '<span class="art-thumb" aria-hidden="true"><code>' + esc(preview) + '</code></span>' +
       '<span class="art-body">' +
       '<span class="art-title">' + esc(a.title) + '</span>' +
-      '<span class="art-meta">' + esc(a.lang || 'code') + ' · ' + a.lines + ' 行 · 生成的产物</span>' +
+      '<span class="art-meta">' + meta + '</span>' +
       '</span><span class="art-open">查看</span></button>';
   }
 
@@ -354,7 +360,12 @@
       updateScrollBtn();
       return;
     }
-    el.thread.innerHTML = conv.messages.map(messageHTML).join('');
+    const total = conv.messages.length;
+    const start = Math.max(0, total - (app.renderLimit || 80));
+    const earlier = start > 0
+      ? '<button class="load-earlier" type="button" data-load-earlier="1">加载更早的 ' + start + ' 条消息</button>'
+      : '';
+    el.thread.innerHTML = earlier + conv.messages.slice(start).map(messageHTML).join('');
     requestAnimationFrame(() => {
       if (nearBottom) el.scroller.scrollTop = el.scroller.scrollHeight;
       updateScrollBtn();

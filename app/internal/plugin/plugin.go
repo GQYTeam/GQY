@@ -21,12 +21,15 @@ import (
 )
 
 var (
-	ErrNotFound   = errors.New("插件不存在")
-	ErrNotReady   = errors.New("插件未就绪")
-	ErrExited     = errors.New("插件进程已退出")
-	ErrDuplicate  = errors.New("插件 id 重复")
-	idPattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
-	toolNameClean = regexp.MustCompile(`[^A-Za-z0-9_-]+`)
+	ErrNotFound        = errors.New("插件不存在")
+	ErrNotReady        = errors.New("插件未就绪")
+	ErrExited          = errors.New("插件进程已退出")
+	ErrDuplicate       = errors.New("插件 id 重复")
+	ErrMissingService  = errors.New("缺少依赖服务")
+	ErrServiceConflict = errors.New("服务已由其他插件提供")
+	ErrHasDependents   = errors.New("仍有插件依赖该服务")
+	idPattern          = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+	toolNameClean      = regexp.MustCompile(`[^A-Za-z0-9_-]+`)
 )
 
 // Action 是插件声明或 MCP 发现的工具。
@@ -46,9 +49,12 @@ type Manifest struct {
 	Command     []string          `json:"command"`
 	Cwd         string            `json:"cwd"`
 	Env         map[string]string `json:"env"`
+	Socket      string            `json:"socket"` // unix: socket 路径；tcp: host:port
 	TimeoutMS   int               `json:"timeout_ms"`
 	Concurrency string            `json:"concurrency"`
 	Actions     []Action          `json:"actions"`
+	Provides    []string          `json:"provides"`
+	Requires    []string          `json:"requires"`
 	Dir         string            `json:"-"`
 }
 
@@ -90,6 +96,8 @@ type Status struct {
 	State       string   `json:"state"` // discovered / loading / ready / closing / failed
 	PID         int      `json:"pid,omitempty"`
 	Actions     []Action `json:"actions"`
+	Provides    []string `json:"provides,omitempty"`
+	Requires    []string `json:"requires,omitempty"`
 	Calls       int64    `json:"calls"`
 	Failures    int64    `json:"failures"`
 	LastError   string   `json:"lastError,omitempty"`
@@ -118,6 +126,7 @@ type Manager struct {
 	adapters  []Adapter
 	manifests map[string]Manifest
 	plugins   map[string]*managed
+	services  map[string]string // service name → plugin id
 }
 
 // NewManager 创建运行时。dir 为空时用 $GQY_HOME/plugins。
@@ -129,8 +138,9 @@ func NewManager(home string, reg *tool.Registry) *Manager {
 		registry:  reg,
 		manifests: map[string]Manifest{},
 		plugins:   map[string]*managed{},
+		services:  map[string]string{},
 	}
-	m.adapters = []Adapter{NativeAdapter{}, MCPAdapter{}}
+	m.adapters = []Adapter{NativeAdapter{}, MCPAdapter{}, RemoteAdapter{}}
 	return m
 }
 
@@ -202,7 +212,11 @@ func normalizeManifest(m *Manifest) error {
 	if m.Protocol == "" {
 		m.Protocol = "gqy-jsonrpc-v1"
 	}
-	if len(m.Command) == 0 {
+	if m.Protocol == "unix" || m.Protocol == "tcp" {
+		if strings.TrimSpace(m.Socket) == "" {
+			return fmt.Errorf("%s 协议需要 socket 地址", m.Protocol)
+		}
+	} else if len(m.Command) == 0 {
 		return fmt.Errorf("command 不能为空")
 	}
 	if m.TimeoutMS <= 0 {
@@ -231,6 +245,8 @@ func (m *Manager) List() []Status {
 			ID: p.manifest.ID, Name: p.manifest.Name, Version: p.manifest.Version,
 			Description: p.manifest.Description, Protocol: p.manifest.Protocol,
 			State: p.state, Calls: p.calls, Failures: p.failures,
+			Provides:  append([]string{}, p.manifest.Provides...),
+			Requires:  append([]string{}, p.manifest.Requires...),
 			LastError: p.lastError, Actions: append([]Action{}, p.manifest.Actions...),
 		}
 		if p.instance != nil {
@@ -265,6 +281,13 @@ func (m *Manager) Load(ctx context.Context, id string) error {
 	case "loading":
 		return fmt.Errorf("插件 %s 正在加载", id)
 	}
+	for _, need := range p.manifest.Requires {
+		if m.services[need] == "" {
+			p.state = "failed"
+			p.lastError = "缺少依赖服务：" + need
+			return fmt.Errorf("%w: %s", ErrMissingService, need)
+		}
+	}
 	adapter := m.adapterFor(p.manifest)
 	if adapter == nil {
 		p.state = "failed"
@@ -292,7 +315,38 @@ func (m *Manager) Load(ctx context.Context, id string) error {
 		p.lastError = err.Error()
 		return err
 	}
+	if err := m.registerServicesLocked(p); err != nil {
+		for _, name := range p.toolNames {
+			m.registry.Unregister(name)
+		}
+		p.toolNames = nil
+		_ = inst.Close(context.Background())
+		p.instance = nil
+		p.state = "failed"
+		p.lastError = err.Error()
+		return err
+	}
 	return nil
+}
+
+func (m *Manager) registerServicesLocked(p *managed) error {
+	for _, svc := range p.manifest.Provides {
+		if owner := m.services[svc]; owner != "" && owner != p.manifest.ID {
+			return fmt.Errorf("%w: %s 由 %s 提供", ErrServiceConflict, svc, owner)
+		}
+	}
+	for _, svc := range p.manifest.Provides {
+		m.services[svc] = p.manifest.ID
+	}
+	return nil
+}
+
+func (m *Manager) releaseServicesLocked(p *managed) {
+	for _, svc := range p.manifest.Provides {
+		if m.services[svc] == p.manifest.ID {
+			delete(m.services, svc)
+		}
+	}
 }
 
 // Unload 卸载插件（幂等）。
@@ -309,6 +363,18 @@ func (m *Manager) Unload(ctx context.Context, id string) error {
 		p.state = "discovered"
 		return ErrNotFound
 	}
+	for _, other := range m.plugins {
+		if other.manifest.ID == p.manifest.ID || other.state != "ready" {
+			continue
+		}
+		for _, need := range other.manifest.Requires {
+			for _, svc := range p.manifest.Provides {
+				if need == svc {
+					return fmt.Errorf("%w: %s 依赖 %s", ErrHasDependents, other.manifest.ID, svc)
+				}
+			}
+		}
+	}
 	p.state = "closing"
 	for _, name := range p.toolNames {
 		m.registry.Unregister(name)
@@ -323,6 +389,7 @@ func (m *Manager) Unload(ctx context.Context, id string) error {
 			return err
 		}
 	}
+	m.releaseServicesLocked(p)
 	return nil
 }
 
@@ -385,6 +452,7 @@ func (m *Manager) Close() {
 		p.mu.Unlock()
 		_ = id
 	}
+	m.services = map[string]string{}
 }
 
 func (m *Manager) adapterFor(manifest Manifest) Adapter {

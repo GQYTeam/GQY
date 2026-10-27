@@ -63,6 +63,8 @@ type Config struct {
 	Axes         Axes     `json:"axes"`
 	Fixed        Fixed    `json:"fixed"`
 	Timeouts     Timeouts `json:"timeouts"`
+	// JudgeModel 非空时启用模型裁判；规则判定仍是主判定。
+	JudgeModel string `json:"judge_model,omitempty"`
 
 	// CasesPath 是相对配置文件目录解析后的绝对/相对路径，不进入配置快照。
 	CasesPath string `json:"-"`

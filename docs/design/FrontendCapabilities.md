@@ -19,6 +19,7 @@
 - 每张卡：`{id, title, note, status, convId?, createdAt}`；状态 `todo / doing / done`。
 - 卡片可新增、编辑标题、删除、左右移动；点击关联会话时跳回对话。
 - 数据存 `state.board.cards`；`setView('board')` 显示；Esc/返回回到对话。
+- 暗色主题 `state.darkMode`、语言 `state.locale`、长会话 `renderLimit`、多文件产物与图片附件见实现。
 - 窄屏三列改为纵向堆叠。
 
 ### C. 关键词浮窗

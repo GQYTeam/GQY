@@ -9,6 +9,8 @@
 
   function syncSettingsUI() {
     el.motionSwitch.setAttribute('aria-checked', String(app.state.reduceMotion));
+    if (el.themeSwitch) el.themeSwitch.setAttribute('aria-checked', String(!!app.state.darkMode));
+    if (el.localeSelect) el.localeSelect.value = app.state.locale === 'en' ? 'en' : 'zh';
     el.sideSwitch.setAttribute('aria-checked', String(app.state.sidebarCollapsed));
     el.thinkSwitch.setAttribute('aria-checked', String(app.state.thinkOpen));
     if (el.voiceSwitch) el.voiceSwitch.setAttribute('aria-checked', String(!!app.state.voiceEnabled));
@@ -33,6 +35,10 @@
 
   function applyFontSize() {
     document.documentElement.style.setProperty('--msg-size', app.FONT_SIZES[app.state.fontSize] || app.FONT_SIZES.normal);
+  }
+
+  function applyTheme() {
+    document.documentElement.setAttribute('data-theme', app.state.darkMode ? 'dark' : 'light');
   }
 
   function usageSnapshot() {
@@ -195,6 +201,7 @@
       '<div class="feature-row"><div class="feature-main"><b>' + esc(p.name || p.id) +
       ' <span class="feature-tag">' + esc(p.id) + '</span></b><small>' +
       esc(p.baseUrl || '') + ' · ' + esc(p.defaultModel || '') + ' · ' + (p.models || []).length + ' 个模型 · ' +
+      ((p.accounts || []).length || (p.keySet ? 1 : 0)) + ' 个账号 · ' +
       (p.calls || 0) + ' 调用 / ' + (p.failures || 0) + ' 失败' +
       (p.cooldownUntil ? ' · 冷却至 ' + esc(p.cooldownUntil) : '') + '</small></div>' +
       '<div class="feature-actions">' +
@@ -204,6 +211,26 @@
           '<button class="btn btn-danger" type="button" data-provider-del="' + esc(p.id) + '">删除</button>') +
       '</div></div>'
     ).join('');
+    const accounts = editing && Array.isArray(editing.accounts) ? editing.accounts : [];
+    const accountRows = accounts.length ? accounts.map((a) =>
+      '<div class="feature-row"><div class="feature-main"><b>' + esc(a.name || a.id) +
+      ' <span class="feature-tag">' + esc(a.id) + '</span></b><small>' +
+      (a.keySet ? '有密钥' : '无密钥') + ' · 今日 ' + (a.usedTokens || 0) +
+      (a.dailyTokenLimit ? ' / ' + a.dailyTokenLimit : ' / 不限') + ' token · ' +
+      (a.calls || 0) + ' 调用 / ' + (a.failures || 0) + ' 失败' +
+      (a.cooldownUntil ? ' · 冷却至 ' + esc(a.cooldownUntil) : '') + '</small></div>' +
+      '<div class="feature-actions"><button class="btn btn-danger" type="button" data-account-del="' + esc(a.id) + '" data-account-provider="' + esc(editing.id) + '">删除</button></div></div>'
+    ).join('') : '<p class="feature-empty">未单独配置账号；使用 provider 的 api_key。</p>';
+    const accountSection = editing
+      ? '<div class="panel-list-row" style="margin-top:14px"><span>账号 / 配额</span><b>' + accounts.length + ' 个</b></div>' +
+        '<form class="feature-form" data-account-form="' + esc(editing.id) + '"><div class="feature-form-row">' +
+        '<input name="id" type="text" maxlength="32" placeholder="账号 id">' +
+        '<input name="name" type="text" maxlength="60" placeholder="名称">' +
+        '<input name="daily_token_limit" type="number" min="0" placeholder="日 token 上限（0 不限）"></div>' +
+        '<input name="api_key" type="password" maxlength="300" placeholder="账号 API key" autocomplete="off">' +
+        '<div class="feature-form-row"><button class="btn" type="submit">添加 / 更新账号</button></div></form>' +
+        '<div class="feature-list">' + accountRows + '</div>'
+      : '';
     const groupRows = groups.length ? groups.map((g) =>
       '<div class="feature-row"><div class="feature-main"><b>' + esc(g.id) + ' <span class="feature-tag">' + esc(g.strategy) + '</span></b><small>' +
       esc((g.members || []).join(', ')) + '</small></div>' +
@@ -220,6 +247,7 @@
       '<input name="api_key" type="password" maxlength="300" placeholder="' + (editing && editing.keySet ? '留空保留原密钥' : 'API key') + '" autocomplete="off">' +
       '<div class="feature-form-row"><button class="btn btn-primary" type="submit">' + (editing ? '保存修改' : '新增 provider') + '</button>' +
       (editing ? '<button class="btn" type="button" data-provider-cancel>取消编辑</button>' : '') + '</div></form>' +
+      accountSection +
       '<div class="feature-list">' + (providerRows || '<p class="feature-empty">没有 provider。</p>') + '</div>' +
       '<div class="panel-list-row" style="margin-top:14px"><span>默认模型</span><b>' + esc((def.provider || '—') + '/' + (def.model || '—')) + '</b></div>' +
       '<form class="feature-form" data-default-form><div class="feature-form-row">' +
@@ -416,6 +444,8 @@
       // 重新载入 state（store 暴露 reload）
       app.reloadState();
       applyFontSize();
+      applyTheme();
+      if (G.i18n) G.i18n.apply();
       el.app.setAttribute('data-sidebar', app.state.sidebarCollapsed ? 'collapsed' : 'open');
       app.applyReduceMotion();
       renderServerStatus();
@@ -459,7 +489,8 @@
     const settings = {
       model: app.state.model, effort: app.state.effort,
       fontSize: app.state.fontSize, thinkOpen: app.state.thinkOpen,
-      reduceMotion: app.state.reduceMotion, sidebarCollapsed: app.state.sidebarCollapsed,
+      reduceMotion: app.state.reduceMotion, darkMode: app.state.darkMode, locale: app.state.locale,
+      sidebarCollapsed: app.state.sidebarCollapsed,
       onboarded: app.state.onboarded, voiceEnabled: app.state.voiceEnabled,
       activePersonaId: app.state.activePersonaId,
       personas: JSON.parse(JSON.stringify(app.state.personas || [])),
@@ -470,6 +501,8 @@
     app.resetState();
     Object.assign(app.state, settings);
     applyFontSize();
+    applyTheme();
+    if (G.i18n) G.i18n.apply();
     el.app.setAttribute('data-sidebar', app.state.sidebarCollapsed ? 'collapsed' : 'open');
     applyReduceMotion();
     app.save();
@@ -762,6 +795,20 @@
         }).catch((err) => app.toast(err.message));
         return;
       }
+      if (form.matches('[data-account-form]')) {
+        e.preventDefault();
+        const providerId = form.getAttribute('data-account-form');
+        const account = {
+          id: form.querySelector('[name=id]').value.trim(),
+          name: form.querySelector('[name=name]').value.trim(),
+          api_key: form.querySelector('[name=api_key]').value,
+          daily_token_limit: Number(form.querySelector('[name=daily_token_limit]').value) || 0
+        };
+        if (!account.id) { app.toast('账号 id 不能为空'); return; }
+        G.api.saveAccount(providerId, account).then(() => { loadProviders(); app.toast('账号已保存'); })
+          .catch((err) => app.toast(err.message));
+        return;
+      }
       if (form.matches('[data-default-form]')) {
         e.preventDefault();
         const provider = form.querySelector('[name=provider]').value.trim();
@@ -861,6 +908,14 @@
           .catch((err) => app.toast(err.message));
         return;
       }
+      const delAcc = e.target.closest('[data-account-del]');
+      if (delAcc) {
+        const id = delAcc.getAttribute('data-account-del');
+        const provider = delAcc.getAttribute('data-account-provider');
+        G.api.deleteAccount(provider, id).then(() => { loadProviders(); app.toast('账号已删除'); })
+          .catch((err) => app.toast(err.message));
+        return;
+      }
       const delGroup = e.target.closest('[data-group-del]');
       if (delGroup) {
         const id = delGroup.getAttribute('data-group-del');
@@ -885,7 +940,7 @@
   }
 
   Object.assign(app, {
-    syncSettingsUI, applyFontSize, usageSnapshot, renderServerStatus, refreshUsage,
+    syncSettingsUI, applyFontSize, applyTheme, usageSnapshot, renderServerStatus, refreshUsage,
     openSettingsTab, openSettings, closeSettings, filterSettings, loadProviders, openUsage, closeUsage,
     renderPersonasPanel, renderMemoryPanel, renderKnowledgePanel, renderToolsPanel,
     renderUsagePanel, renderAccountsPanel, renderGatewayPanel, refreshPlugins,

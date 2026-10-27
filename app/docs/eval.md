@@ -47,6 +47,7 @@ go run ./cmd/gqy-eval -config ... -replay /tmp/gqy-eval/runs/r1-20260101-120000/
   "concurrency": 2,
   "max_rounds": 4,
   "strict_schema": true,
+  "judge_model": "",
   "stage": "full",
   "round": "r1",
   "axes": {
@@ -79,6 +80,7 @@ go run ./cmd/gqy-eval -config ... -replay /tmp/gqy-eval/runs/r1-20260101-120000/
 | `axes` | 三个维度的枚举值，不能为空，不允许重复 |
 | `fixed` | 单因素/两两组合时固定其余维度的默认值 |
 | `timeouts` | 请求/工具/总超时、重试次数与指数退避上限；0 使用默认值 |
+| `judge_model` | 可选模型裁判；规则判定仍是主判定，模型裁判单独记录 |
 
 校验错误带字段路径，例如 `axes.prompt[1]: 未知变体 "nope"`、`fixed.schema: 未知变体 "wat"`；JSON 语法错误带文件名和行列号。
 

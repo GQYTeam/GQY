@@ -125,6 +125,56 @@ func TestNoRetryOn4xx(t *testing.T) {
 	}
 }
 
+func TestAccountQuota(t *testing.T) {
+	up, calls := fakeUpstream(t, 200, "ok")
+	r := newRouter(t, []map[string]any{
+		{"id": "q", "base_url": up.URL, "default_model": "m", "accounts": []map[string]any{
+			{"id": "only", "api_key": "k", "daily_token_limit": 1},
+		}},
+	}, nil)
+	_, _, err := r.Complete(context.Background(), provider.Request{Model: "q/m", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	first := calls.Load()
+	_, _, err = r.Complete(context.Background(), provider.Request{Model: "q/m", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
+	if err == nil || calls.Load() != first {
+		t.Fatalf("配额应阻止第二次请求: err=%v calls=%d", err, calls.Load())
+	}
+	st := r.Status()
+	if len(st.Providers) != 1 || len(st.Providers[0].Accounts) != 1 || st.Providers[0].Accounts[0].UsedTokens == 0 {
+		t.Fatalf("accounts status: %+v", st.Providers)
+	}
+}
+
+func TestAccountAdmin(t *testing.T) {
+	r := newAdminRouter(t)
+	if err := r.UpsertProvider(Provider{ID: "p", BaseURL: "https://p/v1", DefaultModel: "m", APIKey: "top"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.UpsertAccount("p", Account{ID: "a", APIKey: "ka", DailyTokenLimit: 10}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.UpsertAccount("p", Account{ID: "a", Name: "A", DailyTokenLimit: 20}); err != nil {
+		t.Fatal(err)
+	}
+	r.mu.RLock()
+	got := r.byID["p"].Accounts
+	r.mu.RUnlock()
+	if len(got) != 1 || got[0].APIKey != "ka" || got[0].DailyTokenLimit != 20 {
+		t.Fatalf("accounts: %+v", got)
+	}
+	if err := r.DeleteAccount("p", "a"); err != nil {
+		t.Fatal(err)
+	}
+	r.mu.RLock()
+	left := len(r.byID["p"].Accounts)
+	r.mu.RUnlock()
+	if left != 0 {
+		t.Fatalf("account 未删除: %d", left)
+	}
+}
+
 func TestAffinity(t *testing.T) {
 	a, _ := fakeUpstream(t, 200, "a")
 	b, _ := fakeUpstream(t, 200, "b")

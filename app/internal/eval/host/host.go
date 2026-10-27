@@ -72,6 +72,7 @@ func DefaultRegistry() (*tool.Registry, error) {
 		tool.Edit{Policy: policy},
 		tool.Shell{Policy: policy},
 		tool.ListDir{Policy: policy},
+		tool.Artifact{Policy: policy},
 		tool.WebSearch{},
 		Echo{},
 	}

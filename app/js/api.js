@@ -19,7 +19,7 @@
     if (!canProbe()) { health = null; return Promise.resolve(null); }
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const timer = setTimeout(() => { if (controller) controller.abort(); }, 1500);
-    probing = fetch('/api/health', {
+    probing = apiFetch('/api/health', {
       headers: { accept: 'application/json' },
       signal: controller ? controller.signal : undefined,
       cache: 'no-store'
@@ -28,6 +28,33 @@
       .catch(() => { health = null; return null; })
       .finally(() => { clearTimeout(timer); probing = null; });
     return probing;
+  }
+
+
+  /* 可选访问令牌：GQY_AUTH_TOKEN 启用时，401 先换 token cookie 再重试。 */
+  let authPending = null;
+  function authenticate() {
+    if (authPending) return authPending;
+    authPending = (async () => {
+      const token = typeof window.prompt === 'function' ? window.prompt('服务端访问令牌（GQY_AUTH_TOKEN）') : '';
+      if (!token) throw new Error('需要访问令牌');
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token: token })
+      });
+      if (!res.ok) throw new Error('访问令牌不正确');
+    })().finally(() => { authPending = null; });
+    return authPending;
+  }
+
+  async function apiFetch(input, init) {
+    let res = await fetch(input, init);
+    if (res.status === 401 && String(input).indexOf('/api/auth') < 0) {
+      await authenticate();
+      res = await fetch(input, init);
+    }
+    return res;
   }
 
   const available = () => !!(health && health.ok && health.provider !== 'none');
@@ -76,7 +103,7 @@
 
   async function chat(options) {
     const { messages, model, effort, session, signal, onEvent } = options || {};
-    const res = await fetch('/api/chat', {
+    const res = await apiFetch('/api/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
       body: JSON.stringify({ messages, model, effort, session }),
@@ -95,7 +122,7 @@
 
   /* 模型目录：由服务端从 models.dev 拉取并缓存，前端只消费精简结果 */
   async function models() {
-    const res = await fetch('/api/models', {
+    const res = await apiFetch('/api/models', {
       headers: { accept: 'application/json' },
       cache: 'no-store'
     });
@@ -109,7 +136,7 @@
 
   /* 用量：服务端聚合的真实 token 用量与消息量 */
   async function usage() {
-    const res = await fetch('/api/usage', {
+    const res = await apiFetch('/api/usage', {
       headers: { accept: 'application/json' },
       cache: 'no-store'
     });
@@ -126,7 +153,7 @@
     clearTimeout(syncTimer);
     syncTimer = setTimeout(() => {
       syncChain = syncChain.then(() =>
-        fetch('/api/sessions/' + encodeURIComponent(id), {
+        apiFetch('/api/sessions/' + encodeURIComponent(id), {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(payload)
@@ -141,19 +168,19 @@
 
   /* GitHub 只读账户：auth URL / 当前账户 / 断开 */
   async function githubAuth() {
-    const res = await fetch('/api/github/auth', { headers: { accept: 'application/json' } });
+    const res = await apiFetch('/api/github/auth', { headers: { accept: 'application/json' } });
     if (!res.ok) throw new Error('GitHub 未配置');
     return res.json();
   }
 
   async function githubMe() {
-    const res = await fetch('/api/github/me', { headers: { accept: 'application/json' } });
+    const res = await apiFetch('/api/github/me', { headers: { accept: 'application/json' } });
     if (!res.ok) return { connected: false };
     return res.json();
   }
 
   async function githubDisconnect() {
-    await fetch('/api/github', { method: 'DELETE' });
+    await apiFetch('/api/github', { method: 'DELETE' });
   }
 
   /* 附件上传：文本附件返回抽取的文本，二进制只落盘 */
@@ -161,7 +188,7 @@
     const fd = new FormData();
     fd.append('session', sessionId);
     fd.append('file', file, file.name);
-    const res = await fetch('/api/files', { method: 'POST', body: fd });
+    const res = await apiFetch('/api/files', { method: 'POST', body: fd });
     if (!res.ok) {
       const detail = await res.json().catch(() => ({}));
       throw new Error(detail.message || '上传失败 ' + res.status);
@@ -171,7 +198,7 @@
 
   /* 供应商列表（导入的 providers.json） */
   async function providers() {
-    const res = await fetch('/api/providers', { headers: { accept: 'application/json' } });
+    const res = await apiFetch('/api/providers', { headers: { accept: 'application/json' } });
     if (!res.ok) return [];
     const data = await res.json();
     return data.providers || [];
@@ -179,32 +206,32 @@
 
   /* 插件与工具 */
   async function installExample() {
-    const res = await fetch('/api/plugins/install-example', { method: 'POST' });
+    const res = await apiFetch('/api/plugins/install-example', { method: 'POST' });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || '安装示例失败');
     return res.json();
   }
 
   async function plugins() {
-    const res = await fetch('/api/plugins', { headers: { accept: 'application/json' }, cache: 'no-store' });
+    const res = await apiFetch('/api/plugins', { headers: { accept: 'application/json' }, cache: 'no-store' });
     if (!res.ok) throw new Error('插件列表获取失败');
     const data = await res.json();
     return data.plugins || [];
   }
 
   async function pluginLoad(id) {
-    const res = await fetch('/api/plugins/' + encodeURIComponent(id) + '/load', { method: 'POST' });
+    const res = await apiFetch('/api/plugins/' + encodeURIComponent(id) + '/load', { method: 'POST' });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || '加载失败');
     return res.json();
   }
 
   async function pluginUnload(id) {
-    const res = await fetch('/api/plugins/' + encodeURIComponent(id) + '/unload', { method: 'POST' });
+    const res = await apiFetch('/api/plugins/' + encodeURIComponent(id) + '/unload', { method: 'POST' });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || '卸载失败');
     return res.json();
   }
 
   async function pluginCall(id, action, args) {
-    const res = await fetch('/api/plugins/' + encodeURIComponent(id) + '/call', {
+    const res = await apiFetch('/api/plugins/' + encodeURIComponent(id) + '/call', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ action, arguments: args || {} })
@@ -214,13 +241,13 @@
   }
 
   async function tools() {
-    const res = await fetch('/api/tools', { headers: { accept: 'application/json' }, cache: 'no-store' });
+    const res = await apiFetch('/api/tools', { headers: { accept: 'application/json' }, cache: 'no-store' });
     if (!res.ok) throw new Error('工具列表获取失败');
     return res.json();
   }
 
   async function setExternal(enabled) {
-    const res = await fetch('/api/tools/external', {
+    const res = await apiFetch('/api/tools/external', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ enabled: !!enabled })
@@ -230,13 +257,13 @@
   }
 
   async function gatewayStatus() {
-    const res = await fetch('/api/gateway/status', { headers: { accept: 'application/json' }, cache: 'no-store' });
+    const res = await apiFetch('/api/gateway/status', { headers: { accept: 'application/json' }, cache: 'no-store' });
     if (!res.ok) throw new Error('网关状态获取失败');
     return res.json();
   }
 
   async function saveProvider(provider) {
-    const res = await fetch('/api/providers', {
+    const res = await apiFetch('/api/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(provider)
@@ -245,14 +272,30 @@
     return res.json();
   }
 
+  async function saveAccount(providerId, account) {
+    const res = await apiFetch('/api/providers/' + encodeURIComponent(providerId) + '/accounts', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(account)
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || '保存账号失败');
+    return res.json();
+  }
+
+  async function deleteAccount(providerId, accountId) {
+    const res = await apiFetch('/api/providers/' + encodeURIComponent(providerId) + '/accounts/' + encodeURIComponent(accountId), { method: 'DELETE' });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || '删除账号失败');
+    return res.json();
+  }
+
   async function deleteProvider(id) {
-    const res = await fetch('/api/providers/' + encodeURIComponent(id), { method: 'DELETE' });
+    const res = await apiFetch('/api/providers/' + encodeURIComponent(id), { method: 'DELETE' });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || '删除 provider 失败');
     return res.json();
   }
 
   async function saveGroup(group) {
-    const res = await fetch('/api/routing/groups', {
+    const res = await apiFetch('/api/routing/groups', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(group)
@@ -262,13 +305,13 @@
   }
 
   async function deleteGroup(id) {
-    const res = await fetch('/api/routing/groups/' + encodeURIComponent(id), { method: 'DELETE' });
+    const res = await apiFetch('/api/routing/groups/' + encodeURIComponent(id), { method: 'DELETE' });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || '删除路由组失败');
     return res.json();
   }
 
   async function setDefault(provider, model) {
-    const res = await fetch('/api/routing/default', {
+    const res = await apiFetch('/api/routing/default', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ provider, model })
@@ -280,7 +323,7 @@
   G.api = {
     detect, available, info, chat, models, usage, providers,
     plugins, installExample, pluginLoad, pluginUnload, pluginCall, tools, setExternal, gatewayStatus, uploadFile,
-    saveProvider, deleteProvider, saveGroup, deleteGroup, setDefault,
+    saveProvider, deleteProvider, saveAccount, deleteAccount, saveGroup, deleteGroup, setDefault,
     syncSession, githubAuth, githubMe, githubDisconnect
   };
 })();

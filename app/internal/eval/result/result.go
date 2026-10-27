@@ -153,6 +153,16 @@ type Verdict struct {
 	Reasons []string        `json:"reasons"`
 	Rules   map[string]bool `json:"rules"`
 	Runtime bool            `json:"runtime"`
+	// Model 是可选模型裁判；规则判定与模型裁判分开记录，不互相覆盖。
+	Model *ModelVerdict `json:"model,omitempty"`
+}
+
+// ModelVerdict 是模型裁判的结果。
+type ModelVerdict struct {
+	Pass    bool     `json:"pass"`
+	Reasons []string `json:"reasons"`
+	Model   string   `json:"model"`
+	Error   string   `json:"error,omitempty"`
 }
 
 // Trace 是一次「用例 × 配置 × 重复」的完整轨迹。

@@ -236,6 +236,13 @@
   });
 
   el.thread.addEventListener('click', (e) => {
+    const earlier = e.target.closest('[data-load-earlier]');
+    if (earlier) {
+      app.renderLimit = (app.renderLimit || 80) + 80;
+      app.renderThread();
+      el.scroller.scrollTop = 0;
+      return;
+    }
     const term = e.target.closest('[data-term]');
     if (term) { G.glossary.open(term.getAttribute('data-term'), term); return; }
     const img = e.target.closest('[data-att-msg]');
@@ -371,6 +378,19 @@
   el.motionSwitch.addEventListener('click', () => {
     app.state.reduceMotion = !app.state.reduceMotion;
     app.applyReduceMotion();
+    app.save();
+  });
+
+  if (el.localeSelect) el.localeSelect.addEventListener('change', () => {
+    app.state.locale = el.localeSelect.value === 'en' ? 'en' : 'zh';
+    if (G.i18n) G.i18n.apply();
+    app.save();
+  });
+
+  if (el.themeSwitch) el.themeSwitch.addEventListener('click', () => {
+    app.state.darkMode = !app.state.darkMode;
+    app.applyTheme();
+    app.syncSettingsUI();
     app.save();
   });
 
@@ -515,7 +535,9 @@
 
   el.app.setAttribute('data-sidebar', app.state.sidebarCollapsed ? 'collapsed' : 'open');
   app.applyReduceMotion();
+  app.applyTheme();
   app.applyFontSize();
+  if (G.i18n) G.i18n.apply();
   app.syncSettingsUI();
   app.updateContextChip();
   app.initFilesResize();

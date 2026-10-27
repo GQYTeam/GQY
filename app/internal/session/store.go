@@ -52,7 +52,13 @@ type Tool struct {
 }
 
 type Artifact struct {
-	Title   string `json:"title"`
+	Title   string         `json:"title"`
+	Content string         `json:"content"`
+	Files   []ArtifactFile `json:"files,omitempty"`
+}
+
+type ArtifactFile struct {
+	Path    string `json:"path"`
 	Content string `json:"content"`
 }
 
@@ -166,10 +172,31 @@ func (s *Store) Put(id string, payload Payload) (string, error) {
 	used := map[string]bool{}
 	artifactNames := make([]string, 0, 8)
 	for _, m := range decoded {
-		if m.Artifact == nil || m.Artifact.Content == "" || len(m.Artifact.Content) > maxArtifact {
+		if m.Artifact == nil {
 			continue
 		}
-		name := safeName(m.Artifact.Title, fmt.Sprintf("artifact-%d", len(artifactNames)))
+		title := safeName(m.Artifact.Title, fmt.Sprintf("artifact-%d", len(artifactNames)))
+		if m.Artifact.Files != nil {
+			for _, f := range m.Artifact.Files {
+				if len(f.Content) > maxArtifact {
+					continue
+				}
+				rel, err := safeArtifactPath(f.Path)
+				if err != nil {
+					continue
+				}
+				target := filepath.Join(dir, "io", "output", "artifacts", title, rel)
+				if err := writeFileAtomic(target, []byte(f.Content)); err != nil {
+					return dir, err
+				}
+				artifactNames = append(artifactNames, filepath.ToSlash(filepath.Join(title, rel)))
+			}
+			continue
+		}
+		if m.Artifact.Content == "" || len(m.Artifact.Content) > maxArtifact {
+			continue
+		}
+		name := title
 		if used[name] {
 			name = fmt.Sprintf("%d-%s", len(artifactNames), name)
 		}
@@ -287,6 +314,27 @@ func writeFileAtomic(file string, data []byte) error {
 		return err
 	}
 	return nil
+}
+
+func safeArtifactPath(raw string) (string, error) {
+	clean := filepath.Clean("/" + strings.TrimPrefix(filepath.ToSlash(raw), "/"))
+	rel := strings.TrimPrefix(clean, "/")
+	if rel == "" || rel == "." || strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("非法产物路径")
+	}
+	parts := strings.Split(rel, "/")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = safeName(p, "file")
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+	}
+	if len(out) == 0 {
+		return "", fmt.Errorf("非法产物路径")
+	}
+	return filepath.Join(out...), nil
 }
 
 func safeName(name, fallbackName string) string {

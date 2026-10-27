@@ -54,6 +54,20 @@ func (r *Router) UpsertProvider(p Provider) error {
 		if p.UserAgent == "" {
 			p.UserAgent = old.UserAgent
 		}
+		if len(p.Accounts) == 0 && len(old.Accounts) > 0 {
+			p.Accounts = old.Accounts
+		}
+		for i := range p.Accounts {
+			if p.Accounts[i].APIKey != "" {
+				continue
+			}
+			for _, oldAcc := range old.Accounts {
+				if oldAcc.ID == p.Accounts[i].ID {
+					p.Accounts[i].APIKey = oldAcc.APIKey
+					break
+				}
+			}
+		}
 		*old = p
 		if st := r.states[p.ID]; st == nil || cap(st.sem) != p.MaxConcurrency {
 			r.states[p.ID] = &providerState{sem: make(chan struct{}, p.MaxConcurrency)}
@@ -64,6 +78,63 @@ func (r *Router) UpsertProvider(p Provider) error {
 	if r.def.Provider == "" {
 		r.def = Ref{Provider: p.ID, Model: p.DefaultModel}
 	}
+	return r.saveProvidersLocked()
+}
+
+// UpsertAccount 新增/更新 provider 下的账号；key 留空保留原值。
+func (r *Router) UpsertAccount(providerID string, acc Account) error {
+	acc.ID = strings.TrimSpace(acc.ID)
+	if !providerIDRe.MatchString(acc.ID) {
+		return fmt.Errorf("account id 不合法：%q", acc.ID)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p := r.byID[providerID]
+	if p == nil {
+		return fmt.Errorf("provider 不存在：%s", providerID)
+	}
+	for i := range p.Accounts {
+		if p.Accounts[i].ID == acc.ID {
+			if acc.APIKey == "" {
+				acc.APIKey = p.Accounts[i].APIKey
+			}
+			if acc.Name == "" {
+				acc.Name = p.Accounts[i].Name
+			}
+			p.Accounts[i] = acc
+			return r.saveProvidersLocked()
+		}
+	}
+	if acc.Name == "" {
+		acc.Name = acc.ID
+	}
+	p.Accounts = append(p.Accounts, acc)
+	return r.saveProvidersLocked()
+}
+
+// DeleteAccount 删除 provider 下的账号。
+func (r *Router) DeleteAccount(providerID, accountID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p := r.byID[providerID]
+	if p == nil {
+		return fmt.Errorf("provider 不存在：%s", providerID)
+	}
+	out := p.Accounts[:0]
+	found := false
+	for _, a := range p.Accounts {
+		if a.ID == accountID {
+			found = true
+			continue
+		}
+		out = append(out, a)
+	}
+	if !found {
+		return fmt.Errorf("账号不存在：%s", accountID)
+	}
+	p.Accounts = out
+	delete(r.states, providerID+"|"+accountID)
+	delete(r.quota, providerID+"|"+accountID)
 	return r.saveProvidersLocked()
 }
 

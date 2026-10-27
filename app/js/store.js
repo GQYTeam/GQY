@@ -52,7 +52,7 @@
     aboutModels: $$('.about-model'), aboutModelInline: $('#aboutModelInline'), aboutEffortInline: $('#aboutEffortInline'),
     aboutModelInline2: $('#aboutModelInline2'), aboutEffortInline2: $('#aboutEffortInline2'),
     providerCount: $('#providerCount'), providerList: $('#providerList'),
-    motionSwitch: $('#motionSwitch'), sideSwitch: $('#sideSwitch'),
+    motionSwitch: $('#motionSwitch'), themeSwitch: $('#themeSwitch'), sideSwitch: $('#sideSwitch'), localeSelect: $('#localeSelect'),
     fontSeg: $('#fontSeg'), thinkSwitch: $('#thinkSwitch'), voiceSwitch: $('#voiceSwitch'),
     settingsSearch: $('#settingsSearch'),
     exportData: $('#exportData'),
@@ -119,6 +119,7 @@
   app.draftTimer = 0;
   app.paintTimer = 0;
   app.paintLast = 0;
+  app.renderLimit = 80;
   app.filesState = { root: '~/项目', files: [], current: null, tree: [], treeView: false };
   app.filesDrag = null;
 
@@ -145,6 +146,8 @@
       thinkOpen: false,
       sidebarCollapsed: false,
       reduceMotion: app.prefersReducedMotion(),
+      darkMode: false,
+      locale: 'zh',
       drafts: {},
       onboarded: false,
       voiceEnabled: false,
@@ -199,6 +202,8 @@
       s.thinkOpen = !!s.thinkOpen;
       s.sidebarCollapsed = !!s.sidebarCollapsed;
       s.reduceMotion = typeof s.reduceMotion === 'boolean' ? s.reduceMotion : app.prefersReducedMotion();
+      s.darkMode = s.darkMode === true;
+      s.locale = s.locale === 'en' ? 'en' : 'zh';
       s.drafts = (s.drafts && typeof s.drafts === 'object' && !Array.isArray(s.drafts)) ? s.drafts : {};
       Object.keys(s.drafts).forEach((k) => { if (typeof s.drafts[k] !== 'string') delete s.drafts[k]; });
       s.model = typeof s.model === 'string' ? s.model : '';
