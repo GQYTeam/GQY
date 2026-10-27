@@ -238,7 +238,7 @@
           s.shown = s.full.length;
         } else if (event.type === 'tool') {
           upsertTool(s.tools, event.tool);
-          if (event.tool && event.tool.name === 'write_artifact') {
+          if (event.tool && event.tool.name === 'write_artifact' && event.tool.status !== 'error') {
             try {
               const args = JSON.parse(event.tool.detail || '{}');
               if (Array.isArray(args.files) && args.files.length) {
