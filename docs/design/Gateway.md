@@ -148,6 +148,18 @@ return ErrAllFailed
 }
 ```
 
+### GET /api/providers
+
+返回脱敏 provider 列表（`keySet`、健康、调用数），不返回密钥。
+
+### POST /api/providers · DELETE /api/providers/{id}
+
+新增/更新/删除 provider，写回 `providers.json`（0600）。更新时 `api_key` 留空保留原密钥；`env` provider 不可删。
+
+### POST /api/routing/groups · DELETE /api/routing/groups/{id} · PUT /api/routing/default
+
+维护路由组与默认 `provider/model`，写回 `routing.json`，立即生效。
+
 ### GET /v1/models
 
 OpenAI 风格：

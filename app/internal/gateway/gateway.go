@@ -560,16 +560,19 @@ func retryable(err error) bool {
 
 // ProviderStatus 是脱敏后的 provider 状态。
 type ProviderStatus struct {
-	ID         string   `json:"id"`
-	Name       string   `json:"name"`
-	BaseURL    string   `json:"baseUrl"`
-	Models     []string `json:"models"`
-	KeySet     bool     `json:"keySet"`
-	Inflight   int      `json:"inflight"`
-	Calls      int64    `json:"calls"`
-	Failures   int64    `json:"failures"`
-	CooldownAt *string  `json:"cooldownUntil"`
-	LastError  string   `json:"lastError"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	BaseURL        string   `json:"baseUrl"`
+	Protocol       string   `json:"protocol"`
+	DefaultModel   string   `json:"defaultModel"`
+	Models         []string `json:"models"`
+	MaxConcurrency int      `json:"maxConcurrency"`
+	KeySet         bool     `json:"keySet"`
+	Inflight       int      `json:"inflight"`
+	Calls          int64    `json:"calls"`
+	Failures       int64    `json:"failures"`
+	CooldownAt     *string  `json:"cooldownUntil"`
+	LastError      string   `json:"lastError"`
 }
 
 // GroupStatus 是路由组状态。
@@ -591,10 +594,14 @@ type Status struct {
 func (r *Router) Status() Status {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	out := Status{Default: r.def, Affinity: map[string]string{}}
+	out := Status{Default: r.def, Affinity: map[string]string{}, Providers: []ProviderStatus{}, Groups: []GroupStatus{}}
 	for _, p := range r.providers {
 		st := r.states[p.ID]
-		ps := ProviderStatus{ID: p.ID, Name: p.Name, BaseURL: p.BaseURL, Models: append([]string{}, p.Models...), KeySet: p.APIKey != ""}
+		ps := ProviderStatus{
+			ID: p.ID, Name: p.Name, BaseURL: p.BaseURL, Protocol: p.Protocol,
+			DefaultModel: p.DefaultModel, Models: append([]string{}, p.Models...),
+			MaxConcurrency: p.MaxConcurrency, KeySet: p.APIKey != "",
+		}
 		if st != nil {
 			ps.Inflight = len(st.sem)
 			ps.Calls = st.calls.Load()

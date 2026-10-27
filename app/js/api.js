@@ -216,9 +216,52 @@
     return res.json();
   }
 
+  async function saveProvider(provider) {
+    const res = await fetch('/api/providers', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(provider)
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || '保存 provider 失败');
+    return res.json();
+  }
+
+  async function deleteProvider(id) {
+    const res = await fetch('/api/providers/' + encodeURIComponent(id), { method: 'DELETE' });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || '删除 provider 失败');
+    return res.json();
+  }
+
+  async function saveGroup(group) {
+    const res = await fetch('/api/routing/groups', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(group)
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || '保存路由组失败');
+    return res.json();
+  }
+
+  async function deleteGroup(id) {
+    const res = await fetch('/api/routing/groups/' + encodeURIComponent(id), { method: 'DELETE' });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || '删除路由组失败');
+    return res.json();
+  }
+
+  async function setDefault(provider, model) {
+    const res = await fetch('/api/routing/default', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider, model })
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || '设置默认模型失败');
+    return res.json();
+  }
+
   G.api = {
     detect, available, info, chat, models, usage, providers,
     plugins, pluginLoad, pluginUnload, pluginCall, tools, setExternal, gatewayStatus,
+    saveProvider, deleteProvider, saveGroup, deleteGroup, setDefault,
     syncSession, githubAuth, githubMe, githubDisconnect
   };
 })();

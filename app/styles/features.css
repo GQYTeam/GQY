@@ -51,7 +51,8 @@
 .feature-main small{display:block;color:var(--muted);font-size:12px;margin-top:2px;white-space:pre-wrap;word-break:break-word}
 .feature-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .feature-form{display:flex;flex-direction:column;gap:8px;padding:12px 4px;border-bottom:1px solid var(--line-soft)}
-.feature-form input,.feature-form textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;background:var(--paper);outline:none;font-size:13px}
+.feature-form input,.feature-form textarea,.feature-form select{width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;background:var(--paper);outline:none;font-size:13px}
+.feature-form select{min-width:96px;width:auto}
 .feature-form textarea{min-height:74px;resize:vertical}
 .feature-form input:focus,.feature-form textarea:focus{border-color:#c98a70}
 .feature-form-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
