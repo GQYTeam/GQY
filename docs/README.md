@@ -22,6 +22,7 @@
 | `design/EvalGateway.md` | 三维评测网关设计 |
 | `design/FrontendCapabilities.md` | 引导、看板、术语、设置页设计 |
 | `CapabilityMatrix.md` | 能力分类与状态 |
+| `Verification.md` | 已跑检查、手工验证与未验证边界 |
 
 ## 当前实现文档
 
