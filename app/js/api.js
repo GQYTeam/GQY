@@ -156,5 +156,13 @@
     await fetch('/api/github', { method: 'DELETE' });
   }
 
-  G.api = { detect, available, info, chat, models, usage, syncSession, githubAuth, githubMe, githubDisconnect };
+  /* 供应商列表（导入的 providers.json） */
+  async function providers() {
+    const res = await fetch('/api/providers', { headers: { accept: 'application/json' } });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.providers || [];
+  }
+
+  G.api = { detect, available, info, chat, models, usage, providers, syncSession, githubAuth, githubMe, githubDisconnect };
 })();

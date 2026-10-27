@@ -3,7 +3,7 @@
   'use strict';
   const G = window.GQY;
   const app = G.app;
-  const { uid, now, formatBytes } = G;
+  const { uid, now, esc, formatBytes } = G;
   const el = app.el;
   const $$ = app.$$;
 
@@ -15,6 +15,8 @@
     el.aboutModels.forEach((node) => { node.textContent = app.activeModel(); });
     if (el.aboutModelInline) el.aboutModelInline.textContent = app.activeModel();
     if (el.aboutEffortInline) el.aboutEffortInline.textContent = app.state.effort;
+    if (el.aboutModelInline2) el.aboutModelInline2.textContent = app.activeModel();
+    if (el.aboutEffortInline2) el.aboutEffortInline2.textContent = app.state.effort;
     renderServerStatus();
     refreshUsage();
   }
@@ -119,8 +121,8 @@
   }
 
   function openSettingsTab(name, focusTab) {
-    const valid = ['appearance', 'chat', 'data', 'about'];
-    app.settingsTab = valid.indexOf(name) >= 0 ? name : 'appearance';
+    const valid = ['general', 'models', 'personas', 'memory', 'knowledge', 'voice', 'packages', 'tools', 'usage', 'accounts'];
+    app.settingsTab = valid.indexOf(name) >= 0 ? name : 'general';
     el.settingsTabs.forEach((tab) => {
       const on = tab.getAttribute('data-settings-tab') === app.settingsTab;
       tab.classList.toggle('is-active', on);
@@ -136,6 +138,22 @@
       const tab = el.settingsTabs.find((node) => node.getAttribute('data-settings-tab') === app.settingsTab);
       if (tab) tab.focus({ preventScroll: true });
     }
+    if (app.settingsTab === 'models') loadProviders();
+  }
+
+  async function loadProviders() {
+    if (!el.providerList || !G.api || !G.api.providers) return;
+    try {
+      const list = await G.api.providers();
+      if (el.providerCount) el.providerCount.textContent = String(list.length);
+      el.providerList.innerHTML = list.map((p) =>
+        '<div class="provider-row"><span class="provider-id">' + esc(p.id || '') + '</span>' +
+        '<span class="provider-name">' + esc(p.display_name || p.id || '') + '</span>' +
+        '<span class="provider-base">' + esc(p.base_url || '') + '</span></div>'
+      ).join('');
+    } catch (err) {
+      if (el.providerCount) el.providerCount.textContent = '0';
+    }
   }
 
   function openSettings() {
@@ -147,6 +165,24 @@
     openSettingsTab(app.settingsTab, false);
     el.settingsWindow.focus({ preventScroll: true });
     refreshUsage();
+  }
+
+  // 搜索过滤：按设置项文本高亮/过滤 panel，跳转到匹配的第一个 tab
+  function filterSettings(query) {
+    const q = String(query || '').trim().toLowerCase();
+    if (!el.settingsTabs || !el.settingsPanels) return;
+    if (!q) {
+      // 清空搜索：显示所有 tab
+      el.settingsTabs.forEach((tab) => { tab.hidden = false; });
+      return;
+    }
+    // 对每个 panel 判断是否包含关键词，隐藏不匹配的 tab 和 panel
+    el.settingsTabs.forEach((tab) => {
+      const name = tab.getAttribute('data-settings-tab');
+      const panel = el.settingsPanels.find((p) => p.getAttribute('data-settings-panel') === name);
+      const text = ((tab.textContent || '') + ' ' + (panel ? panel.textContent : '')).toLowerCase();
+      tab.hidden = text.indexOf(q) < 0;
+    });
   }
 
   function closeSettings() {
@@ -353,7 +389,7 @@
 
   Object.assign(app, {
     syncSettingsUI, applyFontSize, usageSnapshot, renderServerStatus, refreshUsage,
-    openSettingsTab, openSettings, closeSettings, openUsage, closeUsage,
+    openSettingsTab, openSettings, closeSettings, filterSettings, loadProviders, openUsage, closeUsage,
     openExtensions, closeExtensions, refreshGithub, connectGithub, disconnectGithub,
     trapTab, setView,
     exportData, importData, setupDetectedApi, openWsDialog, applyReduceMotion, clearEverything

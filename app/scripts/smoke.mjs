@@ -254,7 +254,7 @@ try {
   const md = await evaluate(`GQY.renderMarkdown('[点我](javascript:alert(1))\\n\\n![图](javascript:alert(2))')`);
   check('Markdown 拦截 javascript: 链接', !/javascript:/i.test(md) && /点我/.test(md), md);
 
-  /* 设置：四个 tab 都要能打开 */
+  /* 设置：十个 tab 都要能打开 */
   await evaluate('document.querySelector("#accountBtn").click()');
   await sleep(300);
   const tabs = await evaluate(`(() => {
@@ -267,9 +267,19 @@ try {
     }
     return out;
   })()`);
-  check('设置四个 tab 全部可切换', tabs.length === 4 && tabs.every((t) => t.endsWith(':true')), tabs.join(' '));
+  check('设置十个 tab 全部可切换', tabs.length === 10 && tabs.every((t) => t.endsWith(':true')), tabs.join(' '));
   const dataTab = await evaluate('!!document.querySelector("#importData") && !!document.querySelector("#exportData") && !!document.querySelector("#clearAll")');
-  check('数据页有导入 / 导出 / 清空', dataTab === true);
+  check('通用页有导入 / 导出 / 清空', dataTab === true);
+  // 搜索过滤
+  const searchFilter = await evaluate(`(() => {
+    const input = document.querySelector('#settingsSearch');
+    input.value = '人设';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    const hidden = [...document.querySelectorAll('.settings-tab')].filter((t) => t.hidden).length;
+    return { hidden, total: document.querySelectorAll('.settings-tab').length };
+  })()`);
+  check('设置搜索过滤生效', searchFilter.hidden > 0 && searchFilter.hidden < searchFilter.total, JSON.stringify(searchFilter));
+  await evaluate(`(() => { const i = document.querySelector('#settingsSearch'); i.value=''; i.dispatchEvent(new Event('input',{bubbles:true})); })()`);
   await evaluate('document.querySelector("#settingsLayer [data-settings-close]").click()');
   await sleep(200);
 

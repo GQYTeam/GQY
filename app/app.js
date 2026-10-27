@@ -25,6 +25,7 @@
   });
   el.scrim.addEventListener('click', app.closeDrawer);
   el.accountBtn.addEventListener('click', app.openSettings);
+  if (el.settingsSearch) el.settingsSearch.addEventListener('input', () => app.filterSettings(el.settingsSearch.value));
 
   function setSearchOpen(open, focus) {
     app.searchOpen = !!open;

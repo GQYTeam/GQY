@@ -106,3 +106,19 @@
 /* ---------- 数据危险区 ---------- */
 .panel-data.is-danger{border-color:#e3c3b8;background:#fdf6f3}
 .panel-data.is-danger .set-actions{margin-top:10px}
+
+/* ---------- 设置搜索 + 板块占位（miyu 风格） ---------- */
+.settings-search{display:flex;align-items:center;gap:8px;margin:2px 8px 6px;padding:0 10px;height:32px;border:1px solid #e6e6e5;border-radius:8px;background:#fafaf9}
+.settings-search .ico{width:15px;height:15px;color:var(--muted);flex:none}
+.settings-search input{flex:1;min-width:0;border:0;outline:none;background:transparent;font-size:13px;color:var(--ink)}
+.settings-search input::placeholder{color:var(--faint)}
+.settings-tab[hidden]{display:none}
+.panel-placeholder{display:flex;align-items:center;justify-content:center;min-height:120px;padding:16px;font-size:12.5px;color:var(--faint);text-align:center}
+
+/* ---------- 供应商列表 ---------- */
+.provider-list{display:flex;flex-direction:column}
+.provider-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #efefee;font-size:12.5px}
+.provider-row:last-child{border-bottom:0}
+.provider-id{flex:none;font:11px/1 var(--mono);color:#4e7d5f;background:#eef4ef;border-radius:4px;padding:2px 6px}
+.provider-name{font-weight:600;color:var(--ink)}
+.provider-base{margin-left:auto;font:11px/1 var(--mono);color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:45%}

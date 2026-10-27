@@ -103,6 +103,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/models", s.handleModels)
 	mux.HandleFunc("GET /api/usage", s.handleUsage)
 	mux.HandleFunc("POST /api/chat", s.handleChat)
+	mux.HandleFunc("GET /api/providers", s.handleProviders)
 	mux.HandleFunc("GET /api/github/auth", s.handleGitHubAuth)
 	mux.HandleFunc("GET /api/github/callback", s.handleGitHubCallback)
 	mux.HandleFunc("GET /api/github/me", s.handleGitHubMe)
@@ -122,6 +123,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/models", allow("GET"))
 	mux.HandleFunc("/api/usage", allow("GET"))
 	mux.HandleFunc("/api/chat", allow("POST"))
+	mux.HandleFunc("/api/providers", allow("GET"))
 	mux.HandleFunc("/api/github/auth", allow("GET"))
 	mux.HandleFunc("/api/github/callback", allow("GET"))
 	mux.HandleFunc("/api/github/me", allow("GET"))
@@ -290,6 +292,24 @@ func normalizeMessages(in []provider.Message) []provider.Message {
 		kept = append(kept, provider.Message{Role: role, Content: content})
 	}
 	return kept
+}
+
+/* ---------------- 供应商列表（providers.json） ---------------- */
+
+func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
+	raw, err := os.ReadFile(filepath.Join(s.Cfg.Home, "providers.json"))
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"providers": []any{}})
+		return
+	}
+	var data struct {
+		Providers []map[string]any `json:"providers"`
+	}
+	if err := json.Unmarshal(raw, &data); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"providers": []any{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"providers": data.Providers})
 }
 
 /* ---------------- GitHub 只读账户 ---------------- */
