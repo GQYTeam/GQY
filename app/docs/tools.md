@@ -3,7 +3,7 @@
 ## 现状
 
 服务端已实现最小工具系统：统一 `Tool` 接口 + 线程安全注册表 + agent loop。工具全部进程内执行，来源只有内置（核心）和 `provider_usage`（外部）。
-`docs/AboutPlugin.md` 里的统一模型、原生/MCP 适配器、子进程生命周期与进程组回收已经落地；远程传输、服务依赖、权限审批和跨社区契约矩阵仍未实现，详见文末「与插件设计的关系」。
+`docs/AboutPlugin.md` 里的统一模型、原生/MCP/unix/tcp 适配器、服务依赖、子进程生命周期与进程组回收已经落地；权限审批、崩溃自动重启和跨社区契约矩阵仍未实现，详见文末「与插件设计的关系」。
 
 ## 契约
 
@@ -34,6 +34,7 @@ type Tool interface {
 | `edit` | `path`, `content` | 覆盖写入，自动建父目录；同目录临时文件 + rename 原子替换 | 仅允许根内；无 diff、无追加模式 |
 | `shell` | `command` | 在 workspace 以 `sh -c` 执行，合并 stdout+stderr | 默认 60s 超时并杀进程组；输出 ≤ 16 KB；可选白名单 |
 | `list_dir` | `path`（默认 `.`） | 列目录，目录名以 `/` 结尾 | 仅允许根内；不递归 |
+| `write_artifact` | `title`, `files[]` | 写工作区并生成多文件产物 | 单文件 2 MB、总量 2 MB、最多 20 个 |
 | `websearch` | `query` | 占位：直接返回“尚未接入搜索后端” | 未实现 |
 | `ask_user` | `question`, `options?` | 中断 loop，向前端发提问卡片 | 不受单工具超时约束 |
 
@@ -139,7 +140,7 @@ HTTP：`GET /api/plugins`、`POST /api/plugins/reload`、`POST /api/plugins/{id}
 | 统一调用入口 / 统一模型 | `Tool` 接口 + `Registry`；插件实现 `KindExternal` |
 | 注册中心、适配器 | manifest 发现 + `Adapter`（原生 / MCP） |
 | 生命周期状态机、卸载、进程组回收 | 已实现（discovered → loading → ready → closing） |
-| 并发模型声明、远程传输、熔断 | 单插件 `concurrent / exclusive`；远程与熔断未做 |
+| 并发模型声明、远程传输、熔断 | 单插件 `concurrent / exclusive`；unix/tcp；熔断未做 |
 | 契约测试套件 | `internal/plugin` 单测；跨社区契约矩阵未做 |
 | 重复注册报错 | 已对齐 |
 | 社区专有类型不出适配器 | 原生 / MCP 适配器内部处理 |
@@ -153,4 +154,4 @@ HTTP：`GET /api/plugins`、`POST /api/plugins/reload`、`POST /api/plugins/{id}
 - 客户端只保存工具轨迹用于展示，`apiMessages()` 只发送文本，模型在下一轮看不到上一轮的工具调用记录（除非服务端回灌）。
 - `websearch` 未实现；`GQY_MOCK=1` 不经过 agent loop，工具不会执行。
 - `ask_user` 不是授权闸门，回答不会回传工具上下文。
-- 插件远程传输、服务依赖（Requires/Provides）、权限/审批、崩溃自动重启未实现。
+- 插件权限/审批、崩溃自动重启、跨社区契约矩阵未实现。
