@@ -88,7 +88,7 @@ Go module（`gqy`，标准库，零第三方依赖），按 `cmd` / `internal` �
 
 `agent.Loop.Run()`：
 
-1. 系统提示始终插在最前（工具清单 + 调用规则）；客户端自带的人设/记忆/知识 system 消息跟在其后。
+1. 工具系统提示（工具清单 + 调用规则）与客户端自带的人设/记忆/知识 system 合并成一条，放在最前，避免上游只读取第一条 system。
 2. 请求上游（带 `tools` schema），累加 `usage`。
 3. 没有工具调用 → 返回最终答案。
 4. 有工具调用 → 逐个执行（`ToolTimeout` 限时），`OnTool` 回调把结果转成 SSE `tool` 事件；结果以 `role: "tool"` 回填。
