@@ -84,6 +84,8 @@
   .lb-panel{width:calc(100vw - 16px);height:calc(100dvh - 16px);max-height:none;border-radius:12px}
   .lb-top{height:52px;gap:8px;padding:0 10px 0 12px}
   .lb-chip{display:none}
+  .lb-seg-btn{padding:0 8px}
+  .lb-md{padding:16px 18px 28px}
   .lb-foot{gap:10px}
   .imgbox{padding:0}
   .imgbox-panel{width:100vw;height:100dvh;border-radius:0}
@@ -98,6 +100,10 @@
 }
 
 @media (max-width:480px){
+  .lb-seg{padding:1px}
+  .lb-seg-btn{padding:0 6px;font-size:11px}
+  .lb-copy-label{display:none}
+  .lb-md{padding:14px 14px 26px}
   .settings-tab .ico{display:none}
   .settings-tab{padding:0 15px;gap:0}
   .settings-tabs{gap:2px}
