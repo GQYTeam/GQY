@@ -58,6 +58,17 @@ func (r *Registry) Get(name string) (Tool, bool) {
 	return t, ok
 }
 
+// Unregister 注销工具；不存在时返回 false。
+func (r *Registry) Unregister(name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.tools[name]; !ok {
+		return false
+	}
+	delete(r.tools, name)
+	return true
+}
+
 // List 返回所有工具。
 func (r *Registry) List() []Tool {
 	r.mu.RLock()

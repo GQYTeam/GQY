@@ -75,11 +75,11 @@
   }
 
   async function chat(options) {
-    const { messages, model, effort, signal, onEvent } = options || {};
+    const { messages, model, effort, session, signal, onEvent } = options || {};
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
-      body: JSON.stringify({ messages, model, effort }),
+      body: JSON.stringify({ messages, model, effort, session }),
       signal
     });
     if (!res.ok) {
@@ -164,5 +164,61 @@
     return data.providers || [];
   }
 
-  G.api = { detect, available, info, chat, models, usage, providers, syncSession, githubAuth, githubMe, githubDisconnect };
+  /* 插件与工具 */
+  async function plugins() {
+    const res = await fetch('/api/plugins', { headers: { accept: 'application/json' }, cache: 'no-store' });
+    if (!res.ok) throw new Error('插件列表获取失败');
+    const data = await res.json();
+    return data.plugins || [];
+  }
+
+  async function pluginLoad(id) {
+    const res = await fetch('/api/plugins/' + encodeURIComponent(id) + '/load', { method: 'POST' });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || '加载失败');
+    return res.json();
+  }
+
+  async function pluginUnload(id) {
+    const res = await fetch('/api/plugins/' + encodeURIComponent(id) + '/unload', { method: 'POST' });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || '卸载失败');
+    return res.json();
+  }
+
+  async function pluginCall(id, action, args) {
+    const res = await fetch('/api/plugins/' + encodeURIComponent(id) + '/call', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action, arguments: args || {} })
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || '调用失败');
+    return res.json();
+  }
+
+  async function tools() {
+    const res = await fetch('/api/tools', { headers: { accept: 'application/json' }, cache: 'no-store' });
+    if (!res.ok) throw new Error('工具列表获取失败');
+    return res.json();
+  }
+
+  async function setExternal(enabled) {
+    const res = await fetch('/api/tools/external', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: !!enabled })
+    });
+    if (!res.ok) throw new Error('开关失败');
+    return res.json();
+  }
+
+  async function gatewayStatus() {
+    const res = await fetch('/api/gateway/status', { headers: { accept: 'application/json' }, cache: 'no-store' });
+    if (!res.ok) throw new Error('网关状态获取失败');
+    return res.json();
+  }
+
+  G.api = {
+    detect, available, info, chat, models, usage, providers,
+    plugins, pluginLoad, pluginUnload, pluginCall, tools, setExternal, gatewayStatus,
+    syncSession, githubAuth, githubMe, githubDisconnect
+  };
 })();

@@ -110,14 +110,49 @@
     if (files && files.length) {
       app.toast('附件暂未接入上传通道，这条回复不含文件内容');
     }
-    startApiStream(conv, msg);
+    startApiStream(conv, msg, prompt);
   }
 
-  function apiMessages(conv) {
-    return conv.messages
+  function matchKnowledge(prompt) {
+    const words = String(prompt || '').toLowerCase().split(/[^\p{L}\p{N}_-]+/u).filter((w) => w.length >= 2);
+    if (!words.length) return [];
+    return app.state.knowledge
+      .filter((k) => k && k.enabled && k.content)
+      .map((k) => {
+        const hay = (k.title + '\n' + k.content).toLowerCase();
+        return { k: k, score: words.reduce((n, w) => (hay.indexOf(w) >= 0 ? n + 1 : n), 0) };
+      })
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3)
+      .map((x) => x.k);
+  }
+
+  function systemContext(prompt) {
+    const parts = [];
+    const persona = (app.state.personas || []).find((p) => p.id === app.state.activePersonaId);
+    if (persona && persona.system && persona.system.trim()) {
+      parts.push('【人设】\n' + persona.system.trim());
+    }
+    const memories = (app.state.memories || []).filter((m) => m.enabled && m.text.trim());
+    if (memories.length) {
+      parts.push('【记忆】\n' + memories.map((m) => '- ' + m.text.trim()).join('\n'));
+    }
+    const docs = matchKnowledge(prompt);
+    if (docs.length) {
+      parts.push('【知识库】\n' + docs.map((k) => '### ' + k.title + '\n' + k.content).join('\n\n'));
+    }
+    return parts.join('\n\n').slice(0, 12000);
+  }
+
+  function apiMessages(conv, prompt) {
+    const msgs = conv.messages
       .filter((m) => m && m.text && (m.role === 'user' || m.role === 'assistant') && !m.error)
       .slice(-20)
       .map((m) => ({ role: m.role, content: String(m.text).slice(0, 20000) }));
+    const sys = systemContext(prompt);
+    if (sys) msgs.unshift({ role: 'system', content: sys });
+    return msgs;
   }
 
   function upsertTool(list, tool) {
@@ -129,7 +164,7 @@
     else list.push(next);
   }
 
-  function startApiStream(conv, msg) {
+  function startApiStream(conv, msg, prompt) {
     const controller = new AbortController();
     app.stream = {
       mode: 'api', convId: conv.id, msgId: msg.id, demo: false,
@@ -142,9 +177,10 @@
     paintStream();
 
     G.api.chat({
-      messages: apiMessages(conv),
+      messages: apiMessages(conv, prompt),
       model: app.activeModel(),
       effort: app.state.effort,
+      session: conv.id,
       signal: controller.signal,
       onEvent: (event) => {
         if (!app.stream || app.stream.controller !== controller) return;

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"gqy/internal/provider"
@@ -46,13 +47,30 @@ type Loop struct {
 	// ToolTimeout 是单次工具调用的上限；零值表示不额外限制（仍受请求 context 约束）。
 	// 超时只影响本次调用，错误回填后 loop 继续。
 	ToolTimeout time.Duration
+	extMu       sync.RWMutex
 }
+
+// SetExternal 运行时切换外部工具注入，供设置页使用。
+func (l *Loop) SetExternal(v bool) {
+	l.extMu.Lock()
+	l.IncludeExternal = v
+	l.extMu.Unlock()
+}
+
+func (l *Loop) externalEnabled() bool {
+	l.extMu.RLock()
+	defer l.extMu.RUnlock()
+	return l.IncludeExternal
+}
+
+// ExternalEnabled 返回当前是否注入外部工具。
+func (l *Loop) ExternalEnabled() bool { return l.externalEnabled() }
 
 // ToolsSchema 把核心工具转成 OpenAI function calling 的 tools 数组。
 // 外部工具（插件/skill/mcp）默认不注入，需要时通过 EnableExternal 开启。
 func (l *Loop) ToolsSchema() []any {
 	tools := l.Registry.ListCore()
-	if l.IncludeExternal {
+	if l.externalEnabled() {
 		tools = l.Registry.List()
 	}
 	out := make([]any, 0, len(tools))
@@ -75,7 +93,7 @@ func (l *Loop) systemPrompt() string {
 	var b strings.Builder
 	b.WriteString("你是顾清影，运行在本机（macOS）的 AI 助手，拥有以下可主动调用的工具：\n")
 	tools := l.Registry.ListCore()
-	if l.IncludeExternal {
+	if l.externalEnabled() {
 		tools = l.Registry.List()
 	}
 	for _, t := range tools {
@@ -95,11 +113,8 @@ func (l *Loop) systemPrompt() string {
 func (l *Loop) Run(ctx context.Context, messages []provider.Message, model, effort string) (provider.Message, *provider.Usage, *tool.Ask, error) {
 	totalUsage := &provider.Usage{}
 	msgs := make([]provider.Message, 0, len(messages)+1)
-	// 系统提示插最前；若用户消息里已带 system 则替换
-	hasSystem := len(messages) > 0 && messages[0].Role == "system"
-	if !hasSystem {
-		msgs = append(msgs, provider.Message{Role: "system", Content: l.systemPrompt()})
-	}
+	// 工具系统提示始终插最前；客户端自带的 system（人设/记忆/知识）跟在后面。
+	msgs = append(msgs, provider.Message{Role: "system", Content: l.systemPrompt()})
 	msgs = append(msgs, messages...)
 
 	for round := 0; round < maxRounds; round++ {

@@ -239,7 +239,8 @@
       body += toolsHTML(m.tools, m.toolsTotal);
     }
     const empty = !m.text && !m.thinking && !(m.tools && m.tools.length);
-    body += '<div class="md">' + (m.text ? renderMarkdown(m.text) : (empty && !live ? thinkingHTML() : '')) + '</div>';
+    const mdHTML = m.text ? renderMarkdown(m.text) : '';
+    body += '<div class="md">' + (m.text ? (G.glossary ? G.glossary.decorate(mdHTML) : mdHTML) : (empty && !live ? thinkingHTML() : '')) + '</div>';
     if (m.error) body += errorHTML(m);
     if (m.artifact) body += artifactHTML(m);
     if (m.question) body += askHTML(m);
