@@ -1,7 +1,10 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +12,8 @@ import (
 	"testing"
 
 	"gqy/internal/config"
+	"gqy/internal/plugin"
+	"gqy/internal/tool"
 )
 
 func TestSafeUploadName(t *testing.T) {
@@ -102,5 +107,58 @@ func TestSaveUploadConcurrentSameName(t *testing.T) {
 		if string(data) != fmt.Sprintf("content-%d", i) {
 			t.Fatalf("%s 内容被覆盖: %q", rels[i], data)
 		}
+	}
+}
+
+func TestInstallExamplesIdempotent(t *testing.T) {
+	home := t.TempDir()
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		Root:    root,
+		Cfg:     config.Config{Home: home},
+		Plugins: plugin.NewManager(home, tool.NewRegistry()),
+	}
+	t.Cleanup(s.Plugins.Close)
+
+	call := func() *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/plugins/install-example", nil)
+		s.handlePluginInstallExample(rec, req)
+		return rec
+	}
+
+	rec := call()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("首次安装 code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, id := range []string{"echo", "mcp-echo"} {
+		if _, err := os.Stat(filepath.Join(home, "plugins", id, "manifest.json")); err != nil {
+			t.Fatalf("%s 未安装: %v", id, err)
+		}
+	}
+
+	if rec := call(); rec.Code != http.StatusConflict {
+		t.Fatalf("全部已存在应 409，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 删掉其中一个后再装：只补装缺失的那个。
+	if err := os.RemoveAll(filepath.Join(home, "plugins", "mcp-echo")); err != nil {
+		t.Fatal(err)
+	}
+	rec = call()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("补装 code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Installed []string `json:"installed"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Installed) != 1 || body.Installed[0] != "mcp-echo" {
+		t.Fatalf("installed=%v", body.Installed)
 	}
 }
