@@ -19,7 +19,11 @@
       updatedAt: conv.updatedAt || now(),
       messages: conv.messages.map((m) => ({
         id: m.id, role: m.role, ts: m.ts, text: m.text,
-        thinking: m.thinking, tools: m.tools, artifact: m.artifact, usage: m.usage
+        thinking: m.thinking, tools: m.tools, artifact: m.artifact, usage: m.usage,
+        attachments: (m.attachments || []).map((a) => ({
+          name: a.name, type: a.type, size: a.size, path: a.path,
+          truncated: !!a.truncated
+        }))
       }))
     });
   }
@@ -52,6 +56,7 @@
 
   function handleSend() {
     if (app.stream) { app.stopStreaming(); return; }
+    if (app.uploading) return;
     const text = el.input.value.trim();
     if (!text) return;
 
@@ -86,10 +91,29 @@
     app.save();
     app.renderAll();
     app.scrollToBottom(true);
-    respond(conv, text, sending.map((f) => f.name));
+    respond(conv, text, sending, attachments);
   }
 
-  function respond(conv, prompt, files) {
+  async function uploadAttachments(conv, files, attachments) {
+    if (!G.api || !G.api.uploadFile) return;
+    const list = attachments || [];
+    await Promise.all(files.map(async (file, i) => {
+      try {
+        const data = await G.api.uploadFile(conv.id, file);
+        if (list[i]) {
+          list[i].path = data.path || '';
+          list[i].text = data.text || '';
+          list[i].truncated = !!data.truncated;
+          list[i].size = data.size || list[i].size;
+        }
+      } catch (err) {
+        app.toast('附件「' + file.name + '」上传失败：' + err.message);
+      }
+    }));
+    app.save();
+  }
+
+  function respond(conv, prompt, files, attachments) {
     if (app.stream) app.stopStreaming();
     const msg = { id: uid(), role: 'assistant', text: '', ts: now() };
     conv.messages.push(msg);
@@ -107,10 +131,16 @@
       app.finishStream();
       return;
     }
+    const start = () => startApiStream(conv, msg, prompt);
     if (files && files.length) {
-      app.toast('附件暂未接入上传通道，这条回复不含文件内容');
+      app.uploading = true;
+      uploadAttachments(conv, files, attachments).finally(() => {
+        app.uploading = false;
+        start();
+      });
+    } else {
+      start();
     }
-    startApiStream(conv, msg, prompt);
   }
 
   function matchKnowledge(prompt) {
@@ -145,11 +175,23 @@
     return parts.join('\n\n').slice(0, 12000);
   }
 
+  function attachmentContext(m) {
+    const list = Array.isArray(m.attachments) ? m.attachments : [];
+    return list.filter((a) => a && a.text).map((a) =>
+      '[附件：' + a.name + (a.truncated ? '（已截断）' : '') + ']\n' + a.text
+    ).join('\n\n');
+  }
+
   function apiMessages(conv, prompt) {
     const msgs = conv.messages
       .filter((m) => m && m.text && (m.role === 'user' || m.role === 'assistant') && !m.error)
       .slice(-20)
-      .map((m) => ({ role: m.role, content: String(m.text).slice(0, 20000) }));
+      .map((m) => {
+        let content = String(m.text).slice(0, 20000);
+        const extra = attachmentContext(m);
+        if (extra) content += '\n\n' + extra;
+        return { role: m.role, content: content.slice(0, 60000) };
+      });
     const sys = systemContext(prompt);
     if (sys) msgs.unshift({ role: 'system', content: sys });
     return msgs;

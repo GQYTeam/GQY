@@ -226,6 +226,7 @@ npm start                 # cmd/gqy-server 自动读取 .env，真实环境变�
 | `PUT` | `/api/routing/default` | `{provider, model}` 设置默认模型 |
 | `GET` | `/api/gateway/status` | provider 健康、调用数、冷却、路由组、会话亲和 |
 | `POST` | `/api/chat` | 请求 `{ messages, model, effort, session }`，返回 SSE：`thinking` / `tool` / `text` / `question` / `done` / `error` / `end` |
+| `POST` | `/api/files` | multipart `{session, file}`；写入 `$GQY_HOME/sessions/<id>/tmp/uploads/`，文本附件返回最多 2 万字符 |
 | `GET` | `/api/plugins` | 已发现插件、状态、actions、调用统计 |
 | `POST` | `/api/plugins/reload` | 重新扫描 manifest |
 | `POST` | `/api/plugins/install-example` | 把仓库 `plugins/echo` 复制到 `$GQY_HOME/plugins/echo` |
@@ -314,9 +315,9 @@ docs/                   架构、页面、数据、工具、测试、路线图
 ## 数据
 
 - 前端以 `localStorage['claude-webchat:v7']` 为准，刷新不丢；配额写满会明确提示，不再静默失败。
-- 服务端可用时，每次保存会把当前会话镜像到 `$GQY_HOME/sessions/<id>/`，日志与产物落盘。镜像字段是 `text / thinking / tools / artifact / usage`；`question` 与附件不落服务端。
+- 服务端可用时，每次保存会把当前会话镜像到 `$GQY_HOME/sessions/<id>/`，日志与产物落盘。镜像字段是 `text / thinking / tools / artifact / usage / attachments`（附件只带 name/size/path/truncated，不带正文）；`question` 不落服务端。
 - `ask_user` 的回答会先写成本地 user 消息，再触发一次新的 `/api/chat` 请求。
-- 附件目前只在本地：图片用 `blob:` 预览，序列化前剔除，不写入磁盘。
+- 附件：发送时上传到 `$GQY_HOME/sessions/<id>/tmp/uploads/`；文本附件抽取最多 2 万字符拼进该条 user 消息，二进制只落盘、不注入模型。图片预览仍用 `blob:`，序列化前剔除。
 
 ## 安全边界
 
@@ -330,6 +331,7 @@ docs/                   架构、页面、数据、工具、测试、路线图
 - `ask_user` 是交互暂停，不是安全确认；不要把它当授权闸门。
 - GitHub token 只存服务端 `$GQY_HOME/github_token.json`（0600），`/api/github/me` 不返回 token。
 - `/v1/*` 网关端点没有鉴权，默认只监听本机；公网必须加反代鉴权。
+- 附件上传单个上限 10 MB，文件名白名单化，写入 0600；文本按 UTF-8 校验后最多注入 2 万字符，二进制不执行、不解析。
 - 工具日志写入前对 `key` / `token` / `secret` / `authorization` / `password` 类参数脱敏。
 - 会话目录 0700、文件 0600，写入走临时文件 + rename；越界路径与非法会话 id 直接拒绝。
 
