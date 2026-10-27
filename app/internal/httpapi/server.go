@@ -2,6 +2,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,10 +17,12 @@ import (
 	"strings"
 	"time"
 
+	"gqy/internal/agent"
 	"gqy/internal/catalog"
 	"gqy/internal/config"
 	"gqy/internal/provider"
 	"gqy/internal/session"
+	"gqy/internal/tool"
 )
 
 const apiVersion = 1
@@ -47,24 +50,33 @@ type Server struct {
 	Catalog  *catalog.Catalog
 	Session  *session.Store
 	Upstream *provider.Upstream
+	Agent    *agent.Loop
 }
 
 func New(root string, cfg config.Config, client *http.Client) *Server {
-	return &Server{
-		Root:    root,
-		Cfg:     cfg,
+	upstream := &provider.Upstream{
+		APIBase: cfg.APIBase,
+		APIKey:  cfg.APIKey,
+		APIUA:   cfg.APIUA,
+		Model:   cfg.Model,
+		Wire:    cfg.Wire,
+		Mock:    cfg.Mock,
 		Client:  client,
-		Catalog: catalog.New(client),
-		Session: session.New(cfg.Home),
-		Upstream: &provider.Upstream{
-			APIBase: cfg.APIBase,
-			APIKey:  cfg.APIKey,
-			APIUA:   cfg.APIUA,
-			Model:   cfg.Model,
-			Wire:    cfg.Wire,
-			Mock:    cfg.Mock,
-			Client:  client,
-		},
+	}
+	registry := tool.NewRegistry()
+	_ = registry.Register(tool.ReadFile{})
+	_ = registry.Register(tool.ListDir{})
+	_ = registry.Register(tool.WriteFile{})
+	_ = registry.Register(tool.RunShell{})
+
+	return &Server{
+		Root:     root,
+		Cfg:      cfg,
+		Client:   client,
+		Catalog:  catalog.New(client),
+		Session:  session.New(cfg.Home),
+		Upstream: upstream,
+		Agent:    &agent.Loop{Upstream: upstream, Registry: registry},
 	}
 }
 
@@ -132,7 +144,117 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
-	s.Upstream.Handle(w, r, provider.Request{})
+	// mock 模式：复用旧 mock 流（Upstream.Handle 自己解析 body，不走 agent loop）
+	if s.Cfg.Mock {
+		s.Upstream.Handle(w, r, provider.Request{})
+		return
+	}
+
+	// 解析请求体
+	var req provider.Request
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10))
+	if err := dec.Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_json", "请求体不是合法 JSON")
+		return
+	}
+	messages := normalizeMessages(req.Messages)
+	if len(messages) == 0 {
+		writeErr(w, http.StatusBadRequest, "messages_required", "messages 不能为空")
+		return
+	}
+	if s.Cfg.Provider() == "none" {
+		writeErr(w, http.StatusServiceUnavailable, "no_provider", "服务端未配置 GQY_API_KEY")
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, "no_flusher", "当前连接不支持流式")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	out := provider.NewWriter(w, flusher)
+
+	// 工具回调 → SSE tool 事件
+	s.Agent.OnTool = func(tr agent.ToolResult) {
+		status := "done"
+		if tr.Error != nil {
+			status = "error"
+		}
+		out.Send(provider.Event{
+			Type: "tool",
+			Tool: &provider.ToolEvent{
+				Name:   tr.Name,
+				Detail: tr.Arguments,
+				Status: status,
+				MS:     tr.Duration.Milliseconds(),
+				Output: tr.Output,
+			},
+		})
+	}
+
+	final, usage, err := s.Agent.Run(ctx, messages, req.Model, req.Effort)
+	if err != nil && ctx.Err() == nil {
+		out.Send(provider.Event{Type: "error", Code: "agent_failed", Message: err.Error()})
+		out.Send(provider.Event{Type: "end"})
+		return
+	}
+
+	// 最终答案：分块吐 text
+	if final.Content != "" {
+		runes := []rune(final.Content)
+		for i := 0; i < len(runes); i += 8 {
+			end := i + 8
+			if end > len(runes) {
+				end = len(runes)
+			}
+			out.Send(provider.Event{Type: "text", Delta: string(runes[i:end])})
+			if ctx.Err() != nil {
+				break
+			}
+		}
+	}
+	out.Send(provider.Event{Type: "done", Usage: usage})
+	out.Send(provider.Event{Type: "end"})
+}
+
+// normalizeMessages 截断并规范化消息（与 provider 内部逻辑一致）。
+func normalizeMessages(in []provider.Message) []provider.Message {
+	const maxMessages = 200
+	const maxChars = 200_000
+	if len(in) == 0 {
+		return nil
+	}
+	if len(in) > maxMessages {
+		in = in[len(in)-maxMessages:]
+	}
+	kept := make([]provider.Message, 0, len(in))
+	for _, m := range in {
+		role := "user"
+		switch m.Role {
+		case "assistant":
+			role = "assistant"
+		case "system":
+			role = "system"
+		}
+		content := m.Content
+		if runes := []rune(content); len(runes) > maxChars {
+			content = string(runes[:maxChars])
+		}
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		kept = append(kept, provider.Message{Role: role, Content: content})
+	}
+	return kept
 }
 
 /* ---------------- 会话 ---------------- */

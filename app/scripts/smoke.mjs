@@ -332,21 +332,28 @@ try {
 
   check('浏览器控制台无报错', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
 
-  /* 真实上游：OpenAI 兼容流 → thinking / text / usage 的正确映射 */
+  /* 真实上游：agent loop —— 第一轮返回工具调用，第二轮返回最终答案 */
   const upstreamPort = PORT + 400;
+  let upstreamCalls = 0;
   const upstream = http.createServer((req, res) => {
     let body = '';
     req.on('data', (d) => { body += d; });
     req.on('end', () => {
       const parsed = JSON.parse(body || '{}');
-      res.writeHead(200, { 'content-type': 'text/event-stream' });
-      const chunk = (delta) => res.write('data: ' + JSON.stringify({ choices: [{ delta }] }) + '\n\n');
-      chunk({ reasoning_content: '先想一下' });
-      chunk({ content: '## 结论\n\n' });
-      chunk({ content: '上游流 · ' + parsed.model + ' · ' + parsed.temperature + '\n' });
-      res.write('data: ' + JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 7, total_tokens: 10 } }) + '\n\n');
-      res.write('data: [DONE]\n\n');
-      res.end();
+      upstreamCalls += 1;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      // 第一次：返回 list_dir 工具调用；第二次：返回最终答案
+      if (upstreamCalls === 1) {
+        res.end(JSON.stringify({
+          choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'list_dir', arguments: '{"path":"/tmp"}' } }] } }],
+          usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 }
+        }));
+      } else {
+        res.end(JSON.stringify({
+          choices: [{ message: { role: 'assistant', content: '已列出 /tmp，模型是 ' + parsed.model } }],
+          usage: { prompt_tokens: 4, completion_tokens: 3, total_tokens: 7 }
+        }));
+      }
     });
   });
   await new Promise((r) => upstream.listen(upstreamPort, '127.0.0.1', r));
@@ -370,15 +377,16 @@ try {
   const sse = await fetch('http://127.0.0.1:' + realPort + '/api/chat', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }], effort: 'High' })
+    body: JSON.stringify({ messages: [{ role: 'user', content: '列一下 /tmp' }], effort: 'High' })
   }).then((res) => res.text());
   const events = sse.split('\n\n').filter((b) => b.startsWith('data:')).map((b) => JSON.parse(b.slice(5)));
-  const thinking = events.filter((e) => e.type === 'thinking').map((e) => e.delta).join('');
   const text = events.filter((e) => e.type === 'text').map((e) => e.delta).join('');
+  const tool = events.find((e) => e.type === 'tool');
   const done = events.find((e) => e.type === 'done');
-  check('OpenAI 兼容上游映射正确（thinking / text / usage）',
-    thinking === '先想一下' && /smoke-model/.test(text) && /0\.6/.test(text) && done && done.usage.total_tokens === 10,
-    JSON.stringify({ thinking, text: text.slice(0, 40), usage: done && done.usage }));
+  check('agent loop：工具调用 + 最终答案 + 累积 usage',
+    upstreamCalls === 2 && tool && tool.tool && tool.tool.name === 'list_dir' &&
+    /smoke-model/.test(text) && done && done.usage.total_tokens === 12,
+    JSON.stringify({ upstreamCalls, text: text.slice(0, 40), tool: tool && tool.tool && tool.tool.name, usage: done && done.usage }));
 } catch (err) {
   failed += 1;
   console.error('\n  FATAL ' + err.message);

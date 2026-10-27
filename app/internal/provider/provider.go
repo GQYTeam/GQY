@@ -20,14 +20,26 @@ import (
 const maxBodyChat = 256 << 10
 
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+}
+
+type ToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
 }
 
 type Request struct {
 	Messages []Message `json:"messages"`
 	Model    string    `json:"model"`
 	Effort   string    `json:"effort"`
+	Tools    []any     `json:"tools,omitempty"`
 }
 
 type Usage struct {
@@ -260,24 +272,81 @@ func (u *Upstream) mockStream(ctx context.Context, out *Writer) error {
 	return nil
 }
 
-func (u *Upstream) chatStream(ctx context.Context, req Request, messages []Message, out *Writer) error {
+// Complete 是非流式请求，供 agent loop 内部使用：拿完整文本 + 工具调用。
+// 返回 assistant 消息（含 tool_calls）与 usage。
+func (u *Upstream) Complete(ctx context.Context, req Request) (Message, *Usage, error) {
 	model := req.Model
 	if model == "" {
 		model = u.Model
 	}
-	temperature := 0.4
-	switch req.Effort {
+	body := map[string]any{
+		"model":       model,
+		"messages":    req.Messages,
+		"stream":      false,
+		"temperature": temperatureFor(req.Effort),
+	}
+	if len(req.Tools) > 0 {
+		body["tools"] = req.Tools
+	}
+
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return Message{}, nil, err
+	}
+	upReq, err := http.NewRequestWithContext(ctx, http.MethodPost, u.APIBase+"/chat/completions", bytes.NewReader(payload))
+	if err != nil {
+		return Message{}, nil, err
+	}
+	upReq.Header.Set("Content-Type", "application/json")
+	upReq.Header.Set("Authorization", "Bearer "+u.APIKey)
+	u.setUserAgent(upReq)
+
+	resp, err := u.Client.Do(upReq)
+	if err != nil {
+		return Message{}, nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return Message{}, nil, &UpstreamError{Status: resp.StatusCode, Code: fmt.Sprintf("upstream_%d", resp.StatusCode), Detail: string(detail)}
+	}
+
+	var full struct {
+		Choices []struct {
+			Message Message `json:"message"`
+		} `json:"choices"`
+		Usage *Usage `json:"usage"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&full); err != nil {
+		return Message{}, nil, err
+	}
+	if len(full.Choices) == 0 {
+		return Message{}, full.Usage, nil
+	}
+	return full.Choices[0].Message, full.Usage, nil
+}
+
+func temperatureFor(effort string) float64 {
+	switch effort {
 	case "High":
-		temperature = 0.6
+		return 0.6
 	case "Low":
-		temperature = 0.2
+		return 0.2
+	}
+	return 0.4
+}
+
+func (u *Upstream) chatStream(ctx context.Context, req Request, messages []Message, out *Writer) error {
+	model := req.Model
+	if model == "" {
+		model = u.Model
 	}
 	payload, err := json.Marshal(map[string]any{
 		"model":          model,
 		"messages":       messages,
 		"stream":         true,
 		"stream_options": map[string]bool{"include_usage": true},
-		"temperature":    temperature,
+		"temperature":    temperatureFor(req.Effort),
 	})
 	if err != nil {
 		return err
