@@ -1,9 +1,11 @@
 package httpapi
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"gqy/internal/config"
@@ -64,5 +66,41 @@ func TestSaveUploadUniqueAndPrivate(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("perm=%v", info.Mode().Perm())
+	}
+}
+
+func TestSaveUploadConcurrentSameName(t *testing.T) {
+	home := t.TempDir()
+	s := &Server{Cfg: config.Config{Home: home}}
+	const n = 16
+
+	rels := make([]string, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			rels[i], _, errs[i] = s.saveUpload("s1", "a.txt", []byte(fmt.Sprintf("content-%d", i)))
+		}(i)
+	}
+	wg.Wait()
+
+	seen := map[string]bool{}
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("upload %d: %v", i, err)
+		}
+		if rels[i] == "" || seen[rels[i]] {
+			t.Fatalf("上传路径为空或重复: %q", rels[i])
+		}
+		seen[rels[i]] = true
+		data, err := os.ReadFile(filepath.Join(home, filepath.FromSlash(rels[i])))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != fmt.Sprintf("content-%d", i) {
+			t.Fatalf("%s 内容被覆盖: %q", rels[i], data)
+		}
 	}
 }

@@ -3,8 +3,6 @@
 package httpapi
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
@@ -12,7 +10,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"gqy/internal/session"
@@ -75,18 +72,31 @@ func (s *Server) saveUpload(sessionID, name string, data []byte) (string, int, e
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", 0, err
 	}
-	name = uniqueUploadName(dir, name)
-	path := filepath.Join(dir, name)
-	tmp := path + "." + randomSuffix() + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return "", 0, err
+	// 用 O_EXCL 逐个抢占文件名：并发上传同名文件不会互相覆盖，也不存在
+	// “先 Stat 再 rename”的竞态。
+	for i := 0; i < 1000; i++ {
+		name := numberedUploadName(name, i)
+		path := filepath.Join(dir, name)
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return "", 0, err
+		}
+		_, werr := f.Write(data)
+		cerr := f.Close()
+		if werr != nil || cerr != nil {
+			_ = os.Remove(path) // 不留半截文件
+			if werr != nil {
+				return "", 0, werr
+			}
+			return "", 0, cerr
+		}
+		rel := filepath.ToSlash(filepath.Join("sessions", sessionID, "tmp", "uploads", name))
+		return rel, len(data), nil
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return "", 0, err
-	}
-	rel := filepath.ToSlash(filepath.Join("sessions", sessionID, "tmp", "uploads", name))
-	return rel, len(data), nil
+	return "", 0, errors.New("同名文件过多，请重命名后重试")
 }
 
 func safeUploadName(raw string) string {
@@ -109,19 +119,13 @@ func safeUploadName(raw string) string {
 	return out
 }
 
-func uniqueUploadName(dir, name string) string {
-	if _, err := os.Stat(filepath.Join(dir, name)); errors.Is(err, os.ErrNotExist) {
+// numberedUploadName 返回第 i 个候选名：a.txt → a-1.txt、a-2.txt…
+func numberedUploadName(name string, i int) string {
+	if i == 0 {
 		return name
 	}
 	ext := filepath.Ext(name)
-	base := strings.TrimSuffix(name, ext)
-	for i := 1; i < 1000; i++ {
-		candidate := base + "-" + strconv.Itoa(i) + ext
-		if _, err := os.Stat(filepath.Join(dir, candidate)); errors.Is(err, os.ErrNotExist) {
-			return candidate
-		}
-	}
-	return base + "-" + strconv.FormatInt(time.Now().UnixNano()%1000000, 10) + ext
+	return strings.TrimSuffix(name, ext) + "-" + strconv.Itoa(i) + ext
 }
 
 func extractUploadText(name string, data []byte) (string, bool) {
@@ -134,10 +138,4 @@ func extractUploadText(name string, data []byte) (string, bool) {
 		return string(runes[:maxTextRunes]), true
 	}
 	return string(runes), false
-}
-
-func randomSuffix() string {
-	var b [4]byte
-	_, _ = rand.Read(b[:])
-	return hex.EncodeToString(b[:])
 }
