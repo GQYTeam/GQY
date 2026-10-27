@@ -4,10 +4,10 @@
   "private": true,
   "description": "顾清影 · AI 对话工作台（前端零构建，Go 标准库后端）",
   "scripts": {
-    "start": "go run server.go",
-    "dev": "go run server.go",
-    "build": "go build -trimpath -ldflags \"-s -w\" -o bin/gqy-server server.go",
-    "check": "node --check js/core.js && node --check js/api.js && node --check js/markdown.js && node --check js/clawd.js && node --check app.js && go vet server.go",
+    "start": "go run ./cmd/gqy-server",
+    "dev": "go run ./cmd/gqy-server",
+    "build": "go build -trimpath -ldflags \"-s -w\" -o bin/gqy-server ./cmd/gqy-server",
+    "check": "node --check js/core.js && node --check js/api.js && node --check js/markdown.js && node --check js/clawd.js && node --check app.js && go vet ./...",
     "smoke": "node scripts/smoke.mjs",
     "files": "find . -maxdepth 2 -type f -not -path './.git/*' -not -name '.DS_Store' | sort"
   },

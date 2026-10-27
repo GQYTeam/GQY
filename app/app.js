@@ -153,6 +153,9 @@
   let modelCatalog = [];
   let modelCatalogLoading = false;
 
+  /* 用量：服务端聚合的真实 token / 会话 / 消息数据 */
+  let usageData = null;
+
   const dropBlobUrls = (key, value) =>
     (key === 'url' && typeof value === 'string' && value.indexOf('blob:') === 0) ? undefined : value;
 
@@ -209,45 +212,32 @@
 
   /* ---------------- markdown ---------------- */
 
-  const USAGE_TOTAL = 1000000;
-  const ctxUsage = {
-    system: 24400,
-    tools: 628,
-    history: 366000,
-    modelMs: 17 * 60000 + 43000,
-    toolMs: 2 * 60000 + 42000,
-    firstMs: 1700,
-    firstCount: 1,
-    outTokens: 263015,
-    outMs: 900000,
-    uncached: 150174,
-    cacheRead: 22071168,
-    cacheHit: 99
-  };
   let contextNode = null;
 
-
-
+  // 当前选中模型在 models.dev 里的元数据（context 窗口、输入模态等）
+  function currentModelMeta() {
+    if (!modelCatalog.length) return null;
+    return modelCatalog.find((m) => m.id === activeModel()) || null;
+  }
 
   function contextSnapshot() {
-    const conv = activeConv();
-    let chars = 0;
-    if (conv) {
-      conv.messages.forEach((m) => {
-        chars += String(m.text || '').length;
-        chars += String(m.thinking || '').length;
-        (m.tools || []).forEach((t) => { chars += String(t.detail || '').length + String(t.output || '').length; });
-      });
+    const meta = currentModelMeta();
+    // 上下文窗口：优先用 models.dev 的 limit.context，否则用服务端默认 128k
+    const total = meta && meta.context ? meta.context : 128000;
+    // 已用：真实 token 用量（服务端聚合的输入 token），无数据时退回估算当前会话
+    let used = 0;
+    if (usageData && usageData.promptTokens != null) {
+      used = usageData.promptTokens;
+    } else {
+      const conv = activeConv();
+      if (conv) used = estimateTokens(conv.messages.map((m) => m.text || '').join(''));
     }
-    const messages = ctxUsage.history + Math.round(chars * 0.62);
-    const used = ctxUsage.system + ctxUsage.tools + messages;
+    const pct = Math.max(0, Math.min(100, Math.round((used / total) * 100)));
     return {
       used: used,
-      total: USAGE_TOTAL,
-      pct: Math.max(1, Math.min(100, Math.round((used / USAGE_TOTAL) * 100))),
-      system: ctxUsage.system,
-      tools: ctxUsage.tools,
-      messages: messages
+      total: total,
+      pct: pct,
+      model: meta
     };
   }
 
@@ -264,36 +254,30 @@
     const snap = contextSnapshot();
     el.usagePct.textContent = snap.pct + '%';
     el.usageWedge.setAttribute('d', contextPie(snap.pct));
-    el.usageBtn.title = '上下文已用 ' + snap.pct + '% · ' + fmtTok(snap.used) + ' / 1M';
+    el.usageBtn.title = '上下文已用 ' + snap.pct + '% · ' + fmtTok(snap.used) + ' / ' + fmtTok(snap.total);
   }
 
   function contextPanelHTML() {
     const snap = contextSnapshot();
-    const seg = [
-      { label: '系统提示词', value: snap.system, color: '#b9b9b3' },
-      { label: '工具定义', value: snap.tools, color: '#dfb28c' },
-      { label: '对话消息', value: snap.messages, color: '#7e9a83' }
-    ];
-    const sum = seg.reduce((a, b) => a + b.value, 0);
-    const tps = Math.round(ctxUsage.outTokens / Math.max(1, ctxUsage.outMs / 1000));
-    const firstAvg = ctxUsage.firstMs / Math.max(1, ctxUsage.firstCount);
+    const meta = snap.model;
+    const modes = meta && meta.inputModes && meta.inputModes.length ? meta.inputModes.join(' · ') : '未知';
+    const cap = meta
+      ? (meta.reasoning ? '推理' : '非推理') + ' · ' + (meta.toolCall ? '工具调用' : '无工具') + ' · ' + (meta.attachment ? '支持附件' : '仅文本')
+      : '（models.dev 无该模型元数据）';
     return '<div class="usage-head"><span>上下文已用</span><b>' + snap.pct + '%</b>' +
-      '<span>' + fmtTok(snap.used) + ' / ' + (snap.total / 1000000) + 'M</span></div>' +
-      '<div class="ctx-bar">' + seg.map((x) => '<i style="width:' + (x.value / sum * 100).toFixed(2) + '%;background:' + x.color + '"></i>').join('') + '</div>' +
-      '<div class="usage-legend">' + seg.map((x) => '<div class="usage-row"><i style="background:' + x.color + '"></i>' + x.label + '<b>' + fmtTok(x.value) + '</b></div>').join('') + '</div>' +
-      '<div class="usage-sec"><h4>会话统计</h4><div class="usage-grid">' +
-      '<div><small>模型用时</small><b>' + fmtDur(ctxUsage.modelMs) + '</b></div>' +
-      '<div><small>工具调用用时</small><b>' + fmtDur(ctxUsage.toolMs) + '</b></div>' +
-      '<div><small>首 token 平均</small><b>' + (firstAvg / 1000).toFixed(1) + ' 秒</b></div>' +
-      '<div><small>输出速度</small><b>' + tps + ' tok/s</b></div>' +
+      '<span>' + fmtTok(snap.used) + ' / ' + fmtTok(snap.total) + '</span></div>' +
+      '<div class="ctx-bar"><i style="width:' + snap.pct + '%;background:#7e9a83"></i></div>' +
+      '<div class="usage-sec"><h4>当前模型</h4><div class="usage-grid">' +
+      '<div><small>上下文窗口</small><b>' + fmtTok(snap.total) + ' tok</b></div>' +
+      '<div><small>输入模态</small><b>' + esc(modes) + '</b></div>' +
+      '<div><small>能力</small><b>' + esc(cap) + '</b></div>' +
       '</div></div>' +
       '<div class="usage-sec"><h4>Token 用量</h4><div class="usage-grid">' +
-      '<div><small>缓存命中</small><b>' + ctxUsage.cacheHit + '%</b></div>' +
-      '<div><small>未缓存输入</small><b>' + ctxUsage.uncached.toLocaleString('en-US') + ' tok</b></div>' +
-      '<div><small>缓存读取</small><b>' + ctxUsage.cacheRead.toLocaleString('en-US') + ' tok</b></div>' +
-      '<div><small>输出</small><b>' + ctxUsage.outTokens.toLocaleString('en-US') + ' tok</b></div>' +
+      '<div><small>输入</small><b>' + fmtTok(usageData && usageData.promptTokens || 0) + ' tok</b></div>' +
+      '<div><small>输出</small><b>' + fmtTok(usageData && usageData.completionTokens || 0) + ' tok</b></div>' +
+      '<div><small>合计</small><b>' + fmtTok(usageData && usageData.totalTokens || 0) + ' tok</b></div>' +
       '</div></div>' +
-      '<p class="usage-foot">本机模拟数据 · 按字符估算 token，不联网</p>';
+      '<p class="usage-foot">上下文窗口来自 models.dev；token 用量来自服务端聚合</p>';
   }
 
   function closeContextPanel() {
@@ -853,17 +837,6 @@
       }
       found.conv.updatedAt = now();
     }
-    const dur = now() - s.started;
-    ctxUsage.modelMs += Math.max(0, dur);
-    ctxUsage.toolMs += s.tools.reduce((sum, t) => sum + (t.ms || 0), 0);
-    const produced = estimateTokens(s.full.slice(0, s.shown));
-    ctxUsage.outTokens += produced;
-    if (s.firstAt) {
-      ctxUsage.firstMs += s.firstAt - s.started;
-      ctxUsage.firstCount += 1;
-      ctxUsage.outMs += Math.max(1, dur - (s.firstAt - s.started));
-    }
-    ctxUsage.uncached += Math.round(estimateTokens(activeConv() ? activeConv().messages.map((m) => m.text || '').join('') : '') * 0.12);
     updateContextChip();
     if (s.error) {
       G.clawd.idle();
@@ -2037,17 +2010,15 @@
     }
   }
 
-  function refreshUsage() {
+  async function refreshUsage() {
     if (!el.usageBadge || !el.usageStorageText) return;
+    // 本机 localStorage 占用（真实、本地）
     const u = usageSnapshot();
     const pct = Math.min(100, u.bytes / u.budget * 100);
     const pctText = (pct >= 10 ? Math.round(pct) : pct.toFixed(1)) + '%';
     el.usageStorageText.textContent = formatBytes(u.bytes);
     el.usageStoragePercent.textContent = pctText + ' · 5 MB';
     el.usageWorkspaces.textContent = String(state.workspaces.length);
-    el.usageConvs.textContent = String(u.convs);
-    el.usageMessages.textContent = String(u.messages);
-    el.usageAssets.textContent = String(u.assets);
     el.usageBadge.textContent = formatBytes(u.bytes);
     if (el.miniUsageText) el.miniUsageText.textContent = formatBytes(u.bytes);
     if (el.miniUsageBar) el.miniUsageBar.style.width = Math.max(2, pct) + '%';
@@ -2055,19 +2026,36 @@
       const circumference = 301.59;
       el.usageRing.style.strokeDashoffset = String(circumference - circumference * pct / 100);
     }
+
+    // 服务端真实会话统计（会话/消息/产物/token/7天消息量）
+    if (G.api && G.api.usage && G.api.available()) {
+      try {
+        usageData = await G.api.usage();
+      } catch (err) {
+        usageData = null;
+      }
+    }
+    const s = usageData || {};
+    el.usageConvs.textContent = String(s.sessions != null ? s.sessions : u.convs);
+    el.usageMessages.textContent = String(s.messages != null ? s.messages : u.messages);
+    el.usageAssets.textContent = String(s.artifacts != null ? s.artifacts : u.assets);
+
     const weekday = ['日', '一', '二', '三', '四', '五', '六'];
-    const maxDay = Math.max.apply(null, u.days.concat([1]));
+    const days = Array.isArray(s.days) ? s.days : u.days;
+    const maxDay = Math.max.apply(null, days.concat([1]));
     const bars = [];
     const axis = [];
-    u.days.forEach((count, i) => {
-      const d = new Date(u.base - (6 - i) * 86400000);
+    days.forEach((count, i) => {
+      const d = new Date(Date.now() - (6 - i) * 86400000);
       const height = count ? Math.max(8, Math.round(count / maxDay * 100)) : 4;
       bars.push('<div class="usage-bar' + (i === 6 ? ' is-today' : '') + (count ? '' : ' is-empty') + '" title="' + (d.getMonth() + 1) + '/' + d.getDate() + ' · ' + count + ' 条"><i style="height:' + height + '%"></i></div>');
       axis.push('<span>' + (i === 6 ? '今天' : '周' + weekday[d.getDay()]) + '</span>');
     });
     el.usageBars.innerHTML = bars.join('');
     el.usageAxis.innerHTML = axis.join('');
-    el.usageWeekTotal.textContent = u.days.reduce((a, b) => a + b, 0) + ' 条';
+    el.usageWeekTotal.textContent = days.reduce((a, b) => a + b, 0) + ' 条';
+
+    updateContextChip();
   }
 
   function openSettingsTab(name, focusTab) {

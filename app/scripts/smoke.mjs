@@ -73,7 +73,7 @@ async function buildServer() {
     process.exit(0);
   }
   const out = join(PROFILE, 'gqy-server');
-  await run('go', ['build', '-o', out, 'server.go']);
+  await run('go', ['build', '-o', out, './cmd/gqy-server']);
   return out;
 }
 
@@ -96,7 +96,7 @@ async function cleanup() {
 
 try {
   serverBin = await buildServer();
-  console.log('  编译 server.go: ok');
+  console.log('  编译 cmd/gqy-server: ok');
 
   server = spawn(serverBin, [], {
     cwd: ROOT,
@@ -133,6 +133,13 @@ try {
     modelsRes.models.every((m) => m && typeof m.id === 'string' && typeof m.name === 'string') &&
     modelsRes.models.some((m) => /deepseek/i.test(m.id + m.provider)),
     JSON.stringify({ count: modelsRes.count, sample: modelsRes.models[0] }));
+
+  /* 用量：/api/usage 返回真实聚合结构 */
+  const usageRes = await fetch(BASE + '/api/usage').then((r) => r.json());
+  check('用量接口返回聚合结构',
+    usageRes && usageRes.usage && typeof usageRes.usage.sessions === 'number' &&
+    Array.isArray(usageRes.usage.days) && usageRes.usage.days.length === 7,
+    JSON.stringify(usageRes));
 
   chrome = spawn(chromePath, [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',

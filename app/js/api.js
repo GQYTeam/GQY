@@ -107,6 +107,17 @@
     return data.models || [];
   }
 
+  /* 用量：服务端聚合的真实 token 用量与消息量 */
+  async function usage() {
+    const res = await fetch('/api/usage', {
+      headers: { accept: 'application/json' },
+      cache: 'no-store'
+    });
+    if (!res.ok) throw new Error('用量获取失败');
+    const data = await res.json();
+    return data.usage || {};
+  }
+
   /* 会话镜像：失败只记一次日志，不影响本地使用 */
   let syncTimer = 0;
   let syncChain = Promise.resolve();
@@ -128,5 +139,5 @@
     }, delay == null ? 1200 : delay);
   }
 
-  G.api = { detect, available, info, chat, models, syncSession };
+  G.api = { detect, available, info, chat, models, usage, syncSession };
 })();

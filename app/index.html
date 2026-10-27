@@ -409,7 +409,7 @@
         <section class="settings-panel" id="settings-panel-usage" role="tabpanel" aria-labelledby="settings-tab-usage" data-settings-panel="usage" hidden>
           <header class="panel-head">
             <h2>用量</h2>
-            <p>本机保存的数据规模与最近活跃度，全部离线统计。</p>
+            <p>本机 localStorage 占用，以及服务端聚合的会话、消息与真实 Token 用量。</p>
           </header>
           <div class="usage-top">
             <div class="usage-ring-card">
@@ -435,7 +435,7 @@
             <div class="usage-bars" id="usageBars" role="img" aria-label="最近 7 天消息量柱状图"></div>
             <div class="usage-axis" id="usageAxis"></div>
           </div>
-          <p class="usage-note">消息量按本机数据统计；Token 用量由真实请求回传。</p>
+          <p class="usage-note">会话、消息、产物与 Token 用量来自服务端聚合；localStorage 占用为本机实时值。</p>
         </section>
 
         <section class="settings-panel" id="settings-panel-about" role="tabpanel" aria-labelledby="settings-tab-about" data-settings-panel="about" hidden>

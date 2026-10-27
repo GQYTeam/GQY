@@ -8,10 +8,11 @@ index.html
   ├─ js/core.js                  纯工具，无状态
   ├─ js/markdown.js              纯函数：文本 → HTML（含 URL 协议白名单）
   ├─ js/clawd.js                 自包含：精灵播放 + 状态机
-  ├─ js/api.js                   后端适配：探测 / 模型目录 / SSE 聊天 / 会话镜像
+  ├─ js/api.js                   后端适配：探测 / 模型目录 / 用量 / SSE 聊天 / 会话镜像
   └─ app.js                      控制器（唯一持有状态的地方）
 
-server.go                        服务端（Go 标准库）：静态托管 + /api/models + /api/chat + /api/sessions
+cmd/gqy-server/                  服务端入口
+internal/                        config / catalog / provider / session / httpapi
 ```
 
 `app.js` 是一个 IIFE，内部持有 `state`、`el`（DOM 引用表）、`stream`（当前流式任务）等。
@@ -50,10 +51,20 @@ handleSend()
 
 ## 后端
 
-`server.go` 只用 Go 标准库（单文件，无 `go.mod`、无第三方模块）：
+Go module（`gqy`，标准库，零第三方依赖），按 `cmd` / `internal` 分层：
 
-- **静态托管**：扩展名白名单 + `path.Clean` 规范化，`server.go`、`package.json`、`go.mod`、`scripts/`、`bin/`、点文件不可访问；`http.ServeContent` 处理 ETag / If-None-Match / Range。
-- **`GET /api/models`**：`modelCatalog` 向 models.dev 拉取 `api.json`，`isChatModel` 过滤掉 embedding / speech / 图像 / 视频等专用类型，返回精简条目（`key/id/name/provider/api/reasoning/toolCall/context/output`）；内存缓存 6 小时，刷新失败时用旧缓存兜底。
+- `cmd/gqy-server`：入口，装配 + 信号处理 + 优雅关闭。
+- `internal/config`：环境变量解析，密钥只进服务端。
+- `internal/catalog`：models.dev 拉取、缓存、过滤、元数据。
+- `internal/provider`：SSE 转发。
+- `internal/session`：会话落盘 + 用量聚合。
+- `internal/httpapi`：路由、中间件、JSON、静态白名单。
+
+接口：
+
+- **静态托管**：扩展名白名单 + `path.Clean` 规范化，`*.go`、`package.json`、`go.mod`、`scripts/`、`bin/`、`cmd/`、`internal/`、点文件不可访问；`http.ServeContent` 处理 ETag / If-None-Match / Range。
+- **`GET /api/models`**：`catalog.Catalog` 向 models.dev 拉取 `api.json`，`isChatModel` 过滤掉 embedding / speech / 图像 / 视频等专用类型，返回精简条目（含 `context` / `inputModes` / `outputModes` / `cost` / `reasoning` / `toolCall` / `attachment`）；内存缓存 6 小时，刷新失败时用旧缓存兜底。
+- **`GET /api/usage`**：`session.Store.Stats()` 聚合落盘会话里的真实 token 用量、会话/消息/产物数、近 7 天消息量。
 - **`POST /api/chat`**：对内只吐 `thinking` / `text` / `tool` / `done` / `error` 五类事件，对外支持两种上游协议：
   - `wire=chat`（默认）：`/chat/completions`，`delta.content` → `text`、`delta.reasoning_content` → `thinking`（DeepSeek 等）
   - `wire=responses`：`/responses`，`response.output_text.delta` → `text`、`response.reasoning_summary_text.delta` → `thinking`（GPT-5 系列、部分中转）

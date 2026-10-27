@@ -1,20 +1,35 @@
 # 顾清影 · AI 对话工作台
 
-前端零构建、零依赖；后端是单个 Go 文件（标准库，无第三方依赖），负责模型目录、流式转发与会话落盘。
+前端零构建、零依赖；后端是 Go module（标准库，零第三方依赖），按 `cmd` / `internal` 分包，负责模型目录、流式转发、会话落盘与用量聚合。
 前端通过 `npm start` 起的 Go 后端工作：模型列表来自 models.dev，聊天请求经 SSE 转发到 OpenAI 兼容网关。
 
-需要 Go >= 1.22（只用标准库，没有 `go.mod`、没有外部模块）。
+需要 Go >= 1.22（只用标准库，`go.mod` 无第三方 require）。
 
 ## 命令
 
 ```bash
-npm start        # http://127.0.0.1:5173 ，前端 + /api/*（go run server.go）
+npm start        # http://127.0.0.1:5173 ，前端 + /api/*（go run ./cmd/gqy-server）
 npm run build    # 产出 bin/gqy-server（-trimpath -ldflags "-s -w"），部署用这个
-npm run check    # JS 语法检查 + go vet
+npm run check    # JS 语法检查 + go vet ./...
 npm run smoke    # 编译 + 无头 Chrome 跑端到端检查
 ```
 
 `dev` 与 `start` 相同：Go 没有内置热重载，改后端后手动重启（前端改动刷新浏览器即可）。
+
+## 目录结构
+
+```
+cmd/gqy-server/    入口：装配 + 优雅关闭
+internal/
+  config/          环境变量解析（.env / 密钥）
+  catalog/         models.dev 拉取、缓存、过滤、元数据
+  provider/        SSE 转发：chat / responses 协议
+  session/         会话落盘 + 用量聚合
+  httpapi/         路由、中间件、JSON、静态白名单
+index.html         应用外壳
+app.js             前端控制器
+js/                前端模块（core/markdown/clawd/api）
+```
 
 ## 生产部署
 
@@ -82,7 +97,8 @@ npm start                 # server.go 自动读取 .env，真实环境变量优�
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/api/health` | `{ ok, provider: 'openai-compatible' \| 'mock' \| 'none', model }` |
-| `GET` | `/api/models` | models.dev 精简聊天模型列表（服务端缓存 6 小时） |
+| `GET` | `/api/models` | models.dev 精简聊天模型列表（服务端缓存 6 小时），含 context / 模态 / 成本 |
+| `GET` | `/api/usage` | 服务端聚合的真实用量：会话数、消息数、产物数、token、近 7 天消息量 |
 | `POST` | `/api/chat` | 请求 `{ messages, model, effort }`，返回 SSE：`thinking` / `tool` / `text` / `done` / `error` / `end` |
 | `GET` | `/api/sessions` | 会话 manifest 列表 |
 | `GET` | `/api/sessions/:id` | 读回 `messages.jsonl` |
@@ -107,10 +123,11 @@ $GQY_HOME/sessions/<session_id>/
 ```
 index.html              唯一入口：应用外壳 + 各页面 <section class="view">
 app.js                  控制器：状态、视图、流式管线、事件接线
-server.go               服务端（Go 标准库）：静态托管 + 模型目录 + SSE 转发 + 会话落盘
+cmd/gqy-server/         服务端入口
+internal/               config / catalog / provider / session / httpapi
 js/
   core.js               工具与常量（esc / uid / 时间 / 格式化 / token 估算）
-  api.js                后端适配层（探测 / 模型目录 / 流式聊天 / 会话镜像）
+  api.js                后端适配层（探测 / 模型目录 / 用量 / 流式聊天 / 会话镜像）
   markdown.js           Markdown、代码高亮、链接卡片、URL 协议白名单
   clawd.js              吉祥物精灵播放 + 活动状态机
 scripts/smoke.mjs       端到端冒烟（CDP，无依赖）
@@ -134,6 +151,6 @@ docs/                   架构、页面、数据、测试、路线图
 - 模型密钥只存在于服务端环境变量；前端只会看到模型名。
 - 模型目录由服务端向 models.dev 拉取并缓存，前端只消费精简结果，不直接访问 models.dev。
 - Markdown 只放行 `http(s)` / `mailto` / 相对路径，`javascript:` / `data:` 降级成纯文本。
-- 静态托管走扩展名白名单，`server.go`、`package.json`、`go.mod`、`scripts/`、`bin/`、点文件都不可访问。
+- 静态托管走扩展名白名单，`*.go`、`package.json`、`go.mod`、`scripts/`、`bin/`、点文件都不可访问。
 - 工具日志写入前对 `key` / `token` / `secret` / `authorization` 类参数脱敏。
 - 会话目录 0700、文件 0600，写入走临时文件 + rename；越界路径与非法会话 id 直接拒绝。
