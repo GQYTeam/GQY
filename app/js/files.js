@@ -6,6 +6,262 @@
   const { uid, now, esc, formatBytes, highlightHTML } = G;
   const el = app.el;
 
+  /* 灯箱预览所需的 DOM 不在 store 的 el 表里，就地补齐（不依赖其它模块）。 */
+  el.lbViewSeg = el.lbViewSeg || document.getElementById('lbViewSeg');
+  el.lbPreview = el.lbPreview || document.getElementById('lbPreview');
+  el.lbFrame = el.lbFrame || document.getElementById('lbFrame');
+  el.lbMd = el.lbMd || document.getElementById('lbMd');
+  el.lbNotice = el.lbNotice || document.getElementById('lbNotice');
+  el.lbBarTag = el.lbBarTag || document.getElementById('lbBarTag');
+
+  /* ---------------- 产物预览 ---------------- */
+
+  const PREVIEW_MAX_BYTES = 2 * 1024 * 1024;
+  const PREVIEW_KINDS = {
+    md: 'markdown', markdown: 'markdown',
+    html: 'html', htm: 'html',
+    svg: 'svg'
+  };
+  const HTML_CSP = "default-src 'none'; img-src data: https:; media-src data: https:; style-src 'unsafe-inline'; script-src 'unsafe-inline'";
+  const SVG_CSP = "default-src 'none'; img-src data: https:; media-src data: https:; style-src 'unsafe-inline'; script-src 'none'";
+
+  function contentBytes(text) {
+    try { return new Blob([text]).size; } catch (err) { return String(text).length * 3; }
+  }
+
+  /* 非 UTF-8 / 二进制：NUL、过多控制字符或替换符都视为不可预览。 */
+  function looksBinary(text) {
+    const sample = String(text).slice(0, 8192);
+    if (!sample) return false;
+    if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(sample)) return true;
+    const bad = (sample.match(/�/g) || []).length;
+    return sample.length > 32 && bad / sample.length > 0.02;
+  }
+
+  function previewMeta(file) {
+    const content = String(file && file.content != null ? file.content : '');
+    const lang = String((file && file.lang) || '').toLowerCase().replace(/^\./, '');
+    const ext = String((file && file.name) || '').split('.').pop().toLowerCase();
+    let kind = '';
+    [lang, ext].some((key) => {
+      if (PREVIEW_KINDS[key]) { kind = PREVIEW_KINDS[key]; return true; }
+      return false;
+    });
+    if (!kind) return { kind: '', blocked: false, reason: '', label: '仅源码' };
+    if (!content) {
+      return { kind, blocked: true, reason: '内容为空，没有可预览的内容。', label: '空文件 · 仅源码' };
+    }
+    if (looksBinary(content)) {
+      return { kind, blocked: true, reason: '二进制或非 UTF-8 内容，仅提供源码。', label: '二进制 · 仅源码' };
+    }
+    const size = contentBytes(content);
+    if (size > PREVIEW_MAX_BYTES) {
+      return {
+        kind, blocked: true, size,
+        reason: '内容超过 2 MB（' + formatBytes(size) + '），已禁用预览。',
+        label: '超过 2 MB · 仅源码'
+      };
+    }
+    return { kind, blocked: false, reason: '', label: '可预览' };
+  }
+
+  /* 在文档最前面注入 CSP；已有 <head> / <html> 时插到它们后面。 */
+  function htmlSrcdoc(content) {
+    const meta = '<meta http-equiv="Content-Security-Policy" content="' + HTML_CSP + '">';
+    let m = /<head(\s[^>]*)?>/i.exec(content);
+    if (m) {
+      const at = m.index + m[0].length;
+      return content.slice(0, at) + meta + content.slice(at);
+    }
+    m = /<html(\s[^>]*)?>/i.exec(content);
+    if (m) {
+      const at = m.index + m[0].length;
+      return content.slice(0, at) + '<head><meta charset="utf-8">' + meta + '</head>' + content.slice(at);
+    }
+    m = /^\s*<!doctype[^>]*>/i.exec(content);
+    if (m) {
+      const at = m.index + m[0].length;
+      return content.slice(0, at) + '<head><meta charset="utf-8">' + meta + '</head>' + content.slice(at);
+    }
+    return '<!doctype html><html><head><meta charset="utf-8">' + meta + '</head><body>' + content + '</body></html>';
+  }
+
+  function svgSrcdoc(content) {
+    return '<!doctype html><html><head><meta charset="utf-8">' +
+      '<meta http-equiv="Content-Security-Policy" content="' + SVG_CSP + '">' +
+      '<style>html,body{margin:0;height:100%;background:#fff}body{display:grid;place-items:center;' +
+      'padding:16px;box-sizing:border-box;overflow:auto}svg{max-width:100%;max-height:100%;height:auto;width:auto}</style>' +
+      '</head><body>' + content + '</body></html>';
+  }
+
+  function saveLbScroll() {
+    if (!app.lbFile || !app.lbView) return;
+    if (app.lbView === 'source') {
+      app.lbScroll.source = el.lbCode.scrollTop;
+      app.lbScroll.sourceX = el.lbCode.scrollLeft;
+    } else {
+      app.lbScroll.preview = el.lbPreview ? el.lbPreview.scrollTop : 0;
+    }
+  }
+
+  function restoreLbScroll() {
+    if (app.lbView === 'source') {
+      el.lbCode.scrollTop = app.lbScroll.source || 0;
+      el.lbCode.scrollLeft = app.lbScroll.sourceX || 0;
+    } else if (el.lbPreview) {
+      el.lbPreview.scrollTop = app.lbScroll.preview || 0;
+    }
+  }
+
+  function showPreviewError(err) {
+    if (el.lbFrame) el.lbFrame.hidden = true;
+    if (el.lbMd) { el.lbMd.hidden = true; el.lbMd.innerHTML = ''; }
+    if (el.lbNotice) {
+      el.lbNotice.hidden = false;
+      el.lbNotice.classList.add('is-error');
+      el.lbNotice.textContent = '预览渲染失败：' + ((err && err.message) || '未知错误') + '。可切换到源码查看。';
+    }
+  }
+
+  function renderLightboxPreview() {
+    const file = app.lbFile;
+    const meta = app.lbPreviewMeta;
+    if (!file || !meta) return;
+    if (el.lbNotice) {
+      el.lbNotice.hidden = true;
+      el.lbNotice.textContent = '';
+      el.lbNotice.classList.remove('is-error');
+    }
+    if (el.lbFrame) el.lbFrame.hidden = true;
+    if (el.lbMd) { el.lbMd.hidden = true; el.lbMd.innerHTML = ''; }
+    if (meta.blocked) {
+      if (el.lbNotice) {
+        el.lbNotice.hidden = false;
+        el.lbNotice.textContent = meta.reason || '当前内容无法预览。';
+      }
+      return;
+    }
+    if (meta.kind === 'markdown') {
+      try {
+        const html = G.renderMarkdown(String(file.content || ''));
+        el.lbMd.innerHTML = html || '<p class="lb-empty">没有可显示的内容。</p>';
+        el.lbMd.hidden = false;
+      } catch (err) {
+        showPreviewError(err);
+      }
+      return;
+    }
+    if (meta.kind === 'html') {
+      try {
+        el.lbFrame.setAttribute('sandbox', 'allow-scripts');
+        el.lbFrame.title = (file.name || 'HTML') + ' 预览';
+        el.lbFrame.srcdoc = htmlSrcdoc(String(file.content || ''));
+        el.lbFrame.hidden = false;
+      } catch (err) {
+        showPreviewError(err);
+      }
+      return;
+    }
+    if (meta.kind === 'svg') {
+      try {
+        const body = String(file.content || '');
+        if (!/<svg[\s/>]/i.test(body)) throw new Error('没有找到 <svg> 根元素');
+        el.lbFrame.setAttribute('sandbox', '');
+        el.lbFrame.title = (file.name || 'SVG') + ' 预览';
+        el.lbFrame.srcdoc = svgSrcdoc(body);
+        el.lbFrame.hidden = false;
+      } catch (err) {
+        showPreviewError(err);
+      }
+    }
+  }
+
+  function updateLightboxSeg() {
+    if (el.lbViewSeg) {
+      const meta = app.lbPreviewMeta;
+      el.lbViewSeg.hidden = !(meta && meta.kind && !meta.blocked);
+      Array.prototype.forEach.call(el.lbViewSeg.querySelectorAll('[data-lb-view]'), (btn) => {
+        btn.setAttribute('aria-pressed', String(btn.getAttribute('data-lb-view') === app.lbView));
+      });
+    }
+    if (el.lbBarTag) {
+      const meta = app.lbPreviewMeta;
+      el.lbBarTag.textContent = meta ? meta.label : '新增文件';
+      el.lbBarTag.title = (meta && meta.reason) || '';
+      el.lbBarTag.classList.toggle('is-warn', !!(meta && meta.blocked));
+    }
+  }
+
+  function setLightboxView(view, opts) {
+    if (!app.lbFile || (view !== 'preview' && view !== 'source')) return;
+    const meta = app.lbPreviewMeta;
+    if (view === 'preview' && (!meta || !meta.kind || meta.blocked)) view = 'source';
+    if (app.lbView !== view) saveLbScroll();
+    app.lbView = view;
+    const preview = view === 'preview';
+    if (el.lbPreview) el.lbPreview.hidden = !preview;
+    if (el.lbCode) el.lbCode.hidden = preview;
+    if (preview && !app.lbRendered) {
+      renderLightboxPreview();
+      app.lbRendered = true;
+    }
+    restoreLbScroll();
+    updateLightboxSeg();
+    if (opts && opts.focus && el.lbViewSeg) {
+      const btn = el.lbViewSeg.querySelector('[data-lb-view="' + view + '"]');
+      if (btn) btn.focus({ preventScroll: true });
+    }
+  }
+
+  function onPreviewSegKey(e) {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const buttons = Array.prototype.slice.call(el.lbViewSeg.querySelectorAll('[data-lb-view]'));
+    if (!buttons.length) return;
+    e.preventDefault();
+    const idx = buttons.indexOf(document.activeElement);
+    const dir = e.key === 'ArrowRight' ? 1 : -1;
+    const next = buttons[(idx + dir + buttons.length) % buttons.length] || buttons[0];
+    next.focus({ preventScroll: true });
+    if (!next.disabled) setLightboxView(next.getAttribute('data-lb-view'));
+  }
+
+  function onPreviewClick(e) {
+    const wrap = e.target.closest('[data-wrap]');
+    if (wrap) {
+      const block = wrap.closest('.codeblock');
+      if (block) {
+        block.classList.toggle('is-wrap');
+        wrap.classList.toggle('is-on', block.classList.contains('is-wrap'));
+      }
+      return;
+    }
+    const copy = e.target.closest('.code-copy');
+    if (!copy) return;
+    const pre = copy.closest('.codeblock').querySelector('pre code');
+    copyText(pre ? pre.textContent : '');
+    const use = copy.querySelector('use');
+    copy.classList.add('is-done');
+    copy.setAttribute('aria-label', '已复制');
+    if (use) use.setAttribute('href', '#i-check');
+    clearTimeout(copy.dataset.timer);
+    copy.dataset.timer = setTimeout(() => {
+      copy.classList.remove('is-done');
+      copy.setAttribute('aria-label', '复制代码');
+      if (use) use.setAttribute('href', '#i-copy');
+    }, 1400);
+  }
+
+  function initLightboxPreview() {
+    if (!el.lbViewSeg) return;
+    el.lbViewSeg.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-lb-view]');
+      if (!btn || btn.disabled) return;
+      setLightboxView(btn.getAttribute('data-lb-view'));
+    });
+    el.lbViewSeg.addEventListener('keydown', onPreviewSegKey);
+    if (el.lbMd) el.lbMd.addEventListener('click', onPreviewClick);
+  }
+
   function copyText(text) {
     if (!text) return;
     const done = () => app.toast('已复制');
@@ -339,23 +595,30 @@
     app.lbTrigger = trigger || document.activeElement;
     const language = file.lang || 'code';
     const path = file.path || '~/项目/' + file.name;
+    const lines = Number(file.lines) || String(file.content || '').split('\n').length;
     const gutter = el.lightbox.querySelector('.lb-gutter');
     const src = el.lightbox.querySelector('.lb-src code');
     el.lbTitle.textContent = file.name;
     el.lbPath.textContent = path;
     el.lbBarName.textContent = path;
     el.lbLang.textContent = language;
-    el.lbLines.textContent = file.lines + ' 行';
-    el.lbAdded.textContent = file.lines;
+    el.lbLines.textContent = lines + ' 行';
+    el.lbAdded.textContent = lines;
     el.lbFootLang.textContent = language.charAt(0).toUpperCase() + language.slice(1);
-    gutter.textContent = Array.from({ length: file.lines }, (_, i) => i + 1).join('\n');
-    src.innerHTML = language === 'md' ? esc(file.content) : highlightHTML(file.content, language);
+    gutter.textContent = Array.from({ length: lines }, (_, i) => i + 1).join('\n');
+    src.innerHTML = language === 'md' ? esc(String(file.content || '')) : highlightHTML(String(file.content || ''), language);
+    app.lbFile = file;
+    app.lbPreviewMeta = previewMeta(file);
+    app.lbView = null;
+    app.lbRendered = false;
+    app.lbScroll = { source: 0, sourceX: 0, preview: 0 };
     el.lightbox.hidden = false;
     document.body.classList.add('lb-open');
     syncInert();
     el.lightbox.querySelector('.lb-code').scrollTop = 0;
     el.lightbox.querySelector('.lb-code').scrollLeft = 0;
     el.lbCopy.onclick = () => copyText(file.content);
+    setLightboxView(app.lbPreviewMeta.kind && !app.lbPreviewMeta.blocked ? 'preview' : 'source');
     const panel = el.lightbox.querySelector('.lb-panel');
     if (panel) panel.focus({ preventScroll: true });
   }
@@ -371,6 +634,15 @@
     if (el.lightbox.hidden) return;
     el.lightbox.hidden = true;
     document.body.classList.remove('lb-open');
+    if (el.lbFrame) el.lbFrame.removeAttribute('srcdoc');
+    if (el.lbMd) el.lbMd.innerHTML = '';
+    if (el.lbPreview) el.lbPreview.hidden = true;
+    if (el.lbCode) el.lbCode.hidden = false;
+    if (el.lbViewSeg) el.lbViewSeg.hidden = true;
+    app.lbFile = null;
+    app.lbPreviewMeta = null;
+    app.lbView = null;
+    app.lbRendered = false;
     syncInert();
     const trigger = app.lbTrigger;
     app.lbTrigger = null;
@@ -435,6 +707,9 @@
     showFilesTree, openFilesPanel, closeFilesPanel, toggleFilesTree,
     clampFilesWidth, applyStoredFilesWidth, initFilesResize,
     openViewer, openArtifact, closeLightbox,
+    previewMeta, setLightboxView,
     answerQuestion, openAskCustom, copyMessage
   });
+
+  initLightboxPreview();
 })();

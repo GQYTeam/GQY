@@ -263,8 +263,12 @@
       <span class="lb-chip" id="lbLang">python</span>
       <span class="lb-chip" id="lbLines">0 行</span>
       <span class="lb-actions">
+        <div class="lb-seg" id="lbViewSeg" role="group" aria-label="查看方式" hidden>
+          <button class="lb-seg-btn" type="button" data-lb-view="preview" aria-pressed="true" aria-controls="lbPreview">预览</button>
+          <button class="lb-seg-btn" type="button" data-lb-view="source" aria-pressed="false" aria-controls="lbCode">源码</button>
+        </div>
         <button class="lb-btn" id="lbCopy" type="button">
-          <svg class="ico" aria-hidden="true"><use href="#i-copy"/></svg><span>复制</span>
+          <svg class="ico" aria-hidden="true"><use href="#i-copy"/></svg><span class="lb-copy-label">复制</span>
         </button>
         <button class="lb-icon" type="button" data-lb-close aria-label="关闭" title="关闭">
           <svg class="ico" aria-hidden="true"><use href="#i-x"/></svg>
@@ -274,7 +278,12 @@
     <div class="lb-bar">
       <span class="lb-bar-name" id="lbBarName">dataset.py</span>
       <span class="lb-bar-stat"><i>+</i><span id="lbAdded">0</span></span>
-      <span class="lb-bar-tag">新增文件</span>
+      <span class="lb-bar-tag" id="lbBarTag">新增文件</span>
+    </div>
+    <div class="lb-preview" id="lbPreview" hidden>
+      <iframe class="lb-frame" id="lbFrame" title="内容预览" sandbox="allow-scripts" referrerpolicy="no-referrer" tabindex="0" hidden></iframe>
+      <div class="lb-md md" id="lbMd" hidden></div>
+      <div class="lb-notice" id="lbNotice" role="status" hidden></div>
     </div>
     <div class="lb-code" id="lbCode">
       <pre class="lb-gutter" aria-hidden="true"></pre>

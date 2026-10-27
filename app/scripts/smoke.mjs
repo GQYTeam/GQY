@@ -340,6 +340,127 @@ try {
   })()`);
   check('导入 JSON 覆盖并重载状态', imported.named && imported.convs >= 2, JSON.stringify(imported));
 
+  /* 产物预览：HTML 默认预览、iframe 沙箱 + CSP、源码互切 */
+  const preview = await evaluate(`(async () => {
+    const trigger = document.querySelector('#newChatBtn');
+    GQY.app.openViewer({
+      name: 'demo.html',
+      path: '~/项目/demo.html',
+      lang: 'html',
+      content: '<!doctype html><html><body><h1>预览测试</h1></body></html>',
+      lines: 1
+    }, trigger);
+    await new Promise((r) => setTimeout(r, 80));
+    const seg = document.querySelector('#lbViewSeg');
+    const frame = document.querySelector('#lbFrame');
+    const previewBtn = seg.querySelector('[data-lb-view="preview"]');
+    const sourceBtn = seg.querySelector('[data-lb-view="source"]');
+    const opened = !document.querySelector('#lightbox').hidden;
+    const defaultPreview = !seg.hidden && previewBtn.getAttribute('aria-pressed') === 'true' &&
+      document.querySelector('#lbPreview').hidden === false && frame.hidden === false;
+    const sandbox = frame.getAttribute('sandbox') || '';
+    const srcdoc = frame.getAttribute('srcdoc') || '';
+    const csp = /Content-Security-Policy/.test(srcdoc) && /default-src 'none'/.test(srcdoc);
+    sourceBtn.click();
+    const sourceShown = document.querySelector('#lbCode').hidden === false &&
+      document.querySelector('#lbPreview').hidden === true &&
+      sourceBtn.getAttribute('aria-pressed') === 'true' &&
+      previewBtn.getAttribute('aria-pressed') === 'false';
+    const hasCode = document.querySelector('#lbCode').textContent.includes('预览测试');
+    previewBtn.click();
+    const backToPreview = document.querySelector('#lbPreview').hidden === false &&
+      document.querySelector('#lbCode').hidden === true && frame.hidden === false;
+    document.querySelector('#lightbox [data-lb-close]').click();
+    const closed = document.querySelector('#lightbox').hidden === true;
+    return { opened, defaultPreview, sandbox, csp, sourceShown, hasCode, backToPreview, closed };
+  })()`);
+  check('产物预览：默认预览 / iframe 沙箱 + CSP / 源码切换',
+    preview.opened && preview.defaultPreview && preview.sandbox === 'allow-scripts' &&
+    !/allow-same-origin/.test(preview.sandbox) && preview.csp && preview.sourceShown &&
+    preview.hasCode && preview.backToPreview && preview.closed,
+    JSON.stringify(preview));
+
+  /* 产物预览：SVG 无脚本沙箱；超过 2 MB 降级为源码并给出原因 */
+  const previewEdge = await evaluate(`(async () => {
+    GQY.app.openViewer({
+      name: 'icon.svg',
+      path: '~/项目/icon.svg',
+      lang: 'svg',
+      content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg>',
+      lines: 1
+    }, document.querySelector('#newChatBtn'));
+    await new Promise((r) => setTimeout(r, 60));
+    const frame = document.querySelector('#lbFrame');
+    const sandbox = frame.getAttribute('sandbox');
+    const srcdoc = frame.getAttribute('srcdoc') || '';
+    const svgOk = !document.querySelector('#lbViewSeg').hidden && sandbox === '' &&
+      /<svg/.test(srcdoc) && !/allow-scripts/.test(sandbox);
+    GQY.app.openViewer({
+      name: 'big.md',
+      path: '~/项目/big.md',
+      lang: 'md',
+      content: 'x'.repeat(2 * 1024 * 1024 + 64),
+      lines: 1
+    }, document.querySelector('#newChatBtn'));
+    await new Promise((r) => setTimeout(r, 60));
+    const bigSegHidden = document.querySelector('#lbViewSeg').hidden === true;
+    const bigSource = document.querySelector('#lbCode').hidden === false &&
+      document.querySelector('#lbPreview').hidden === true;
+    const bigReason = /2 MB/.test(document.querySelector('#lbBarTag').textContent);
+    document.querySelector('#lightbox [data-lb-close]').click();
+    return { svgOk, bigSegHidden, bigSource, bigReason };
+  })()`);
+  check('产物预览：SVG 沙箱无脚本 + 超过 2 MB 降级',
+    previewEdge.svgOk && previewEdge.bigSegHidden && previewEdge.bigSource && previewEdge.bigReason,
+    JSON.stringify(previewEdge));
+
+  /* Markdown 预览复用渲染器与链接白名单 */
+  const mdPreview = await evaluate(`(async () => {
+    GQY.app.openViewer({
+      name: 'notes.md',
+      path: '~/项目/notes.md',
+      lang: 'md',
+      content: '**粗体** [坏链](javascript:alert(1)) <script>window.__x=1<\\/script>',
+      lines: 1
+    }, document.querySelector('#newChatBtn'));
+    await new Promise((r) => setTimeout(r, 60));
+    const md = document.querySelector('#lbMd');
+    const shown = document.querySelector('#lbPreview').hidden === false && md.hidden === false &&
+      document.querySelector('#lbViewSeg').querySelector('[data-lb-view="preview"]').getAttribute('aria-pressed') === 'true';
+    const html = md.innerHTML;
+    const safe = /<strong>粗体<\\/strong>/.test(html) && !/javascript:/i.test(html) && !/<script/i.test(html);
+    document.querySelector('#lightbox [data-lb-close]').click();
+    return { shown, safe };
+  })()`);
+  check('产物预览：Markdown 复用渲染器并拦截危险链接', mdPreview.shown && mdPreview.safe, JSON.stringify(mdPreview));
+
+  /* 灯箱在三个关键宽度下不横向溢出 */
+  const widthChecks = [];
+  for (const width of [390, 600, 1100]) {
+    await send('Emulation.setDeviceMetricsOverride', { width, height: 820, deviceScaleFactor: 1, mobile: width <= 600 });
+    await sleep(90);
+    widthChecks.push(await evaluate(`(() => {
+      GQY.app.openViewer({
+        name: 'responsive.html', path: '~/项目/responsive.html', lang: 'html',
+        content: '<h1>宽度检查</h1>', lines: 1
+      }, document.querySelector('#newChatBtn'));
+      const panel = document.querySelector('#lightbox .lb-panel');
+      const top = document.querySelector('#lightbox .lb-top');
+      const bar = document.querySelector('#lightbox .lb-bar');
+      const result = {
+        panel: panel.scrollWidth <= panel.clientWidth + 1,
+        top: top.scrollWidth <= top.clientWidth + 1,
+        bar: bar.scrollWidth <= bar.clientWidth + 1
+      };
+      document.querySelector('#lightbox [data-lb-close]').click();
+      return result;
+    })()`));
+  }
+  await send('Emulation.clearDeviceMetricsOverride');
+  await sleep(90);
+  check('灯箱在 390 / 600 / 1100 宽度不溢出',
+    widthChecks.every((x) => x.panel && x.top && x.bar), JSON.stringify(widthChecks));
+
   check('浏览器控制台无报错', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
 
   /* 真实上游：agent loop —— 第一轮返回工具调用，第二轮返回最终答案 */
