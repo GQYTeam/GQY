@@ -156,6 +156,19 @@
     await fetch('/api/github', { method: 'DELETE' });
   }
 
+  /* 附件上传：文本附件返回抽取的文本，二进制只落盘 */
+  async function uploadFile(sessionId, file) {
+    const fd = new FormData();
+    fd.append('session', sessionId);
+    fd.append('file', file, file.name);
+    const res = await fetch('/api/files', { method: 'POST', body: fd });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new Error(detail.message || '上传失败 ' + res.status);
+    }
+    return res.json();
+  }
+
   /* 供应商列表（导入的 providers.json） */
   async function providers() {
     const res = await fetch('/api/providers', { headers: { accept: 'application/json' } });
@@ -266,7 +279,7 @@
 
   G.api = {
     detect, available, info, chat, models, usage, providers,
-    plugins, installExample, pluginLoad, pluginUnload, pluginCall, tools, setExternal, gatewayStatus,
+    plugins, installExample, pluginLoad, pluginUnload, pluginCall, tools, setExternal, gatewayStatus, uploadFile,
     saveProvider, deleteProvider, saveGroup, deleteGroup, setDefault,
     syncSession, githubAuth, githubMe, githubDisconnect
   };

@@ -66,6 +66,7 @@ handleSend()
 - `stopStreaming()` 会 `AbortController.abort()` 并落库已生成内容；中断的请求不额外写内容。
 - 失败时消息挂 `error: { code, message }`，`messageHTML` 渲染错误卡片 + 重试（`retryMessage` 复用同一管线）。
 - `answerQuestion()` 把选择写进 `msg.question.answer`，再追加一条 user 消息并调用 `respond()` 发起新请求。
+- 附件：`handleSend` 把 File 交给 `respond`，先 `POST /api/files` 上传并拿回文本，再启动流式请求；`apiMessages()` 把文本附件拼进 user 消息，二进制只落盘。
 
 ## 后端
 

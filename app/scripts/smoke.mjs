@@ -741,6 +741,39 @@ try {
   await evaluate('document.querySelector("#settingsLayer [data-settings-close]").click()');
   await sleep(200);
 
+  const uploaded = await evaluate(`(async () => {
+    document.querySelector('#newChatBtn').click();
+    await new Promise((r) => setTimeout(r, 120));
+    const dt = new DataTransfer();
+    dt.items.add(new File(['hello attachment'], 'note.txt', { type: 'text/plain' }));
+    const input = document.querySelector('#fileInput');
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 120));
+    const ci = document.querySelector('#composerInput');
+    ci.value = '读一下附件';
+    ci.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('#composerForm').requestSubmit();
+    for (let i = 0; i < 50; i += 1) {
+      await new Promise((r) => setTimeout(r, 100));
+      const s = JSON.parse(localStorage.getItem('claude-webchat:v7') || '{}');
+      const msgs = (s.workspaces || []).flatMap((w) => w.convs || []).flatMap((c) => c.messages || []);
+      const hit = msgs.find((m) => (m.attachments || []).some((a) => a.text === 'hello attachment'));
+      if (hit) {
+        const a = hit.attachments.find((x) => x.text === 'hello attachment');
+        return { text: a.text, path: a.path || '', name: a.name, size: a.size };
+      }
+    }
+    return { error: 'timeout' };
+  })()`);
+  let uploadedFile = false;
+  if (uploaded.path) {
+    try {
+      uploadedFile = (await readFile(join(HOME, uploaded.path), 'utf8')) === 'hello attachment';
+    } catch (err) {}
+  }
+  check('附件上传并注入文本', uploaded.text === 'hello attachment' && uploadedFile, JSON.stringify(uploaded));
+
   check('浏览器控制台无报错', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
 
   /* 真实上游：agent loop —— 第一轮返回工具调用，第二轮返回最终答案 */

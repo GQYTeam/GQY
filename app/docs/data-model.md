@@ -72,7 +72,8 @@ $GQY_HOME/sessions/<convId>/
 - `artifact.path` 决定文件面板里的目录根（取 dirname）。
 - `question.answer` 为 `{ picks: number[], custom: string }`；一旦存在即视为已回答。回答后还会追加一条 user 消息并触发新请求。
 - `usage` 来自服务端 `done` 事件，字段是 snake_case：`prompt_tokens` / `completion_tokens` / `total_tokens`。
-- 附件的 `url` 可能是 `blob:`，序列化前会被剔除（导出与 localStorage 保存都走同一剔除函数）。
+- 附件字段：`name / type / size / url`，上传后追加 `path / text / truncated`。`url` 可能是 `blob:`，序列化前剔除；`text` 最多 2 万字符，会拼进该条 user 消息发给模型。
+- 上传文件在 `$GQY_HOME/sessions/<id>/tmp/uploads/`，0600；镜像只记录 name/size/path/truncated，不重复存正文。
 
 ## 服务端持久化
 
