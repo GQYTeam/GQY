@@ -227,7 +227,7 @@ go run ./cmd/gqy-eval -config internal/eval/testdata/sample.json -dry-run
 
 - 配置用 JSON（标准库），不引入 YAML 依赖；不使用 `docs/test_call_{tool}/` 的固定目录，结果目录完全由 `-out` 指定。
 - 入口是 `cmd/gqy-eval`，不是设计里的 `cmd/eval-gateway`；包结构按实现拆成 config/cases/matrix/runner/judge/recorder/report/replay/engine。
-- 评测宿主注册核心工具（`read/edit/shell/list_dir/websearch`）和一个确定性的 `plugin__echo__echo` 占位适配器；`-config` 指定 `<pluginID>__<action>` 时，宿主按前缀从 `$GQY_HOME/plugins` 加载真实插件并注册其动作。远程插件与服务依赖仍未实现，评测结论只代表本次加载的工具实现。
+- 评测宿主注册核心工具（`read/edit/shell/list_dir/websearch`）和一个确定性的 `plugin__echo__echo` 占位适配器；`-config` 指定 `<pluginID>__<action>` 时，宿主按前缀从 `$GQY_HOME/plugins` 加载真实插件并注册其动作。远程插件（unix/tcp）与服务依赖已在插件运行时实现，评测宿主按工具名加载；评测结论只代表本次加载的工具实现。
 - 只做规则判定；模型裁判、人工抽检未接。
 - 没有 `best/current.*` 自动写回；CLI 不会修改线上配置。
 - `stage=replay` 不写在配置里，改用 CLI `-replay`。
