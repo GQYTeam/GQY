@@ -23,7 +23,7 @@
 - 设置：10 tab、搜索、用量、账户、provider/路由组增删、清空对话保留人设/记忆。
 - 上下文：人设/记忆/知识文档注入 system，并与工具系统提示合并。
 - 附件：文本文件上传落盘、文本注入；图片返回 data URL。
-- 网关：provider 账号 / 配额、Anthropic / Gemini 非流式翻译、访问令牌、限流。
+- 网关：provider 账号 / 配额、Anthropic / Gemini 翻译、访问令牌、限流。
 - 插件：Unix 远程适配器、provides/requires 依赖、MCP 示例。
 - 评测：模型裁判、真实插件宿主。
 - 前端：暗色主题、中文/English、长会话分页、多文件产物。
@@ -40,8 +40,9 @@
 | 插件：加载 echo、`/api/plugins/echo/call`、`/api/tools`、卸载 | 正常；工具名 `echo__echo` 出现和消失 |
 | 插件：加载 mcp-echo、调用 add | 正常；`tools/list` 发现 add，`2+3` 返回 5 |
 | 远程插件：Unix socket JSON-RPC | 单测通过 |
-| 协议：Anthropic / Gemini 非流式 | 单测通过（假上游） |
-| 鉴权：无 token / Bearer / cookie | 单测通过；`/api/auth` 设置 HttpOnly cookie |
+| 协议：Anthropic / Gemini 非流式 + 流式 | 单测通过（假上游） |
+| 鉴权：无 token / Bearer / cookie | 单测 + 手工验证：401 / 200 / cookie 200；静态页 200 |
+| 清理：`gqy-clean -dry-run` / 实际删除 | 手工验证：旧会话删除、新会话保留 |
 | 插件：安装示例接口 | 首次复制 echo + mcp-echo；再次返回 409 |
 | 评测：假上游 + 真实 echo 插件 | `gqy-eval` 1/1 通过，报告 / runs / trace 落盘正确 |
 | 评测 dry-run | 6 配置 × 3 用例矩阵正确打印 |

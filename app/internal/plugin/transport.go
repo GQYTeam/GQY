@@ -162,7 +162,13 @@ func openPluginLog(host Host, id string) (*os.File, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	return os.OpenFile(filepath.Join(dir, id+".log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	path := filepath.Join(dir, id+".log")
+	// 超过 1 MB 轮转一次，保留一个 .1 备份。
+	if info, err := os.Stat(path); err == nil && info.Size() > 1<<20 {
+		_ = os.Remove(path + ".1")
+		_ = os.Rename(path, path+".1")
+	}
+	return os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 }
 
 func (c *stdioClient) deliver(id int64, msg rpcMessage) {

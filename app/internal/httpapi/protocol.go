@@ -39,10 +39,6 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", "请求体不是合法 JSON")
 		return
 	}
-	if req.Stream {
-		writeAnthropicError(w, http.StatusBadRequest, "unsupported", "当前网关只支持 Anthropic 非流式请求")
-		return
-	}
 	messages, images, err := anthropicMessages(req)
 	if err != nil {
 		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
@@ -76,11 +72,54 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	if usage != nil {
 		in, out = usage.PromptTokens, usage.CompletionTokens
 	}
+	if req.Stream {
+		writeAnthropicStream(w, req.Model, content, stop, in, out)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id": "msg_" + newRequestID(), "type": "message", "role": "assistant",
 		"model": req.Model, "content": content, "stop_reason": stop,
 		"usage": map[string]int{"input_tokens": in, "output_tokens": out},
 	})
+}
+
+func writeAnthropicStream(w http.ResponseWriter, model string, content []any, stop string, in, out int) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeAnthropicError(w, http.StatusInternalServerError, "api_error", "当前连接不支持流式")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	id := "msg_" + newRequestID()
+	send := func(event string, v any) {
+		b, _ := json.Marshal(v)
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
+		flusher.Flush()
+	}
+	send("message_start", map[string]any{"type": "message_start", "message": map[string]any{
+		"id": id, "type": "message", "role": "assistant", "model": model,
+		"content": []any{}, "stop_reason": nil, "usage": map[string]int{"input_tokens": in, "output_tokens": 0},
+	}})
+	for i, block := range content {
+		switch b := block.(type) {
+		case map[string]any:
+			if b["type"] == "text" {
+				send("content_block_start", map[string]any{"type": "content_block_start", "index": i, "content_block": map[string]any{"type": "text", "text": ""}})
+				send("content_block_delta", map[string]any{"type": "content_block_delta", "index": i, "delta": map[string]any{"type": "text_delta", "text": b["text"]}})
+				send("content_block_stop", map[string]any{"type": "content_block_stop", "index": i})
+			} else if b["type"] == "tool_use" {
+				send("content_block_start", map[string]any{"type": "content_block_start", "index": i, "content_block": map[string]any{"type": "tool_use", "id": b["id"], "name": b["name"], "input": map[string]any{}}})
+				args, _ := json.Marshal(b["input"])
+				send("content_block_delta", map[string]any{"type": "content_block_delta", "index": i, "delta": map[string]any{"type": "input_json_delta", "partial_json": string(args)}})
+				send("content_block_stop", map[string]any{"type": "content_block_stop", "index": i})
+			}
+		}
+	}
+	send("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": stop}, "usage": map[string]int{"output_tokens": out}})
+	send("message_stop", map[string]any{"type": "message_stop"})
 }
 
 func anthropicMessages(req anthropicRequest) ([]provider.Message, []string, error) {
@@ -205,8 +244,8 @@ type geminiRequest struct {
 
 func (s *Server) handleGeminiGenerate(w http.ResponseWriter, r *http.Request) {
 	model, action, ok := strings.Cut(strings.TrimPrefix(r.URL.Path, "/v1beta/models/"), ":")
-	if !ok || action != "generateContent" {
-		writeGeminiError(w, http.StatusBadRequest, "只支持 :generateContent")
+	if !ok || (action != "generateContent" && action != "streamGenerateContent") {
+		writeGeminiError(w, http.StatusBadRequest, "只支持 :generateContent / :streamGenerateContent")
 		return
 	}
 	model = strings.TrimPrefix(model, "models/")
@@ -273,9 +312,44 @@ func (s *Server) handleGeminiGenerate(w http.ResponseWriter, r *http.Request) {
 	if usage != nil {
 		in, out = usage.PromptTokens, usage.CompletionTokens
 	}
+	if action == "streamGenerateContent" {
+		writeGeminiStream(w, parts, in, out)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"candidates": []any{map[string]any{
 			"content":      map[string]any{"role": "model", "parts": parts},
+			"finishReason": "STOP", "index": 0,
+		}},
+		"usageMetadata": map[string]int{"promptTokenCount": in, "candidatesTokenCount": out, "totalTokenCount": in + out},
+	})
+}
+
+func writeGeminiStream(w http.ResponseWriter, parts []any, in, out int) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeGeminiError(w, http.StatusInternalServerError, "当前连接不支持流式")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.WriteHeader(http.StatusOK)
+	send := func(v any) {
+		b, _ := json.Marshal(v)
+		fmt.Fprintf(w, "data: %s\n\n", b)
+		flusher.Flush()
+	}
+	for _, part := range parts {
+		send(map[string]any{
+			"candidates": []any{map[string]any{
+				"content": map[string]any{"role": "model", "parts": []any{part}},
+				"index":   0,
+			}},
+		})
+	}
+	send(map[string]any{
+		"candidates": []any{map[string]any{
+			"content":      map[string]any{"role": "model", "parts": []any{}},
 			"finishReason": "STOP", "index": 0,
 		}},
 		"usageMetadata": map[string]int{"promptTokenCount": in, "candidatesTokenCount": out, "totalTokenCount": in + out},
