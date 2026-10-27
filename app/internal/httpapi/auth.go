@@ -77,6 +77,8 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 		Value:    s.Cfg.AuthToken,
 		Path:     "/",
 		HttpOnly: true,
+		// 反向代理终止 TLS 时也要带上 Secure，避免令牌走明文回源后由浏览器继续明文发送。
+		Secure:   r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https"),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   7 * 24 * 3600,
 	})

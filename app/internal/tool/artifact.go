@@ -56,7 +56,15 @@ func (a Artifact) Execute(ctx context.Context, args map[string]any) (string, err
 	if len(raw) > 20 {
 		return "", fmt.Errorf("一次最多 20 个文件")
 	}
-	written := make([]string, 0, len(raw))
+	const maxTotal = 2 << 20 // 与单文件上限一致：产物会进 localStorage，总量必须受限
+	type planned struct {
+		display  string
+		resolved string
+		content  string
+	}
+	plans := make([]planned, 0, len(raw))
+	total := 0
+	// 先完整校验再写：总量或路径不合法时不能留下写了一半的产物。
 	for _, item := range raw {
 		m, ok := item.(map[string]any)
 		if !ok {
@@ -70,20 +78,28 @@ func (a Artifact) Execute(ctx context.Context, args map[string]any) (string, err
 		if len(content) > 2<<20 {
 			return "", fmt.Errorf("%s 超过 2 MB", path)
 		}
+		total += len(content)
+		if total > maxTotal {
+			return "", fmt.Errorf("产物总量超过 2 MB，请拆分或精简")
+		}
 		resolved, err := a.Policy.Resolve(path)
 		if err != nil {
 			return "", err
 		}
-		if err := os.MkdirAll(filepath.Dir(resolved), 0o755); err != nil {
-			return "", err
-		}
-		if err := os.WriteFile(resolved, []byte(content), 0o644); err != nil {
-			return "", err
-		}
-		written = append(written, path)
+		plans = append(plans, planned{display: path, resolved: resolved, content: content})
 	}
-	if len(written) == 0 {
+	if len(plans) == 0 {
 		return "", fmt.Errorf("没有有效文件")
+	}
+	written := make([]string, 0, len(plans))
+	for _, p := range plans {
+		if err := os.MkdirAll(filepath.Dir(p.resolved), 0o755); err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(p.resolved, []byte(p.content), 0o644); err != nil {
+			return "", err
+		}
+		written = append(written, p.display)
 	}
 	out, _ := json.Marshal(map[string]any{"title": title, "files": written})
 	return string(out), nil

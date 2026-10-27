@@ -264,7 +264,9 @@ func (s *Server) handleGeminiGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, tc := range msg.ToolCalls {
 		var args map[string]any
-		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil || args == nil {
+			args = map[string]any{}
+		}
 		parts = append(parts, map[string]any{"functionCall": map[string]any{"name": tc.Function.Name, "args": args}})
 	}
 	in, out := 0, 0

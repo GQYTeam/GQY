@@ -31,6 +31,14 @@ func (s *Server) withRateLimit(next http.Handler) http.Handler {
 		key := clientIP(r)
 		minute := time.Now().Unix() / 60
 		lim.mu.Lock()
+		// 桶只在内存里；超过阈值时先清掉上一分钟的旧桶，避免长期运行累积。
+		if len(lim.buckets) > 4096 {
+			for k, old := range lim.buckets {
+				if old.minute != minute {
+					delete(lim.buckets, k)
+				}
+			}
+		}
 		b := lim.buckets[key]
 		if b == nil || b.minute != minute {
 			b = &bucket{minute: minute}
