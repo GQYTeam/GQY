@@ -8,3 +8,4 @@ node_modules/
 .gqy/
 app/bin/
 app/tmp/
+.claude/worktrees/
