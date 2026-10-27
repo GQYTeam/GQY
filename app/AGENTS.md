@@ -25,6 +25,8 @@ npm run build    # go build -trimpath -ldflags "-s -w" -o bin/gqy-server ./cmd/g
 npm run check    # node --check 所有 JS + go vet ./...
 npm run smoke    # 编译后端 + 无头 Chrome 端到端
 npm run files    # 列出项目文件
+go test ./...    # 网关 / 插件 / 评测 / 工具沙箱单测
+go run ./cmd/gqy-eval -config evals/echo/config.json -dry-run
 go run ./cmd/gqy-import -src ... [-dry-run]  # 导入旧备份（需系统 sqlite3）
 go run ./cmd/gqy-eval -config internal/eval/testdata/sample.json -dry-run  # 评测网关矩阵
 ```
@@ -39,7 +41,7 @@ cmd/gqy-server/     服务端入口：装配 config/httpapi，处理信号与优
 cmd/gqy-import/     旧备份导入器：sqlite3 导出 → session.Store / $GQY_HOME
 cmd/gqy-eval/       评测网关 CLI：矩阵执行、报告、trace 回放
 internal/
-  config/           环境变量解析（.env / 密钥只进服务端）
+  config/           环境变量解析（.env / 密钥 / workspace / 工具沙箱）
   catalog/          models.dev 拉取、缓存、过滤、元数据（context/模态/成本）
   provider/         SSE 转发：chat / responses 两种协议 → 内部事件
   gateway/          本地多 provider 网关：路由、失败转移、健康/冷却、会话亲和
@@ -53,17 +55,19 @@ internal/
 js/core.js          工具与常量（esc / uid / 时间 / 格式化 / token 估算）
 js/markdown.js      Markdown、代码高亮、链接卡片、safeUrl
 js/clawd.js         Clawd 精灵播放 + 活动状态机
-js/api.js           后端探测、模型目录、用量、SSE 聊天、会话镜像、GitHub
+js/api.js           后端探测、模型目录、用量、SSE 聊天、会话镜像、GitHub、插件、网关
 js/store.js         共享 store：state、el、常量、save/镜像入口
 js/render.js        消息 HTML、侧栏、线程、上下文用量浮层
-js/chat.js          发送、流式管线、会话切换与镜像
-js/files.js         文件面板、代码/图片灯箱、提问卡片
+js/chat.js          发送、流式管线、会话切换与镜像、人设/记忆/知识 system 上下文
+js/files.js         文件面板、代码/图片灯箱、提问卡片、预览
 js/menu.js          浮层菜单、推理滑块、模型选择、附件、语音输入
-js/settings.js      设置窗口、用量、导入导出、扩展、GitHub、人设/记忆/知识库/软件包
+js/settings.js      设置窗口、用量、导入导出、扩展、GitHub、人设/记忆/知识库/软件包/工具
 js/glossary.js      关键词浮窗（本地术语表）
 js/board.js         看板
 js/onboarding.js    首次引导
 scripts/smoke.mjs   端到端冒烟（go build + CDP，无依赖）
+plugins/echo/       示例插件（原生 stdio JSON-RPC）
+evals/echo/         评测示例配置与用例
 skills/gh.md         agent 的 gh 命令参考（通过 shell 工具使用）
 plugins/            示例插件（echo：native stdio 协议）
 styles/             base → shell → chat → ui → pages → panels → media → settings → features → responsive
@@ -81,6 +85,11 @@ CSS 按 `index.html` 的顺序级联，新样式放在 `responsive.css` 之前�
 - **模型目录**：`internal/catalog` 负责拉取 models.dev 并缓存（TTL 6h）、过滤专用类型、补全 context / 模态 / 成本等元数据；前端 `openModelMenu` 消费 `/api/models` 做可搜索选择器。
 - **用量**：`internal/session` 聚合落盘会话里的真实 token 用量与消息量，`GET /api/usage` 暴露；前端 `refreshUsage` 消费。
 - **新增工具**：实现 `tool.Tool`（`Name/Description/Schema/Execute/Kind`）→ 在 `internal/httpapi.New` 注册；重名 `Register` 会报错，不要静默覆盖。核心工具默认注入，外部工具只在 `GQY_ENABLE_EXTERNAL=1` 时注入。文件类工具必须复用 `tool.Policy.Resolve`，不要直接拼路径；shell 类工具必须带超时与输出上限。详见 `docs/tools.md`。
+- **网关**：provider 来自 `$GQY_HOME/providers.json` + 环境变量兜底；路由组在 `$GQY_HOME/routing.json`。改解析/失败转移只动 `internal/gateway`，不要让 agent 感知 provider 细节。`/api/chat` 和 `/v1/*` 共用 `Router.Complete`。
+- **插件**：manifest 放 `$GQY_HOME/plugins/<id>/`；协议只加适配器（`plugin.Adapter`），生命周期、超时、进程回收留在 `Manager`。插件动作注册成 `KindExternal` 工具，默认不注入。新增协议必须补 `internal/plugin` 单测。
+- **评测**：配置 JSON 在 `evals/<tool>/`；包结构 `internal/eval/{config,cases,matrix,runner,judge,result,recorder,report,replay,engine,host}`。宿主按 `config.tool` 前缀加载真实插件；改判定器要新开一轮，不能和旧 `runs.jsonl` 混比。命令见 `docs/eval.md`。
+- **新增设置页功能**：占位容器换成 `#xxxPanel` → `settings.js` 加 `renderXxxPanel()` → `openSettingsTab` 分发 → 表单用 `data-*` 事件委托。新字段同步 `store.js` 的 `seedState` / `loadState`。
+- **前端新视图**：`index.html` 加 `<section class="view">`，`setView` 加分派，Esc 关闭顺序与 `syncInert` 同步；看板是第二个视图。
 - **新增接口**：`internal/httpapi` 里注册 `METHOD /api/xxx` 路由，返回 JSON 或 SSE；静态文件只允许 `mimeTypes` 表里的扩展名，并记得给不支持的方法留 405。
 - **新增 SSE 事件**：`provider.Event` 加字段，`/api/chat` 里 `out.Send`，前端 `chat.js` 的 `startApiStream` 加分支，`finishStream` 决定是否落进消息。
 - **改 Go 代码后**：`gofmt -w ./cmd ./internal && go vet ./...`，再跑 `npm run smoke`。
@@ -92,8 +101,8 @@ CSS 按 `index.html` 的顺序级联，新样式放在 `responsive.css` 之前�
 
 ## 质量门槛（提交前）
 
-1. `npm run check` 全绿。
-2. `npm run smoke` 全绿（覆盖 Go 编译、agent loop、模型目录、用量、流式、落盘、静态白名单、405、十个设置 tab、设置搜索、快捷键、导入、XSS）。
+1. `npm run check` 全绿；`go test ./...` 全绿。
+2. `npm run smoke` 全绿（39 项：Go 编译、agent loop、网关、插件、模型目录、用量、流式、落盘、静态白名单、405、十个设置 tab、设置搜索、快捷键、导入、XSS、看板、引导、术语、人设/记忆/知识库、工具/插件页）。
 3. 浏览器控制台无报错；`js/api.js` 探测失败时优雅降级（不报错、不阻塞）。
 4. 键盘可用：Tab 能到所有控件，Esc 能关浮层（含搜索框），焦点不丢。
 5. 减少动效模式（设置 → 外观）下无闪烁、无无限动画；系统 `prefers-reduced-motion` 首次访问即生效。
@@ -102,6 +111,8 @@ CSS 按 `index.html` 的顺序级联，新样式放在 `responsive.css` 之前�
 ## 已知边界（改动前先读）
 
 - 插件运行时已落地进程内注册表 + 原生 stdio JSON-RPC + MCP stdio（加载 / 调用 / 卸载 / 超时 / 进程组回收）；远程传输、跨社区契约测试矩阵、崩溃恢复仍待补。
+- 网关支持 OpenAI Chat 兼容的 provider、路由组、失败转移、冷却、并发与亲和；Anthropic / Gemini 协议翻译、订阅账号与配额窗口未实现。
+- 评测网关已实现三维矩阵、用例循环、规则判定、录制、报告与回放；模型裁判、跨轮比较未实现。
 - `websearch` 是占位工具，调用直接返回“尚未接入搜索后端”。
 - 工具沙箱默认根 = workspace + `$GQY_HOME/sessions`，`GQY_TOOL_ROOTS` 可追加；`GQY_HOME/github_token.json` 显式拒绝。`shell` 有超时、输出上限与可选白名单，但空白名单时仍可访问任意路径；没有交互式审批。`GQY_ENABLE_EXTERNAL` 只控制注入，不是权限开关。
 - `ask_user` 的续跑是无状态的：服务端返回 `question` 后结束本轮，前端把回答作为新 user 消息再请求一次；工具调用历史不随回答回传。
@@ -113,7 +124,7 @@ CSS 按 `index.html` 的顺序级联，新样式放在 `responsive.css` 之前�
 - Go 服务端定位前端目录：优先当前目录，其次可执行文件所在目录（`findStaticRoot`）。生产部署把二进制和 `index.html` 放一起即可脱离源码树运行。
 - 只有当前会话会镜像到服务端；刷新后以 localStorage 为准（服务端不做回灌）。
 - GitHub 集成只做只读账户信息；仓库操作走 `skills/gh.md` + 本机 `gh` CLI，不通过 OAuth token 代调。
-- 设置里 10 个 tab 全部可切换；人设 / 记忆 / 知识库 / 软件包已可用，语音与账户权限仍是占位。
+- 设置里 10 个 tab 全部可用：人设 / 记忆 / 知识库 / 工具 / 软件包 / 用量 / 账户都接真实数据；供应商编辑、语音唤醒词、模型市场价格仍未接。
 
 ## 仓库与产品文档
 
@@ -124,6 +135,9 @@ CSS 按 `index.html` 的顺序级联，新样式放在 `responsive.css` 之前�
 - `docs/AboutAiOtput.md`：输出风格红线。
 - `docs/AboutPlugin.md`：插件运行时 + 多社区适配器设计（四层、并发、远程、进程回收、契约测试）。当前落地统一 `Tool` 契约、进程内注册表、原生 stdio 与 MCP stdio 适配器。
 - `docs/AboutAitestCallToolOrPlugin.md`：工具/插件调用评测网关设计（三维度实验矩阵、判定、落盘）。已落地 `internal/eval` + `cmd/gqy-eval`，用法见 `docs/eval.md`。
+- `docs/research/MagpieGateway.md`、`docs/design/Gateway.md`：网关调研与设计。
+- `docs/design/PluginRuntime.md`、`docs/design/EvalGateway.md`、`docs/design/FrontendCapabilities.md`：实现设计。
+- `docs/CapabilityMatrix.md`：能力分类与状态。
 
 ### 文案风格（来自 AboutAiOtput）
 
@@ -137,7 +151,7 @@ CSS 按 `index.html` 的顺序级联，新样式放在 `responsive.css` 之前�
 - `docs/architecture.md`：模块、状态流、流式管线、后端
 - `docs/pages.md`：页面与组件地图、设置 tab
 - `docs/data-model.md`：state / message / localStorage / 镜像
-- `docs/tools.md`：工具契约、核心/外部工具、沙箱与超时、agent loop、ask_user
+- `docs/tools.md`：工具契约、核心/外部/插件工具、沙箱与超时、agent loop、ask_user
 - `docs/eval.md`：评测网关配置、命令、落盘与回放
 - `docs/testing.md`：手动与 headless 验证
 - `docs/roadmap.md`：未来计划与优先级

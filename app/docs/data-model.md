@@ -21,12 +21,22 @@
   fontSize,                      // 'small' | 'normal' | 'large'
   thinkOpen,                     // 回复结束后是否保持思考展开
   sidebarCollapsed, reduceMotion,
-  drafts: { [convId]: string }   // 每个会话的未发送草稿
+  drafts: { [convId]: string },  // 每个会话的未发送草稿
+
+  onboarded,                    // 首次引导是否完成
+  voiceEnabled,                 // 麦克风是否可用
+  activePersonaId,
+  personas: [{ id, name, system, enabled }],
+  memories: [{ id, text, enabled, createdAt }],
+  knowledge: [{ id, title, content, enabled, updatedAt }],
+  glossary: [{ term, aliases?, definition }],
+  board: { cards: [{ id, title, status, convId, createdAt }] }
 }
 ```
 
 `loadState()` 对每个字段做白名单校验，非法值回落到默认。
 `reduceMotion` 没有存过时取系统 `prefers-reduced-motion`；`drafts` 只保留字符串值。
+`personas` 至少保留内置 `default`；`activePersonaId` 不存在时回落 `default`。`board.cards.status` 只接受 `todo / doing / done`；`glossary.term` + `definition` 都非空才保留。
 
 会话字段的迁移规则：
 
@@ -67,7 +77,11 @@ $GQY_HOME/sessions/<convId>/
 ## 服务端持久化
 
 - `github_token.json`：`$GQY_HOME/github_token.json`，0600，含 access token 与账户快照；`GET /api/github/me` 不返回 token。
-- `providers.json`：`$GQY_HOME/providers.json`，0600，由 `cmd/gqy-import` 从旧 `config.jsonc` 提取；`GET /api/providers` 只读返回。
+- `providers.json`：`$GQY_HOME/providers.json`，0600，由 `cmd/gqy-import` 从旧 `config.jsonc` 提取；`GET /api/providers` 只读返回脱敏条目；密钥为空时读 `GQY_PROVIDER_<ID>_API_KEY`。
+- `routing.json`：`$GQY_HOME/routing.json`，默认模型、路由组、失败次数、冷却与排队超时；缺失时只使用 providers 的第一个。
+- `gateway/requests.jsonl`：每次网关调用一行，字段 `ts / request_id / session / provider / model / status / error_code / duration_ms / attempt`，不落正文。
+- `plugins/<id>/manifest.json`：插件清单；`plugins/<id>.log`：stderr。插件动作注册成外部工具，不写入 localStorage。
+- 评测结果在 CLI `-out` 目录：`configs/`、`runs/<round>-<ts>/{runs.jsonl,trace/}`、`report/`、`best/current.json`。
 - 写入统一走 `writeFileAtomic`：建父目录 → 写临时文件（0600）→ rename。
 - 会话 id 只接受 `^[A-Za-z0-9_-]{1,64}$`；产物文件名会过滤非 `A-Za-z0-9_.-` 字符。
 - `messages.jsonl` 最多保留 500 条；产物单文件超过 2 MB 跳过。

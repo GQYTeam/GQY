@@ -3,7 +3,7 @@
 ## 现状
 
 服务端已实现最小工具系统：统一 `Tool` 接口 + 线程安全注册表 + agent loop。工具全部进程内执行，来源只有内置（核心）和 `provider_usage`（外部）。
-`docs/AboutPlugin.md` 里的适配器、注册中心、子进程/远程运行时、契约测试尚未实现，详见文末「与插件设计的关系」。
+`docs/AboutPlugin.md` 里的统一模型、原生/MCP 适配器、子进程生命周期与进程组回收已经落地；远程传输、服务依赖、权限审批和跨社区契约矩阵仍未实现，详见文末「与插件设计的关系」。
 
 ## 契约
 
@@ -120,17 +120,29 @@ messages（客户端历史）
 4. 参数在 `Execute` 里自行校验，返回给模型的文本要能让模型继续推理。
 5. 补测试：`scripts/smoke.mjs` 的 agent loop 用假上游返回工具调用；新工具至少手动跑一次真实调用。
 
+## 插件工具
+
+`internal/plugin` 把插件动作注册成 `KindExternal` 工具：
+
+- 发现：`$GQY_HOME/plugins/<id>/manifest.json`；协议 `gqy-jsonrpc-v1` 或 `mcp`。
+- 命名：`<pluginID>__<action>`，非字母数字转 `_`，最长 64。
+- 加载成功注册、卸载注销；默认不注入，`GQY_ENABLE_EXTERNAL=1` 或设置页打开开关后才出现在模型工具列表。
+- 调用走 `Manager.Call`：状态机只允许 `ready`，单次 `timeout_ms`，`exclusive` 插件串行，进程退出后在途调用返回 `ErrExited`。
+- 进程管理：独立进程组、stdin 生命线、SIGTERM → SIGKILL 分级回收；stderr 写 `$GQY_HOME/plugins/<id>.log`。
+
+HTTP：`GET /api/plugins`、`POST /api/plugins/reload`、`POST /api/plugins/{id}/{load,unload,call}`；前端「扩展 / 软件包」页消费。
+
 ## 与插件设计的关系
 
 | `docs/AboutPlugin.md` | 当前实现 |
 | --- | --- |
-| 统一调用入口 / 统一模型 | `Tool` 接口 + `Registry` |
-| 注册中心、适配器 | 无；只有进程内注册 |
-| 生命周期状态机、卸载、进程组回收 | 无；工具是长驻进程内对象 |
-| 并发模型声明、远程传输、熔断 | 无；表级读写锁 + 请求 context |
-| 契约测试套件 | 无；只有冒烟里的单工具链路 |
+| 统一调用入口 / 统一模型 | `Tool` 接口 + `Registry`；插件实现 `KindExternal` |
+| 注册中心、适配器 | manifest 发现 + `Adapter`（原生 / MCP） |
+| 生命周期状态机、卸载、进程组回收 | 已实现（discovered → loading → ready → closing） |
+| 并发模型声明、远程传输、熔断 | 单插件 `concurrent / exclusive`；远程与熔断未做 |
+| 契约测试套件 | `internal/plugin` 单测；跨社区契约矩阵未做 |
 | 重复注册报错 | 已对齐 |
-| 社区专有类型不出适配器 | 不适用（尚无社区接入） |
+| 社区专有类型不出适配器 | 原生 / MCP 适配器内部处理 |
 
 ## 已知缺口
 
@@ -141,3 +153,4 @@ messages（客户端历史）
 - 客户端只保存工具轨迹用于展示，`apiMessages()` 只发送文本，模型在下一轮看不到上一轮的工具调用记录（除非服务端回灌）。
 - `websearch` 未实现；`GQY_MOCK=1` 不经过 agent loop，工具不会执行。
 - `ask_user` 不是授权闸门，回答不会回传工具上下文。
+- 插件远程传输、服务依赖（Requires/Provides）、权限/审批、崩溃自动重启未实现。

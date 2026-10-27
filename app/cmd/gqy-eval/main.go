@@ -144,10 +144,14 @@ func printDryRun(cfg *evalconfig.Config, set *cases.Set, exps []matrix.Experimen
 }
 
 func runEval(cfg *evalconfig.Config, set *cases.Set, exps []matrix.Experiment, outDir string) int {
-	registry, err := host.DefaultRegistry()
+	registry, cleanup, warnings, err := host.DefaultRegistryForTool(cfg.Tool)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "运行错误: 装配工具失败: %v\n", err)
 		return 2
+	}
+	defer cleanup()
+	for _, w := range warnings {
+		fmt.Fprintf(os.Stderr, "插件警告: %s\n", w)
 	}
 	if _, ok := registry.Get(cfg.Tool); !ok {
 		fmt.Fprintf(os.Stderr, "运行错误: 工具 %q 未注册（评测宿主当前提供: %s）\n", cfg.Tool, toolNames(registry))
