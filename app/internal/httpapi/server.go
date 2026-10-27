@@ -68,11 +68,19 @@ func New(root string, cfg config.Config, client *http.Client) *Server {
 		Mock:    cfg.Mock,
 		Client:  client,
 	}
+	// 工具权限沙箱：文件工具只允许访问 workspace / $GQY_HOME / GQY_TOOL_ROOTS。
+	policy := tool.Policy{
+		Workspace:      cfg.Workspace,
+		Roots:          cfg.ToolRoots,
+		ShellTimeout:   cfg.ShellTimeout,
+		MaxOutput:      cfg.ToolMaxOutput,
+		ShellAllowlist: cfg.ShellAllowlist,
+	}
 	registry := tool.NewRegistry()
-	_ = registry.Register(tool.Read{})
-	_ = registry.Register(tool.Edit{})
-	_ = registry.Register(tool.Shell{})
-	_ = registry.Register(tool.ListDir{})
+	_ = registry.Register(tool.Read{Policy: policy})
+	_ = registry.Register(tool.Edit{Policy: policy})
+	_ = registry.Register(tool.Shell{Policy: policy})
+	_ = registry.Register(tool.ListDir{Policy: policy})
 	_ = registry.Register(tool.WebSearch{})
 	_ = registry.Register(tool.AskUser{})
 	// 外部工具：provider_usage（查余额）
@@ -93,7 +101,7 @@ func New(root string, cfg config.Config, client *http.Client) *Server {
 		Session:  session.New(cfg.Home),
 		Upstream: upstream,
 		Gateway:  router,
-		Agent:    &agent.Loop{Upstream: router, Registry: registry, IncludeExternal: cfg.EnableExternal},
+		Agent:    &agent.Loop{Upstream: router, Registry: registry, IncludeExternal: cfg.EnableExternal, ToolTimeout: cfg.ToolTimeout},
 		Tools:    registry,
 		GitHub: &github.Client{
 			ClientID:     cfg.GitHubClientID,

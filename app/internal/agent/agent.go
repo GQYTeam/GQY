@@ -43,6 +43,9 @@ type Loop struct {
 	OnTool   OnTool
 	// IncludeExternal 为 true 时把外部工具也注入模型；默认只注入核心工具。
 	IncludeExternal bool
+	// ToolTimeout 是单次工具调用的上限；零值表示不额外限制（仍受请求 context 约束）。
+	// 超时只影响本次调用，错误回填后 loop 继续。
+	ToolTimeout time.Duration
 }
 
 // ToolsSchema 把核心工具转成 OpenAI function calling 的 tools 数组。
@@ -166,7 +169,51 @@ func (l *Loop) execute(ctx context.Context, tc provider.ToolCall) ToolResult {
 		// 参数不是合法 JSON 也继续，用空 map 让工具自己报错
 		args = map[string]any{"_raw": tc.Function.Arguments}
 	}
-	out, err := t.Execute(ctx, args)
+
+	// ask_user 是中断 loop 的交互工具，不受单工具超时约束。
+	timeout := l.ToolTimeout
+	if t.Name() == "ask_user" {
+		timeout = 0
+	}
+
+	execCtx := ctx
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		execCtx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	type outcome struct {
+		out string
+		err error
+	}
+	// 单独 goroutine + select：即使工具不响应 context，也能按上限返回。
+	// 工具若不响应取消，其 goroutine 会自行结束，不阻塞 loop。
+	ch := make(chan outcome, 1)
+	go func() {
+		out, err := t.Execute(execCtx, args)
+		ch <- outcome{out: out, err: err}
+	}()
+
+	var out string
+	var err error
+	select {
+	case r := <-ch:
+		out, err = r.out, r.err
+		// 工具可能忽略了 context 并“成功”返回；以截止时间为准确认超时。
+		// ask_user 等有意义的返回保持原样。
+		if timeout > 0 && errors.Is(execCtx.Err(), context.DeadlineExceeded) &&
+			(err == nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)) {
+			err = fmt.Errorf("工具 %s 超时（%s），已取消", tc.Function.Name, timeout)
+		}
+	case <-execCtx.Done():
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		} else {
+			err = fmt.Errorf("工具 %s 超时（%s），已取消", tc.Function.Name, timeout)
+		}
+	}
+
 	result.Output = out
 	result.Error = err
 	result.Duration = time.Since(start)

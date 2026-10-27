@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -67,6 +68,13 @@ func main() {
 		log.Printf("  wire     : %s", cfg.Wire)
 	}
 	log.Printf("  sessions : %s", filepath.Join(cfg.Home, "sessions"))
+	log.Printf("  workspace: %s", cfg.Workspace)
+	log.Printf("  toolroots: %s", strings.Join(cfg.ToolRoots, string(os.PathListSeparator)))
+	if len(cfg.ShellAllowlist) == 0 {
+		log.Printf("  shell    : 未限制命令（GQY_SHELL_ALLOWLIST 为空），超时 %s", cfg.ShellTimeout)
+	} else {
+		log.Printf("  shell    : 仅允许 %s，超时 %s", strings.Join(cfg.ShellAllowlist, ","), cfg.ShellTimeout)
+	}
 	if cfg.Provider() == "none" {
 		log.Printf("  提示     : 未配置 GQY_API_KEY")
 	}
