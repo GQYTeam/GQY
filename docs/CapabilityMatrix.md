@@ -38,7 +38,7 @@
 | 状态接口 | `/api/gateway/status` | 可用 | 健康、调用数、冷却 |
 | Anthropic / Gemini 协议 | `/v1/messages`、`/v1beta/models/*` | 可用 | 非流式 + 兼容流式 |
 | 多账号 / 配额 | provider `accounts` | 可用 | 账号级失败转移、日 token 上限（内存） |
-| 访问令牌 | `GQY_AUTH_TOKEN` | 可用 | Bearer / cookie；前端 401 换 token |
+| 访问令牌 | `GQY_AUTH_TOKEN` | 可用 | Bearer / cookie；覆盖 /api、/v1、/v1beta |
 
 ## 工具与插件
 

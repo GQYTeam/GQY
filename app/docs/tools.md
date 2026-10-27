@@ -34,7 +34,7 @@ type Tool interface {
 | `edit` | `path`, `content` | 覆盖写入，自动建父目录；同目录临时文件 + rename 原子替换 | 仅允许根内；无 diff、无追加模式 |
 | `shell` | `command` | 在 workspace 以 `sh -c` 执行，合并 stdout+stderr | 默认 60s 超时并杀进程组；输出 ≤ 16 KB；可选白名单 |
 | `list_dir` | `path`（默认 `.`） | 列目录，目录名以 `/` 结尾 | 仅允许根内；不递归 |
-| `write_artifact` | `title`, `files[]` | 写工作区并生成多文件产物 | 单文件 2 MB，最多 20 个 |
+| `write_artifact` | `title`, `files[]` | 写工作区并生成多文件产物 | 单文件 2 MB、总量 2 MB、最多 20 个 |
 | `websearch` | `query` | 占位：直接返回“尚未接入搜索后端” | 未实现 |
 | `ask_user` | `question`, `options?` | 中断 loop，向前端发提问卡片 | 不受单工具超时约束 |
 

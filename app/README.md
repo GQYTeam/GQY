@@ -212,8 +212,8 @@ npm start                 # cmd/gqy-server 自动读取 .env，真实环境变�
 | `GQY_SHELL_ALLOWLIST` | 空 | 非空时只允许列表里的命令，并拒绝 `; | & $` 等元字符 |
 | `GQY_TOOL_MAX_OUTPUT` | `16384` | shell 合并输出保留字节数 |
 | `GQY_PROVIDER_<ID>_API_KEY` | 空 | `providers.json` 里 provider 的密钥后备；ID 转大写、非字母数字转 `_` |
-| `GQY_AUTH_TOKEN` | 空 | 非空时 `/api/*` 与 `/v1/*` 要求 Bearer / `X-GQY-Token` / HttpOnly cookie；前端 401 时提示输入 |
-| `GQY_RATE_LIMIT` | `0` | 每客户端每分钟请求上限；`0` 不限 |
+| `GQY_AUTH_TOKEN` | 空 | 非空时 `/api/*`、`/v1/*` 与 `/v1beta/*` 要求 Bearer / `X-GQY-Token` / HttpOnly cookie；前端 401 时提示输入 |
+| `GQY_RATE_LIMIT` | `0` | 每客户端每分钟 `/api/*`、`/v1/*`、`/v1beta/*` 请求上限；`0` 不限 |
 | `GITHUB_CLIENT_ID` | 空 | GitHub App 的 Client ID，用于只读账户 OAuth |
 | `GITHUB_CLIENT_SECRET` | 空 | GitHub App 的 Client Secret |
 | `GITHUB_OAUTH_REDIRECT` | 空 | 回调地址；空时按请求 Host 推导 `/api/github/callback` |
