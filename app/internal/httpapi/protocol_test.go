@@ -90,6 +90,28 @@ func TestGeminiGenerateEndpoint(t *testing.T) {
 	}
 }
 
+func TestAnthropicStream(t *testing.T) {
+	s := protocolServer(t)
+	body := `{"model":"fake/m","stream":true,"messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	s.handleAnthropicMessages(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "message_start") || !strings.Contains(rec.Body.String(), "text_delta") {
+		t.Fatalf("stream: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGeminiStream(t *testing.T) {
+	s := protocolServer(t)
+	body := `{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`
+	req := httptest.NewRequest("POST", "/v1beta/models/fake/m:streamGenerateContent", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	s.handleGeminiGenerate(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "data:") || !strings.Contains(rec.Body.String(), "finishReason") {
+		t.Fatalf("stream: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAnthropicContentBlocks(t *testing.T) {
 	var raw json.RawMessage = []byte(`[{"type":"text","text":"看"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AA=="}}]`)
 	text, images := anthropicContent(raw)

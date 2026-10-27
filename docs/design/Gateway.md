@@ -9,7 +9,7 @@
 **做：**
 
 - provider 多账号（accounts）与日 token 配额；账号级失败转移。
-- Anthropic Messages / Gemini generateContent 非流式翻译。
+- Anthropic Messages / Gemini generateContent 翻译（非流式 + 兼容流式）。
 - 可选 `GQY_AUTH_TOKEN` 鉴权与 `GQY_RATE_LIMIT` 限流。
 
 - 从 `$GQY_HOME/providers.json` 读取多个 OpenAI 兼容 provider；环境变量 `GQY_API_BASE/KEY/MODEL` 作为兜底 provider。
@@ -170,7 +170,7 @@ provider 的 `accounts[]` 每个账号独立并发/冷却/用量；`daily_token_
 
 ### 协议端点
 
-`POST /v1/messages` 与 `POST /v1beta/models/{model}:generateContent` 复用 `Router.Complete`，做非流式翻译；流式明确返回 400。
+`POST /v1/messages` 与 `POST /v1beta/models/{model}:generateContent` 复用 `Router.Complete`；非流式返回完整 JSON，流式按最终结果分块发 SSE。
 
 ### GET /v1/models
 

@@ -36,9 +36,8 @@
 | OpenAI 兼容端点 | `/v1/chat/completions` | 可用 | 非流式 + 兼容流式 |
 | 模型列表 | `/v1/models` | 可用 | provider / group |
 | 状态接口 | `/api/gateway/status` | 可用 | 健康、调用数、冷却 |
-| Anthropic / Gemini 协议 | `/v1/messages`、`/v1beta/models/*` | 可用 | 非流式翻译；流式明确拒绝 |
+| Anthropic / Gemini 协议 | `/v1/messages`、`/v1beta/models/*` | 可用 | 非流式 + 兼容流式 |
 | 多账号 / 配额 | provider `accounts` | 可用 | 账号级失败转移、日 token 上限（内存） |
-| 隐私 masking | — | 未开始 | 后置 |
 | 访问令牌 | `GQY_AUTH_TOKEN` | 可用 | Bearer / cookie；前端 401 换 token |
 
 ## 工具与插件
@@ -54,7 +53,6 @@
 | 进程组回收 | 自动 | 可用 | stdin EOF / SIGTERM / SIGKILL |
 | 插件服务依赖 | manifest `provides/requires` | 可用 | 缺依赖拒绝加载、有依赖拒绝卸载 |
 | 远程插件 | unix / tcp | 可用 | 换行 JSON-RPC，不拉起进程 |
-| 插件市场 | — | 未开始 | 后置 |
 
 ## 评测
 
@@ -104,3 +102,11 @@
 | 服务端鉴权 | 可用 | `GQY_AUTH_TOKEN`，默认空=仅本机 |
 | 限流 | 可用 | `GQY_RATE_LIMIT` 每分钟/客户端 |
 | 清理命令 | 可用 | `cmd/gqy-clean -ttl 720h` |
+| 日志轮转 | 可用 | 插件 stderr 超过 1 MB 轮转 .1 |
+
+## 非目标（当前不做）
+
+- 厂商订阅 OAuth（当前是通用 API key 账号 + 日 token 配额）。
+- 请求/响应隐私 masking（日志与工具参数已脱敏）。
+- 插件市场、插件权限审批、崩溃自动重启。
+- 多设备会话回灌。

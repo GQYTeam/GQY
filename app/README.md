@@ -248,8 +248,8 @@ npm start                 # cmd/gqy-server 自动读取 .env，真实环境变�
 | `POST` | `/api/tools/external` | `{ enabled }` 运行时切换外部工具注入 |
 | `GET` | `/v1/models` | OpenAI 风格模型列表（`provider/model` 与 `group/<id>`） |
 | `POST` | `/v1/chat/completions` | OpenAI 兼容端点；非流式 + 兼容流式（当前按最终文本分块） |
-| `POST` | `/v1/messages` | Anthropic Messages 非流式翻译 |
-| `POST` | `/v1beta/models/{model}:generateContent` | Gemini generateContent 非流式翻译 |
+| `POST` | `/v1/messages` | Anthropic Messages 翻译；非流式 + 兼容流式 |
+| `POST` | `/v1beta/models/{model}:generateContent` | Gemini generateContent 翻译；非流式 + 兼容流式 |
 | `GET` | `/api/github/auth` | `{ url }`：GitHub 授权页地址；未配置时 503 |
 | `GET` | `/api/github/callback` | OAuth 回调：换 token、读账户、落盘，然后跳回 `/?github=connected&login=...` |
 | `GET` | `/api/github/me` | `{ connected, account? }`；只返回账户信息，不返回 token |

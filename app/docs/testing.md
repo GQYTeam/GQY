@@ -52,7 +52,7 @@ npm run smoke      # 50 项端到端
 
 1. `POST /v1/messages`：Anthropic 文本块、图片块、tools 能翻译成内部消息；响应含 text / tool_use / usage。
 2. `POST /v1beta/models/{model}:generateContent`：Gemini contents / systemInstruction / functionDeclarations 能翻译；响应含 parts / usageMetadata。
-3. 流式 Anthropic / Gemini 当前明确返回 400。
+3. 流式 Anthropic / Gemini 返回 SSE（按最终结果分块，不是上游逐 token 透传）。
 
 ## 网关
 

@@ -6,7 +6,7 @@
 
 | 文档 | 内容 | 落地状态 |
 | --- | --- | --- |
-| `AboutProjectFile.md` | Artifact / Runtime Files / Workspace / Session 边界，`$GQY_HOME/sessions/$SESSION_ID/{tmp,logs,io}` 目录规范 | 会话落盘、上传、`gqy-clean` TTL 清理已实现；日志轮转未做 |
+| `AboutProjectFile.md` | Artifact / Runtime Files / Workspace / Session 边界，`$GQY_HOME/sessions/$SESSION_ID/{tmp,logs,io}` 目录规范 | 会话落盘、上传、`gqy-clean` TTL 清理与插件日志轮转已实现 |
 | `AboutUiPages.md` | 页面清单：灯箱、设置、看板、用量、初始化引导、关键词浮窗 | 全部已做；看板为本机任务卡 |
 | `AboutAiOtput.md` | 输出与代码风格红线 | 持续遵守 |
 | `AboutPlugin.md` | 插件运行时 + 多社区适配器：分层、并发、远程、进程回收、契约测试 | 已落地统一模型、原生/MCP/unix/tcp 适配器、服务依赖、进程回收与单测；权限审批/崩溃重启未做 |
