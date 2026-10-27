@@ -76,8 +76,16 @@
     }
     if (!cachedPattern) return html;
     const re = cachedPattern;
+    let skipDepth = 0;
     return String(html).split(/(<[^>]*>)/).map((part) => {
-      if (!part || part[0] === '<') return part;
+      if (!part) return part;
+      if (part[0] === '<') {
+        const tag = part.toLowerCase();
+        if (/^<(code|pre|a|button)\b/.test(tag) && !/\/>$/.test(tag)) skipDepth += 1;
+        else if (/^<\/(code|pre|a|button)>/.test(tag)) skipDepth = Math.max(0, skipDepth - 1);
+        return part;
+      }
+      if (skipDepth > 0) return part;
       return part.replace(re, (match) => {
         const entry = find(match);
         if (!entry) return match;

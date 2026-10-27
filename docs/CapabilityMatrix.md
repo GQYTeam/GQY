@@ -14,26 +14,26 @@
 | 附件预览 | 输入框 / 拖拽 | 部分 | 仅本地预览，不上传 |
 | 草稿 | 切换会话 | 可用 | 按会话保存 |
 | 重试 / 停止 | 消息 / 输入框 | 可用 | AbortController |
-| 人设 | 设置 → 人设 | 目标可用 | system prompt 注入 |
-| 记忆 | 设置 → 记忆 | 目标可用 | 手动条目注入 |
-| 知识库 | 设置 → 知识库 | 目标可用 | 关键词匹配注入，无向量检索 |
-| 关键词浮窗 | 正文术语 | 目标可用 | 本地术语表 |
+| 人设 | 设置 → 人设 | 可用 | system prompt 注入 |
+| 记忆 | 设置 → 记忆 | 可用 | 手动条目注入 |
+| 知识库 | 设置 → 知识库 | 可用 | 关键词匹配注入，无向量检索 |
+| 关键词浮窗 | 正文术语 | 可用 | 本地术语表 |
 
 ## 网关
 
 | 能力 | 入口 | 状态 | 说明 |
 | --- | --- | --- | --- |
-| 多 provider | providers.json | 目标可用 | 环境变量 provider 兜底 |
-| 模型解析 | `provider/model`、`group/id` | 目标可用 | 裸模型名按 provider 匹配 |
-| 路由组 | routing.json | 目标可用 | order / rotate / usage |
-| 失败转移 | 自动 | 目标可用 | 响应开始前，最多 3 次 |
-| 健康 / 冷却 | 自动 | 目标可用 | 429 / 5xx / 连接错误 |
-| 并发限制 | 自动 | 目标可用 | 每 provider 信号量 + 有界等待 |
-| 会话亲和 | 自动 | 目标可用 | 内存态 |
-| 请求日志 | gateway/requests.jsonl | 目标可用 | 不落正文 |
-| OpenAI 兼容端点 | `/v1/chat/completions` | 目标可用 | 非流式 + 兼容流式 |
-| 模型列表 | `/v1/models` | 目标可用 | provider / group |
-| 状态接口 | `/api/gateway/status` | 目标可用 | 健康、调用数、冷却 |
+| 多 provider | providers.json | 可用 | 环境变量 provider 兜底 |
+| 模型解析 | `provider/model`、`group/id` | 可用 | 裸模型名按 provider 匹配 |
+| 路由组 | routing.json | 可用 | order / rotate / usage |
+| 失败转移 | 自动 | 可用 | 响应开始前，最多 3 次 |
+| 健康 / 冷却 | 自动 | 可用 | 429 / 5xx / 连接错误 |
+| 并发限制 | 自动 | 可用 | 每 provider 信号量 + 有界等待 |
+| 会话亲和 | 自动 | 可用 | 内存态 |
+| 请求日志 | gateway/requests.jsonl | 可用 | 不落正文 |
+| OpenAI 兼容端点 | `/v1/chat/completions` | 可用 | 非流式 + 兼容流式 |
+| 模型列表 | `/v1/models` | 可用 | provider / group |
+| 状态接口 | `/api/gateway/status` | 可用 | 健康、调用数、冷却 |
 | Anthropic / Gemini 协议 | — | 未开始 | 后置 |
 | 订阅账号 / 配额 | — | 未开始 | 后置 |
 | 隐私 masking | — | 未开始 | 后置 |
@@ -43,12 +43,12 @@
 | 能力 | 入口 | 状态 | 说明 |
 | --- | --- | --- | --- |
 | 核心工具 | 自动注入 | 可用 | read / edit / shell / list_dir / websearch / ask_user |
-| 外部工具 | `GQY_ENABLE_EXTERNAL` | 可用 | provider_usage |
-| 运行时开关 | 设置 → 工具 | 目标可用 | `/api/tools/external` |
-| 插件发现 | `$GQY_HOME/plugins/*/manifest.json` | 目标可用 | 原生 + MCP |
-| 插件加载 / 卸载 | 扩展 / 软件包 | 目标可用 | 状态机、幂等 |
-| 插件动作调用 | HTTP / 工具 | 目标可用 | 原生 JSON-RPC / MCP |
-| 进程组回收 | 自动 | 目标可用 | stdin EOF / SIGTERM / SIGKILL |
+| 外部工具 | `GQY_ENABLE_EXTERNAL` / 设置 | 可用 | provider_usage + 插件动作 |
+| 运行时开关 | 设置 → 工具 | 可用 | `/api/tools/external` |
+| 插件发现 | `$GQY_HOME/plugins/*/manifest.json` | 可用 | 原生 + MCP |
+| 插件加载 / 卸载 | 扩展 / 软件包 | 可用 | 状态机、幂等 |
+| 插件动作调用 | HTTP / 工具 | 可用 | 原生 JSON-RPC / MCP |
+| 进程组回收 | 自动 | 可用 | stdin EOF / SIGTERM / SIGKILL |
 | 插件服务依赖 | — | 未开始 | 后置 |
 | 远程插件 | — | 未开始 | 后置 |
 | 插件市场 | — | 未开始 | 后置 |
@@ -57,12 +57,12 @@
 
 | 能力 | 入口 | 状态 | 说明 |
 | --- | --- | --- | --- |
-| 三维矩阵 | `cmd/eval-gateway` | 目标可用 | prompt / schema / return |
-| 单次对话循环 | CLI | 目标可用 | 工具执行 + 回填 |
-| 规则判定 | CLI | 目标可用 | 调用/参数/最终答案 |
-| 录制 / 报告 | `docs/test_call_*` | 目标可用 | runs.jsonl / trace / report |
-| 重放 | CLI `-stage replay` | 目标可用 | 不发真实请求 |
-| 故障注入 | 用例配置 | 目标可用 | empty / error / timeout |
+| 三维矩阵 | `cmd/gqy-eval` | 可用 | prompt / schema / return |
+| 单次对话循环 | CLI | 可用 | 工具执行 + 回填 |
+| 规则判定 | CLI | 可用 | 调用/参数/最终答案 |
+| 录制 / 报告 | `docs/test_call_*` | 可用 | runs.jsonl / trace / report |
+| 重放 | CLI `-replay` | 可用 | 不发真实请求 |
+| 故障注入 | 用例配置 | 可用 | empty / error / timeout |
 | 模型裁判 | — | 未开始 | 后置 |
 
 ## 页面
@@ -71,19 +71,19 @@
 | --- | --- | --- | --- |
 | 对话 | 侧栏 | 可用 | |
 | 设置 | 账户按钮 | 可用 | 10 tab + 搜索 |
-| 引导 | 首次打开 | 目标可用 | |
-| 看板 | 侧栏 | 目标可用 | 本机任务卡 |
-| 用量 | 顶栏 ⚡ / 设置 | 目标可用 | 本地 + 服务端聚合 |
-| 扩展 | 侧栏 | 目标可用 | 插件 / GitHub |
-| 人设 | 设置 | 目标可用 | |
-| 记忆 | 设置 | 目标可用 | |
-| 知识库 | 设置 | 目标可用 | 术语 + 文档 |
-| 软件包 | 设置 | 目标可用 | 插件清单 |
-| 工具 | 设置 | 目标可用 | 核心 / 外部 / 插件 |
-| 账户 | 设置 | 目标可用 | 本机单用户 |
-| 语音 | 设置 | 目标可用 | 浏览器能力 |
-| 多文件产物 | — | 未开始 | 后置 |
-| 作品预览 | — | 未开始 | 后置 |
+| 引导 | 首次打开 | 可用 | |
+| 看板 | 侧栏 | 可用 | 本机任务卡 |
+| 用量 | 顶栏 ⚡ / 设置 | 可用 | 本地 + 服务端聚合 |
+| 扩展 | 侧栏 | 可用 | 插件 / GitHub |
+| 人设 | 设置 | 可用 | |
+| 记忆 | 设置 | 可用 | |
+| 知识库 | 设置 | 可用 | 术语 + 文档 |
+| 软件包 | 设置 | 可用 | 插件清单 |
+| 工具 | 设置 | 可用 | 核心 / 外部 / 插件 |
+| 账户 | 设置 | 可用 | 本机单用户 + GitHub 状态 |
+| 语音 | 设置 | 部分 | 开关 + 浏览器 SpeechRecognition；唤醒词未接 |
+| 多文件产物 | — | 未开始 | 仍是单 artifact |
+| 作品预览 | 代码灯箱 | 可用 | Markdown / HTML / SVG |
 
 ## 运维与安全
 

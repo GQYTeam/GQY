@@ -6,7 +6,7 @@
 
 **做：**
 
-- JSON 配置（不引入 YAML 依赖）：用例、三个维度、重复次数、输出目录。
+- JSON 配置（不引入 YAML 依赖）：用例、三个维度、重复次数、并发与超时。输出目录由 CLI `-out` 指定。
 - 矩阵生成：单因素、两两组合、全组合；每轮打 `round` / `axis` 标签。
 - 单次对话循环：渲染 prompt / tools / 返回值 → 请求模型 → 执行工具 → 回填 → 直到最终答案或轮次上限。
 - 规则判定：是否调用、调用哪个、参数包含、最终答案关键事实、禁止调用。
@@ -28,25 +28,32 @@
 {
   "name": "echo-tool",
   "model": "deepseek/deepseek-chat",
-  "tool": "plugin__echo__echo",
+  "tool": "echo__echo",
   "cases": "cases.json",
-  "repeats": 2,
-  "max_rounds": 6,
+  "repeats": 1,
+  "concurrency": 1,
+  "max_rounds": 4,
+  "strict_schema": true,
   "stage": "single",
+  "round": "r1",
   "axes": {
-    "prompt": ["none", "basic", "when-how"],
+    "prompt": ["basic", "when-how", "strict"],
     "schema": ["min", "full", "example"],
-    "return": ["raw", "trim", "summary"]
+    "return": ["raw", "summary"]
   },
   "fixed": {"prompt": "basic", "schema": "full", "return": "raw"},
-  "out": "../../docs/test_call_echo"
+  "timeouts": {"request_ms": 60000, "tool_ms": 10000, "total_ms": 180000, "retries": 1}
 }
 ```
 
-- `stage`：`single`（固定两维，扫第三维）、`pair`（两两组合）、`full`、`replay`。
-- `fixed`：单因素扫描时的默认值。
-- `max_rounds`：单次对话最多工具轮次，默认 6。
-- `out`：结果目录；CLI `-out` 可覆盖。
+- `tool`：评测宿主已注册的工具名；真实插件工具是 `<pluginID>__<action>`，宿主持有 `$GQY_HOME/plugins` 下对应插件。
+- `stage`：`single`（固定两维，扫第三维）、`pair`（两两组合）、`full`。
+- `fixed`：单因素/两两组合时的默认值。
+- `round`：轮次标签，写进记录与目录。
+- `max_rounds`：单次对话最多工具轮次。
+- `strict_schema`：参数校验失败时是否拦截执行。
+- `timeouts`：请求 / 工具 / 总超时与重试退避。
+- 输出目录不在配置里，由 CLI `-out` 必填（dry-run/replay 除外）。完整字段见 `docs/eval.md`。
 
 `cases.json`：
 
@@ -59,7 +66,7 @@
       "input": "把我说的这句话原样回显：hello",
       "expect": {
         "should_call": true,
-        "tool": "plugin__echo__echo",
+        "tool": "echo__echo",
         "arg_contains": {"text": "hello"},
         "final_contains": ["hello"],
         "must_not_call": false
@@ -68,6 +75,14 @@
   ]
 }
 ```
+
+故障注入写成对象：
+
+```json
+{"inject": {"mode": "error", "tool": "echo__echo", "times": 1, "message": "注入故障"}}
+```
+
+`mode`：`empty` / `error` / `timeout` / `slow`；`slow` 用 `delay_ms`。
 
 ## 维度渲染
 
@@ -185,10 +200,13 @@ type Verdict struct {
 ## CLI
 
 ```bash
-go run ./cmd/eval-gateway -config evals/echo/config.json
-go run ./cmd/eval-gateway -config ... -out /tmp/eval -dry-run
-go run ./cmd/eval-gateway -config ... -stage replay -trace runs/.../trace
+go run ./cmd/gqy-eval -config evals/echo/config.json -dry-run
+go run ./cmd/gqy-eval -config evals/echo/config.json -out ../docs/test_call_echo
+go run ./cmd/gqy-eval -config ... -replay /tmp/eval/runs/r1-.../trace
+go run ./cmd/gqy-eval -config ... -out /tmp/eval -filter prompt=basic
 ```
+
+实现包：`internal/eval/{config,cases,matrix,runner,judge,result,recorder,report,replay,engine,host}`；`host` 注册核心工具与工具名对应的真实插件。
 
 `-dry-run` 只打印矩阵与用例数，不发请求。
 

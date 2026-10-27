@@ -9,7 +9,7 @@
 import { spawn, execFile } from 'node:child_process';
 import http from 'node:http';
 import { mkdtemp, rm, readFile, readdir } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, cpSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -97,6 +97,13 @@ async function cleanup() {
 try {
   serverBin = await buildServer();
   console.log('  编译 cmd/gqy-server: ok');
+
+  try {
+    mkdirSync(join(HOME, 'plugins'), { recursive: true });
+    cpSync(join(ROOT, 'plugins', 'echo'), join(HOME, 'plugins', 'echo'), { recursive: true });
+  } catch (err) {
+    console.log('  跳过示例插件复制：' + err.message);
+  }
 
   server = spawn(serverBin, [], {
     cwd: ROOT,
@@ -554,6 +561,125 @@ try {
   await sleep(90);
   check('灯箱在 390 / 600 / 1100 宽度不溢出',
     widthChecks.every((x) => x.panel && x.top && x.bar), JSON.stringify(widthChecks));
+
+  /* 新功能：引导 / 看板 / 术语 / 设置页 / 插件 */
+  const onboarding = await evaluate(`(() => {
+    const el = document.querySelector('#onboarding');
+    const shown = !!el && !el.hidden;
+    document.querySelector('#onboardSkip').click();
+    const saved = JSON.parse(localStorage.getItem('claude-webchat:v7') || '{}');
+    return { shown, hidden: el.hidden, onboarded: saved.onboarded === true };
+  })()`);
+  check('首次引导可跳过', onboarding.shown && onboarding.hidden && onboarding.onboarded, JSON.stringify(onboarding));
+
+  const board = await evaluate(`(() => {
+    document.querySelector('#boardBtn').click();
+    const opened = !document.querySelector('#boardView').hidden;
+    const input = document.querySelector('#boardInput');
+    input.value = '测试卡片';
+    document.querySelector('#boardForm').requestSubmit();
+    const cards = document.querySelectorAll('.board-card').length;
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    return { opened, cards, back: document.querySelector('#boardView').hidden };
+  })()`);
+  check('看板可打开 / 加卡 / 返回', board.opened && board.cards === 1 && board.back, JSON.stringify(board));
+
+  const glossary = await evaluate(`(() => {
+    const html = GQY.glossary.decorate('RAG 与 embedding 的 token');
+    const code = GQY.glossary.decorate('<code>RAG</code>');
+    return {
+      rag: html.includes('data-term="RAG"'),
+      emb: html.includes('data-term="embedding"'),
+      token: html.includes('data-term="token"'),
+      codeSkipped: !code.includes('data-term')
+    };
+  })()`);
+  check('术语浮窗装饰正文且跳过代码', glossary.rag && glossary.emb && glossary.token && glossary.codeSkipped, JSON.stringify(glossary));
+
+  await evaluate('document.querySelector("#accountBtn").click()');
+  await sleep(250);
+
+  await evaluate('document.querySelector(\'[data-settings-tab="personas"]\').click()');
+  await sleep(120);
+  const personaAdded = await evaluate(`(() => {
+    const form = document.querySelector('[data-persona-form]');
+    form.querySelector('[name=name]').value = '测试人设';
+    form.querySelector('[name=system]').value = '你是测试人设';
+    form.requestSubmit();
+    const saved = JSON.parse(localStorage.getItem('claude-webchat:v7') || '{}');
+    return saved.personas ? saved.personas.length : 0;
+  })()`);
+  check('人设可新增', personaAdded >= 2, String(personaAdded));
+
+  await evaluate('document.querySelector(\'[data-settings-tab="memory"]\').click()');
+  await sleep(120);
+  const memoryAdded = await evaluate(`(() => {
+    const form = document.querySelector('[data-memory-form]');
+    form.querySelector('[name=text]').value = '我偏好 Go 标准库';
+    form.requestSubmit();
+    const saved = JSON.parse(localStorage.getItem('claude-webchat:v7') || '{}');
+    return saved.memories ? saved.memories.length : 0;
+  })()`);
+  check('记忆可新增', memoryAdded === 1, String(memoryAdded));
+
+  await evaluate('document.querySelector(\'[data-settings-tab="knowledge"]\').click()');
+  await sleep(120);
+  const glossaryAdded = await evaluate(`(() => {
+    const form = document.querySelector('[data-glossary-form]');
+    form.querySelector('[name=term]').value = '测试术语';
+    form.querySelector('[name=definition]').value = '测试定义';
+    form.requestSubmit();
+    const saved = JSON.parse(localStorage.getItem('claude-webchat:v7') || '{}');
+    return saved.glossary ? saved.glossary.length : 0;
+  })()`);
+  check('自定义术语可新增', glossaryAdded === 1, String(glossaryAdded));
+
+  await evaluate('document.querySelector(\'[data-settings-tab="tools"]\').click()');
+  await sleep(500);
+  const toolsPanel = await evaluate(`(() => {
+    const panel = document.querySelector('#toolsPanel');
+    const hasRead = /read/.test(panel.textContent);
+    const sw = panel.querySelector('[data-external-toggle]');
+    if (sw) sw.click();
+    return { hasRead, hasSwitch: !!sw };
+  })()`);
+  await sleep(500);
+  const externalOn = await evaluate(`(() => {
+    const sw = document.querySelector('#toolsPanel [data-external-toggle]');
+    return sw ? sw.getAttribute('aria-checked') : '';
+  })()`);
+  check('工具页列出工具并可切外部注入', toolsPanel.hasRead && toolsPanel.hasSwitch && externalOn === 'true', JSON.stringify({ toolsPanel, externalOn }));
+
+  await evaluate('document.querySelector(\'[data-settings-tab="packages"]\').click()');
+  await sleep(500);
+  const packagesBefore = await evaluate(`document.querySelector('#packagesPanel').textContent`);
+  const pluginLoaded = await evaluate(`(async () => {
+    const btn = document.querySelector('[data-plugin-load="echo"]');
+    if (!btn) return { error: 'no load button', text: document.querySelector('#packagesPanel').textContent.slice(0, 80) };
+    btn.click();
+    await new Promise((r) => setTimeout(r, 600));
+    const text = document.querySelector('#packagesPanel').textContent;
+    const unload = document.querySelector('[data-plugin-unload="echo"]');
+    if (unload) unload.click();
+    await new Promise((r) => setTimeout(r, 400));
+    return { ready: /ready/.test(text), unloaded: /discovered/.test(document.querySelector('#packagesPanel').textContent) };
+  })()`);
+  check('软件包页发现 / 加载 / 卸载插件',
+    /Echo/.test(packagesBefore) && pluginLoaded.ready && pluginLoaded.unloaded,
+    JSON.stringify({ packages: packagesBefore.slice(0, 80), pluginLoaded }));
+
+  await evaluate('document.querySelector(\'[data-settings-tab="usage"]\').click()');
+  await sleep(400);
+  const usagePanel = await evaluate(`document.querySelector('#usagePanel').textContent`);
+  check('用量页渲染真实数据', /Token/.test(usagePanel) && /本地存储/.test(usagePanel), usagePanel.slice(0, 80));
+
+  await evaluate('document.querySelector(\'[data-settings-tab="accounts"]\').click()');
+  await sleep(500);
+  const accounts = await evaluate(`document.querySelector('#accountsPanel').textContent`);
+  check('账户页渲染本机状态', /本机单用户/.test(accounts) && /GitHub/.test(accounts), accounts.slice(0, 80));
+
+  await evaluate('document.querySelector("#settingsLayer [data-settings-close]").click()');
+  await sleep(200);
 
   check('浏览器控制台无报错', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
 
