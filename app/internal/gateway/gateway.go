@@ -631,6 +631,9 @@ func (r *Router) Models() []map[string]any {
 	defer r.mu.RUnlock()
 	out := []map[string]any{}
 	for _, p := range r.providers {
+		if p.APIKey == "" {
+			continue
+		}
 		models := p.Models
 		if len(models) == 0 && p.DefaultModel != "" {
 			models = []string{p.DefaultModel}
