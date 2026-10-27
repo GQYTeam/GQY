@@ -26,6 +26,7 @@ npm run check    # node --check 所有 JS + go vet ./...
 npm run smoke    # 编译后端 + 无头 Chrome 端到端
 npm run files    # 列出项目文件
 go run ./cmd/gqy-import -src ... [-dry-run]  # 导入旧备份（需系统 sqlite3）
+go run ./cmd/gqy-eval -config internal/eval/testdata/sample.json -dry-run  # 评测网关矩阵
 ```
 
 ## 目录与加载顺序
@@ -36,15 +37,19 @@ app.js              事件接线 + boot；不持有业务逻辑
 go.mod              module 声明（gqy）
 cmd/gqy-server/     服务端入口：装配 config/httpapi，处理信号与优雅关闭
 cmd/gqy-import/     旧备份导入器：sqlite3 导出 → session.Store / $GQY_HOME
+cmd/gqy-eval/       评测网关 CLI：矩阵执行、报告、trace 回放
 internal/
   config/           环境变量解析（.env / 密钥只进服务端）
   catalog/          models.dev 拉取、缓存、过滤、元数据（context/模态/成本）
   provider/         SSE 转发：chat / responses 两种协议 → 内部事件
-  agent/            agent loop：工具调用、回填、usage 累加、轮次上限
+  gateway/          本地多 provider 网关：路由、失败转移、健康/冷却、会话亲和
+  agent/            agent loop：工具调用、回填、usage 累加、轮次上限、单工具超时
   tool/             工具契约 / 注册表 / 路径沙箱 / 核心工具 read·edit·shell·list_dir·websearch·ask_user / 外部工具 provider_usage
+  plugin/           插件运行时：原生 stdio JSON-RPC + MCP stdio、状态机、进程组回收
+  eval/             评测网关：config/cases/matrix/runner/judge/recorder/report/replay
   session/          会话落盘（AboutProjectFile.md 目录规范）+ 用量聚合
   github/           GitHub OAuth 只读账户（token 只落服务端）
-  httpapi/          路由、中间件、JSON、静态白名单
+  httpapi/          路由、中间件、JSON、静态白名单、插件与工具接口
 js/core.js          工具与常量（esc / uid / 时间 / 格式化 / token 估算）
 js/markdown.js      Markdown、代码高亮、链接卡片、safeUrl
 js/clawd.js         Clawd 精灵播放 + 活动状态机
@@ -54,15 +59,19 @@ js/render.js        消息 HTML、侧栏、线程、上下文用量浮层
 js/chat.js          发送、流式管线、会话切换与镜像
 js/files.js         文件面板、代码/图片灯箱、提问卡片
 js/menu.js          浮层菜单、推理滑块、模型选择、附件、语音输入
-js/settings.js      设置窗口、用量、导入导出、扩展与 GitHub
+js/settings.js      设置窗口、用量、导入导出、扩展、GitHub、人设/记忆/知识库/软件包
+js/glossary.js      关键词浮窗（本地术语表）
+js/board.js         看板
+js/onboarding.js    首次引导
 scripts/smoke.mjs   端到端冒烟（go build + CDP，无依赖）
 skills/gh.md         agent 的 gh 命令参考（通过 shell 工具使用）
-styles/             base → shell → chat → ui → pages → panels → media → settings → responsive
+plugins/            示例插件（echo：native stdio 协议）
+styles/             base → shell → chat → ui → pages → panels → media → settings → features → responsive
 assets/             头像、字标、favicon、封面、Clawd 精灵图
 docs/               架构、页面、数据、工具、测试、路线图
 ```
 
-JS 全是经典脚本，顺序固定：`core → markdown → clawd → api → store → render → chat → files → menu → settings → app`。
+JS 全是经典脚本，顺序固定：`core → markdown → clawd → api → store → render → chat → files → menu → settings → glossary → board → onboarding → app`。
 共享能力挂在 `window.GQY`，跨模块状态与服务挂在 `window.GQY.app`（`js/store.js` 建立，其余 service 用 `Object.assign` 挂上去），模块之间不互相 import。
 CSS 按 `index.html` 的顺序级联，新样式放在 `responsive.css` 之前。
 
@@ -92,7 +101,7 @@ CSS 按 `index.html` 的顺序级联，新样式放在 `responsive.css` 之前�
 
 ## 已知边界（改动前先读）
 
-- 插件系统只有最小模型：`tool.Tool` + 进程内注册表；`docs/AboutPlugin.md` 里的适配器、注册中心、子进程/远程运行时、契约测试都未实现。
+- 插件运行时已落地进程内注册表 + 原生 stdio JSON-RPC + MCP stdio（加载 / 调用 / 卸载 / 超时 / 进程组回收）；远程传输、跨社区契约测试矩阵、崩溃恢复仍待补。
 - `websearch` 是占位工具，调用直接返回“尚未接入搜索后端”。
 - 工具沙箱默认根 = workspace + `$GQY_HOME/sessions`，`GQY_TOOL_ROOTS` 可追加；`GQY_HOME/github_token.json` 显式拒绝。`shell` 有超时、输出上限与可选白名单，但空白名单时仍可访问任意路径；没有交互式审批。`GQY_ENABLE_EXTERNAL` 只控制注入，不是权限开关。
 - `ask_user` 的续跑是无状态的：服务端返回 `question` 后结束本轮，前端把回答作为新 user 消息再请求一次；工具调用历史不随回答回传。
@@ -104,7 +113,7 @@ CSS 按 `index.html` 的顺序级联，新样式放在 `responsive.css` 之前�
 - Go 服务端定位前端目录：优先当前目录，其次可执行文件所在目录（`findStaticRoot`）。生产部署把二进制和 `index.html` 放一起即可脱离源码树运行。
 - 只有当前会话会镜像到服务端；刷新后以 localStorage 为准（服务端不做回灌）。
 - GitHub 集成只做只读账户信息；仓库操作走 `skills/gh.md` + 本机 `gh` CLI，不通过 OAuth token 代调。
-- 设置里 10 个 tab 全部可切换，但人设 / 记忆 / 知识库 / 软件包 / 用量详情 / 账户权限目前是占位。
+- 设置里 10 个 tab 全部可切换；人设 / 记忆 / 知识库 / 软件包已可用，语音与账户权限仍是占位。
 
 ## 仓库与产品文档
 
@@ -113,8 +122,8 @@ CSS 按 `index.html` 的顺序级联，新样式放在 `responsive.css` 之前�
 - `docs/AboutUiPages.md`：页面清单（灯箱、设置、看板、用量、初始化引导、关键词浮窗）。
 - `docs/AboutProjectFile.md`：Artifact / Runtime Files / Workspace / Session 的边界，`$GQY_HOME/sessions/$SESSION_ID/{tmp,logs,io}` 的目录规范。
 - `docs/AboutAiOtput.md`：输出风格红线。
-- `docs/AboutPlugin.md`：插件运行时 + 多社区适配器设计（四层、并发、远程、进程回收、契约测试）。当前只落地了统一 `Tool` 契约与进程内注册表。
-- `docs/AboutAitestCallToolOrPlugin.md`：工具/插件调用评测网关设计（三维度实验矩阵、判定、落盘）。尚未实现。
+- `docs/AboutPlugin.md`：插件运行时 + 多社区适配器设计（四层、并发、远程、进程回收、契约测试）。当前落地统一 `Tool` 契约、进程内注册表、原生 stdio 与 MCP stdio 适配器。
+- `docs/AboutAitestCallToolOrPlugin.md`：工具/插件调用评测网关设计（三维度实验矩阵、判定、落盘）。已落地 `internal/eval` + `cmd/gqy-eval`，用法见 `docs/eval.md`。
 
 ### 文案风格（来自 AboutAiOtput）
 
@@ -128,6 +137,7 @@ CSS 按 `index.html` 的顺序级联，新样式放在 `responsive.css` 之前�
 - `docs/architecture.md`：模块、状态流、流式管线、后端
 - `docs/pages.md`：页面与组件地图、设置 tab
 - `docs/data-model.md`：state / message / localStorage / 镜像
-- `docs/tools.md`：工具契约、核心/外部工具、agent loop、ask_user
+- `docs/tools.md`：工具契约、核心/外部工具、沙箱与超时、agent loop、ask_user
+- `docs/eval.md`：评测网关配置、命令、落盘与回放
 - `docs/testing.md`：手动与 headless 验证
 - `docs/roadmap.md`：未来计划与优先级

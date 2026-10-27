@@ -10,9 +10,9 @@
 # 只看矩阵，不执行、不落盘
 go run ./cmd/gqy-eval -config internal/eval/testdata/sample.json -dry-run
 
-# 真实运行：需要模型环境和输出目录
+# 真实运行：需要可用 provider（GQY_API_KEY 或 $GQY_HOME/providers.json）和输出目录
 export GQY_API_KEY=sk-...
-export GQY_API_BASE=https://api.deepseek.com/v1   # 可选，默认 deepseek
+export GQY_API_BASE=https://api.deepseek.com/v1   # 可选，单 provider 时使用
 go run ./cmd/gqy-eval -config internal/eval/testdata/sample.json -out /tmp/gqy-eval
 
 # 过滤配置；-filter 可重复，值用逗号分隔
@@ -235,8 +235,8 @@ go run ./cmd/gqy-eval -config internal/eval/testdata/sample.json -dry-run
 
 ## 剩余风险
 
-- 真实模型调用依赖 `GQY_API_KEY`；无密钥只能 dry-run/replay。
-- `shell` 工具以服务端进程权限执行，评测用例不应让模型执行破坏性命令。
+- 真实模型调用走 `internal/gateway`：`GQY_API_KEY` 或 `$GQY_HOME/providers.json` 任一可用即可；都没有只能 dry-run/replay。
+- 评测宿主的 `read/edit/shell/list_dir` 复用服务端的路径沙箱配置（`GQY_WORKSPACE`、`GQY_TOOL_ROOTS`、`GQY_SHELL_ALLOWLIST`、超时与输出上限），并拒绝 `$GQY_HOME/github_token.json`。当前没有交互式审批，评测用例不应让模型执行破坏性命令。
 - trace 脱敏基于字段名和常见密钥前缀，非常规密钥格式可能漏网；新增密钥形态时要补规则。
-- 并发下 Completer 必须线程安全；`provider.Upstream` 是无状态对象，满足要求；自定义 Completer 需自行保证。
+- 并发下 Completer 必须线程安全；`gateway.Router` 与 `provider.Upstream` 均满足；自定义 Completer 需自行保证。
 - 回放只重新执行渲染与判定，不会重放工具副作用；工具原始结果以录制的 `ret_raw` 为准。
