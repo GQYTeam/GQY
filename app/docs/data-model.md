@@ -2,9 +2,9 @@
 
 ## localStorage
 
-- 键：`claude-webchat:v7`（结构变更时递增版本号，旧的演示数据直接作废）。
-- 值：整个 `state` 的 JSON。
-- 另有 `gqy:files-width` 保存文件面板宽度。
+- 主键：`claude-webchat:v7`（结构变更时递增版本号，旧数据直接作废）。
+- 值：整个 `state` 的 JSON；序列化时剔除 `url` 字段里的 `blob:` 地址。
+- `gqy:files-width`：文件面板宽度。
 - 所有读写都包在 try/catch 里；配额失败会 toast 提示（“改动只留在内存里”），不再静默丢弃。
 - 保存成功会触发一次会话镜像（服务端可用时）：`PUT /api/sessions/:id`，写入 `$GQY_HOME`。
 
@@ -34,20 +34,32 @@
 
 ```
 $GQY_HOME/sessions/<convId>/
-  manifest.json                  session_id / workspace / artifacts 清单
-  io/context/context.md          可读摘要
-  io/context/messages.jsonl      逐条消息
-  io/output/artifacts/<title>    产物正文
-  logs/tools/YYYY-MM-DD.jsonl    工具调用（参数脱敏）
+  manifest.json                  session_id / workspace / title / 时间 / 消息数 / 产物清单 / 清理策略
+  io/context/context.md          可读摘要（每条消息截断到 8000 字）
+  io/context/messages.jsonl      逐条消息（客户端发来的原始 JSON）
+  io/output/artifacts/<title>    产物正文（单文件上限 2 MB）
+  io/output/index.json           产物文件名清单
+  logs/tools/YYYY-MM-DD.jsonl    工具调用（参数脱敏，按消息日期分文件）
 ```
 
+镜像字段只包含 `mirrorSession()` 挑出来的 `id / role / ts / text / thinking / tools / artifact / usage`。`question`、`attachments` 和草稿不落服务端。
 镜像不参与前端恢复：刷新后仍以 localStorage 为准。删除会话不会删服务端目录（按 `docs/AboutProjectFile.md` 的 TTL 清理）。
 
 ## Message
 
 见 `docs/pages.md` 的字段表。注意：
 
-- `tools[].ms` 是工具执行时长；`status` 只在流式期间是 `running`。
+- `tools[].ms` 是工具执行时长；`status` 流式期间是 `running`，结束后统一为 `done`。
+- `tools[].args` 是 `[key, value]` 对的数组，用于侧栏轨迹展示和落盘脱敏。
 - `artifact.path` 决定文件面板里的目录根（取 dirname）。
-- `question.answer` 为 `{ picks: number[], custom: string }`；一旦存在即视为已回答。
-- 附件的 `url` 可能是 `blob:`，序列化前会被剔除（设置页的导出逻辑）。
+- `question.answer` 为 `{ picks: number[], custom: string }`；一旦存在即视为已回答。回答后还会追加一条 user 消息并触发新请求。
+- `usage` 来自服务端 `done` 事件，字段是 snake_case：`prompt_tokens` / `completion_tokens` / `total_tokens`。
+- 附件的 `url` 可能是 `blob:`，序列化前会被剔除（导出与 localStorage 保存都走同一剔除函数）。
+
+## 服务端持久化
+
+- `github_token.json`：`$GQY_HOME/github_token.json`，0600，含 access token 与账户快照；`GET /api/github/me` 不返回 token。
+- `providers.json`：`$GQY_HOME/providers.json`，0600，由 `cmd/gqy-import` 从旧 `config.jsonc` 提取；`GET /api/providers` 只读返回。
+- 写入统一走 `writeFileAtomic`：建父目录 → 写临时文件（0600）→ rename。
+- 会话 id 只接受 `^[A-Za-z0-9_-]{1,64}$`；产物文件名会过滤非 `A-Za-z0-9_.-` 字符。
+- `messages.jsonl` 最多保留 500 条；产物单文件超过 2 MB 跳过。
