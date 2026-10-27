@@ -709,6 +709,20 @@ try {
   })()`);
   check('provider / 路由组可增删', providerAdmin.added && providerAdmin.grouped && providerAdmin.removed, JSON.stringify(providerAdmin));
 
+  const cleared = await evaluate(`(() => {
+    window.confirm = () => true;
+    document.querySelector('[data-settings-tab="general"]').click();
+    document.querySelector('#clearAll').click();
+    const s = JSON.parse(localStorage.getItem('claude-webchat:v7') || '{}');
+    return {
+      personas: (s.personas || []).length,
+      memories: (s.memories || []).length,
+      convs: (s.workspaces && s.workspaces[0] && s.workspaces[0].convs || []).length,
+      messages: (s.workspaces && s.workspaces[0] && s.workspaces[0].convs[0] && s.workspaces[0].convs[0].messages || []).length
+    };
+  })()`);
+  check('清空对话保留人设/记忆', cleared.personas >= 2 && cleared.memories === 1 && cleared.convs === 1 && cleared.messages === 0, JSON.stringify(cleared));
+
   await evaluate('document.querySelector("#settingsLayer [data-settings-close]").click()');
   await sleep(200);
 

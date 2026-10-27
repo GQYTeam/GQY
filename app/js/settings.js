@@ -421,6 +421,7 @@
       renderServerStatus();
       app.renderAll();
       app.restoreDraft();
+      syncSettingsUI();
       closeSettings();
       setView('chat');
       app.toast('已导入 ' + app.state.workspaces.length + ' 个工作区');
@@ -458,20 +459,22 @@
     const settings = {
       model: app.state.model, effort: app.state.effort,
       fontSize: app.state.fontSize, thinkOpen: app.state.thinkOpen,
-      reduceMotion: app.state.reduceMotion, sidebarCollapsed: app.state.sidebarCollapsed
+      reduceMotion: app.state.reduceMotion, sidebarCollapsed: app.state.sidebarCollapsed,
+      onboarded: app.state.onboarded, voiceEnabled: app.state.voiceEnabled,
+      activePersonaId: app.state.activePersonaId,
+      personas: JSON.parse(JSON.stringify(app.state.personas || [])),
+      memories: JSON.parse(JSON.stringify(app.state.memories || [])),
+      knowledge: JSON.parse(JSON.stringify(app.state.knowledge || [])),
+      glossary: JSON.parse(JSON.stringify(app.state.glossary || []))
     };
     app.resetState();
-    app.state.model = settings.model;
-    app.state.effort = settings.effort;
-    app.state.fontSize = settings.fontSize;
-    app.state.thinkOpen = settings.thinkOpen;
-    app.state.reduceMotion = settings.reduceMotion;
-    app.state.sidebarCollapsed = settings.sidebarCollapsed;
+    Object.assign(app.state, settings);
     applyFontSize();
     el.app.setAttribute('data-sidebar', app.state.sidebarCollapsed ? 'collapsed' : 'open');
     applyReduceMotion();
     app.save();
     app.renderAll();
+    syncSettingsUI();
     closeSettings();
     setView('chat');
     app.toast('已清空全部对话');
