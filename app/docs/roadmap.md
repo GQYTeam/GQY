@@ -32,7 +32,12 @@
 - **看板与人设/记忆/知识库**：设置页的人设、记忆、知识库、软件包、工具、用量、账户从占位转为可用；新增看板、引导、术语浮窗；语音开关已接线（唤醒词未做）。
 - **本地网关**：多 provider、路由组、失败转移、冷却、并发、亲和、请求日志、`/v1/models` 与 `/v1/chat/completions`。
 - **评测宿主接真实插件**：`cmd/gqy-eval` 按 `tool` 前缀加载 `$GQY_HOME/plugins` 下的插件，不再只依赖占位工具。
-- **附件上传通道**：`POST /api/files` 写入 `sessions/<id>/tmp/uploads/`；文本附件注入 user 消息，二进制只落盘。图片内容未接入视觉模型。
+- **附件上传通道**：`POST /api/files` 写入 `sessions/<id>/tmp/uploads/`；文本附件注入 user 消息，图片以 data URL 走多模态 content。
+- **多文件产物**：`write_artifact` 工具写工作区并生成 `artifact.files`，文件面板按真实路径建树。
+- **网关扩展**：provider 账号与日 token 配额、Anthropic Messages / Gemini 非流式翻译、Unix/TCP 远程插件、插件 `provides/requires` 服务依赖。
+- **评测模型裁判**：`judge_model` 可选，规则判定仍是主判定。
+- **暗色主题 / i18n / 分页渲染**：暗色令牌与 `data-theme`；中文 / English 导航与设置标签；长会话只渲染最近 80 条。
+- **可选访问令牌**：`GQY_AUTH_TOKEN` 保护 `/api/*` 与 `/v1/*`，前端 401 时换 cookie。
 
 ## P0 · 结构性
 
@@ -43,20 +48,14 @@
 
 ## P1 · 功能
 
-2. **多文件产物与目录**：`artifact` 支持 `files: [{path, content}]`，文件面板展示真实目录；代码灯箱支持多标签。
-3. **服务端会话回灌**：启动时 `GET /api/sessions` 合并较新的会话，支持多设备。
-4. **网关协议与账号**：Anthropic Messages / Gemini 协议翻译、订阅账号、配额窗口、远程 magpie。
-5. **插件进阶**：远程传输（Unix Socket / gRPC）、服务依赖（Requires/Provides）、权限审批、崩溃自动重启、契约测试矩阵。
-6. **评测进阶**：模型裁判、跨轮比较、`best/current` 自动写回。
+2. **服务端会话回灌**：启动时 `GET /api/sessions` 合并较新的会话，支持多设备。
+3. **插件权限与崩溃恢复**：交互式审批、崩溃自动重启、跨社区契约测试矩阵。
 
 ## P2 · 体验与质量
 
-7. **暗色主题**：令牌集中在 `styles/base.css`，但大量硬编码颜色需要先收敛成令牌，再补 `[data-theme=dark]`。
-8. **i18n**：文案抽到 `locales/`，中英切换；当前为中文硬编码。
-9. **虚拟滚动**：超长会话时只渲染可视区域。
-10. **无障碍**：文件面板与菜单的焦点陷阱补齐（设置/灯箱/图片/用量/扩展已用 `trapTab`）。
-11. **服务端鉴权**：公网部署前加 token 或反向代理鉴权；当前只允许本机。
-12. **工具日志清理**：按 `manifest.cleanup_policy` 落 `gqy clean --expired`，现在只写不删。
+4. **无障碍**：文件面板与菜单的焦点陷阱补齐（设置/灯箱/图片/用量/扩展已用 `trapTab`）。
+5. **工具日志清理**：按 `manifest.cleanup_policy` 落 `gqy clean --expired`，现在只写不删。
+6. **完整 i18n**：当前覆盖导航、看板、引导与设置标签；正文/提示文案仍是中文硬编码。
 
 ## 非目标（先不做）
 

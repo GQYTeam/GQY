@@ -10,7 +10,7 @@
 | 竞态 | `go test -race ./internal/plugin ./internal/gateway ./internal/eval/host` | 全绿 |
 | vet / JS 语法 | `npm run check` | 全绿 |
 | 构建 | `go build ./cmd/gqy-server ./cmd/gqy-eval ./cmd/gqy-import` | 通过 |
-| 端到端 | `npm run smoke` | 45 项全绿 |
+| 端到端 | `npm run smoke` | 50 项全绿 |
 
 冒烟覆盖（摘要）：
 
@@ -22,7 +22,12 @@
 - 工具/插件：工具清单、外部注入开关、示例插件发现/加载/卸载、安装示例入口。
 - 设置：10 tab、搜索、用量、账户、provider/路由组增删、清空对话保留人设/记忆。
 - 上下文：人设/记忆/知识文档注入 system，并与工具系统提示合并。
-- 附件：文本文件上传落盘、文本注入 user 消息。
+- 附件：文本文件上传落盘、文本注入；图片返回 data URL。
+- 网关：provider 账号 / 配额、Anthropic / Gemini 非流式翻译、访问令牌、限流。
+- 插件：Unix 远程适配器、provides/requires 依赖、MCP 示例。
+- 评测：模型裁判、真实插件宿主。
+- 前端：暗色主题、中文/English、长会话分页、多文件产物。
+- 运维：`gqy-clean` TTL 清理。
 - agent loop：假上游两轮工具调用 + 最终答案 + 累计 usage。
 
 ## 手工验证
@@ -34,6 +39,9 @@
 | `/v1/chat/completions` `stream:true` | SSE chunk + usage + `[DONE]`（当前按最终文本分块，不是逐 token 透传） |
 | 插件：加载 echo、`/api/plugins/echo/call`、`/api/tools`、卸载 | 正常；工具名 `echo__echo` 出现和消失 |
 | 插件：加载 mcp-echo、调用 add | 正常；`tools/list` 发现 add，`2+3` 返回 5 |
+| 远程插件：Unix socket JSON-RPC | 单测通过 |
+| 协议：Anthropic / Gemini 非流式 | 单测通过（假上游） |
+| 鉴权：无 token / Bearer / cookie | 单测通过；`/api/auth` 设置 HttpOnly cookie |
 | 插件：安装示例接口 | 首次复制 echo + mcp-echo；再次返回 409 |
 | 评测：假上游 + 真实 echo 插件 | `gqy-eval` 1/1 通过，报告 / runs / trace 落盘正确 |
 | 评测 dry-run | 6 配置 × 3 用例矩阵正确打印 |
@@ -45,12 +53,13 @@
 - 真实模型上游（DeepSeek / OpenAI / 中转）的完整对话与工具调用。
 - GitHub OAuth 全流程（需要 `GITHUB_CLIENT_ID/SECRET`）。
 - 真实 MCP 服务端（测试用的是本地 Node MCP 夹具）。
-- 远程插件、插件服务依赖、Anthropic / Gemini 协议翻译、订阅账号与配额窗口。
-- 评测模型裁判、跨轮比较、`best/current` 自动写回。
+- 真实远程插件服务、真实 Anthropic / Gemini 客户端。
+- 订阅账号 OAuth（当前是通用 API key 账号，不是各厂商订阅登录）。
+- 模型裁判接真实模型、跨轮比较、`best/current` 自动写回。
 
 ## 安全边界
 
-- 管理接口（provider / routing / plugins / install-example）无鉴权，默认只监听 `127.0.0.1`；公网部署必须加反向代理鉴权。
+- 管理接口（provider / routing / plugins / install-example）在 `GQY_AUTH_TOKEN` 为空时无鉴权，默认只监听 `127.0.0.1`；公网部署必须设置 token 或加反向代理鉴权。
 - 插件以服务端用户权限运行，安装插件 = 信任它。
 - `shell` 空白名单时仍可执行任意命令；需要强约束时设置 `GQY_SHELL_ALLOWLIST`。
 - 文件工具受 workspace + `$GQY_HOME/sessions` 沙箱限制；硬链接和理论 TOCTOU 仍是已知边界。

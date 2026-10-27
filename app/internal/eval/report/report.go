@@ -61,6 +61,7 @@ func Build(cfg *config.Config, set *cases.Set, traces []*result.Trace, tracePref
 
 	groups := groupByConfig(traces)
 	writeMatrix(&b, groups)
+	writeModelJudge(&b, cfg, traces)
 	writeSingleFactor(&b, traces, "prompt")
 	writeSingleFactor(&b, traces, "schema")
 	writeSingleFactor(&b, traces, "return")
@@ -327,4 +328,25 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return string(r[:max]) + "…"
+}
+
+// writeModelJudge 汇总可选的模型裁判结果；规则判定仍是主判定。
+func writeModelJudge(b *strings.Builder, cfg *config.Config, traces []*result.Trace) {
+	if cfg == nil || cfg.JudgeModel == "" {
+		return
+	}
+	runs, pass, errors := 0, 0, 0
+	for _, tr := range traces {
+		if tr.Judge == nil || tr.Judge.Model == nil {
+			continue
+		}
+		runs++
+		if tr.Judge.Model.Pass {
+			pass++
+		}
+		if tr.Judge.Model.Error != "" {
+			errors++
+		}
+	}
+	fmt.Fprintf(b, "\n## 模型裁判\n\n- 裁判模型：`%s`\n- 运行：%d；通过：%d；错误：%d\n", cfg.JudgeModel, runs, pass, errors)
 }

@@ -60,6 +60,8 @@
 .feature-tag.ok{background:#eaf3ec;color:#3d6b47}
 .feature-tag.warn{background:var(--clay-soft);color:var(--clay-deep)}
 .feature-empty{color:var(--faint);font-size:13px;padding:16px 4px;text-align:center}
+.load-earlier{display:block;margin:10px auto 16px;padding:6px 12px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:12px;background:var(--card)}
+.load-earlier:hover{color:var(--ink);background:var(--hover)}
 .ext-plugins{display:flex;flex-direction:column;gap:8px;margin-top:8px}
 .ext-plugin{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
 .ext-plugin-main{flex:1;min-width:0}

@@ -103,6 +103,7 @@
         if (list[i]) {
           list[i].path = data.path || '';
           list[i].text = data.text || '';
+          list[i].dataUrl = data.dataUrl || '';
           list[i].truncated = !!data.truncated;
           list[i].size = data.size || list[i].size;
         }
@@ -190,7 +191,8 @@
         let content = String(m.text).slice(0, 20000);
         const extra = attachmentContext(m);
         if (extra) content += '\n\n' + extra;
-        return { role: m.role, content: content.slice(0, 60000) };
+        const images = (m.attachments || []).filter((a) => a && a.dataUrl).map((a) => a.dataUrl);
+        return { role: m.role, content: content.slice(0, 60000), images: images.length ? images : undefined };
       });
     const sys = systemContext(prompt);
     if (sys) msgs.unshift({ role: 'system', content: sys });
@@ -212,7 +214,7 @@
       mode: 'api', convId: conv.id, msgId: msg.id, demo: false,
       thinking: '', thinkingShown: 0, tools: [], toolIndex: 0,
       full: '', shown: 0, stage: 'thinking', started: now(), timer: 0,
-      controller: controller, usage: null, error: null, question: null
+      controller: controller, usage: null, error: null, question: null, artifact: null
     };
     app.updateSendState();
     G.clawd.set('thinking');
@@ -236,6 +238,17 @@
           s.shown = s.full.length;
         } else if (event.type === 'tool') {
           upsertTool(s.tools, event.tool);
+          if (event.tool && event.tool.name === 'write_artifact') {
+            try {
+              const args = JSON.parse(event.tool.detail || '{}');
+              if (Array.isArray(args.files) && args.files.length) {
+                s.artifact = {
+                  title: args.title || '产物',
+                  files: args.files.map((f) => ({ path: String(f.path || ''), content: String(f.content || '') }))
+                };
+              }
+            } catch (err) {}
+          }
         } else if (event.type === 'question') {
           s.question = event.question || null;
         } else if (event.type === 'done') {
@@ -326,6 +339,7 @@
           ms: t.ms || (t.t0 ? Math.max(80, now() - t.t0) : 0)
         }));
         if (s.usage) msg.usage = s.usage;
+        if (s.artifact) msg.artifact = s.artifact;
         if (s.error) msg.error = s.error;
         // ask_user → question 卡片（复用现有 askHTML）
         if (s.question) {
@@ -393,6 +407,7 @@
   }
 
   function selectConv(id) {
+    app.renderLimit = 80;
     app.closeFilesPanel();
     if (app.stream) app.stopStreaming();
     const found = app.findConv(id);
@@ -410,6 +425,7 @@
   }
 
   function selectWorkspace(wsId) {
+    app.renderLimit = 80;
     if (app.stream) app.stopStreaming();
     saveDraft();
     const ws = app.state.workspaces.find((w) => w.id === wsId);
@@ -431,6 +447,7 @@
   }
 
   function newChat() {
+    app.renderLimit = 80;
     app.closeFilesPanel();
     if (app.stream) app.stopStreaming();
     saveDraft();

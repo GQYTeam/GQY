@@ -8,6 +8,10 @@
 
 **做：**
 
+- provider 多账号（accounts）与日 token 配额；账号级失败转移。
+- Anthropic Messages / Gemini generateContent 非流式翻译。
+- 可选 `GQY_AUTH_TOKEN` 鉴权与 `GQY_RATE_LIMIT` 限流。
+
 - 从 `$GQY_HOME/providers.json` 读取多个 OpenAI 兼容 provider；环境变量 `GQY_API_BASE/KEY/MODEL` 作为兜底 provider。
 - 模型解析：`provider/model`、路由组 `group/id`、裸模型名、默认模型。
 - 路由组策略：`order`、`rotate`、`usage`（按最近使用计数）。
@@ -159,6 +163,14 @@ return ErrAllFailed
 ### POST /api/routing/groups · DELETE /api/routing/groups/{id} · PUT /api/routing/default
 
 维护路由组与默认 `provider/model`，写回 `routing.json`，立即生效。
+
+### 账号与配额
+
+provider 的 `accounts[]` 每个账号独立并发/冷却/用量；`daily_token_limit` 用尽后跳过，次日重置（内存态）。设置页可增删账号。
+
+### 协议端点
+
+`POST /v1/messages` 与 `POST /v1beta/models/{model}:generateContent` 复用 `Router.Complete`，做非流式翻译；流式明确返回 400。
 
 ### GET /v1/models
 

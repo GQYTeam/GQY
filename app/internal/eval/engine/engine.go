@@ -130,6 +130,9 @@ func Run(ctx context.Context, opts Options) ([]*result.Trace, error) {
 						return
 					}
 					v := judge.Judge(c, tr, cfg.StrictSchema)
+					if cfg.JudgeModel != "" && opts.Completer != nil {
+						v.Model = judge.Model(ctx, opts.Completer, cfg.JudgeModel, c, tr)
+					}
 					tr.Judge = &v
 
 					if opts.Recorder != nil {

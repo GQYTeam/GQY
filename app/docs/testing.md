@@ -6,7 +6,7 @@
 npm run check      # node --check 所有 JS + go vet
 go test ./...      # 网关 / 插件 / 评测 / 工具沙箱
 go test -race ./internal/eval/... ./internal/plugin/...
-npm run smoke      # 39 项端到端
+npm run smoke      # 50 项端到端
 ```
 
 启动本地服务后（`npm run dev`）手动走一遍：
@@ -38,6 +38,22 @@ npm run smoke      # 39 项端到端
 9. shell 白名单：设 `GQY_SHELL_ALLOWLIST=echo`，确认 `echo ok` 可执行、`echo x; rm` 被拒绝。
 10. 插件：扩展页安装示例，加载 `echo` 后 `/api/tools` 出现 `echo__echo`，调用返回 `hello`；加载 `mcp-echo` 后 `add` 返回两数之和；卸载后消失。
 
+## 鉴权
+
+1. `GQY_AUTH_TOKEN=secret` 启动：不带 token 的 `/api/health` 与 `/v1/models` 返回 401；`Authorization: Bearer secret`、`X-GQY-Token`、`/api/auth` 换的 cookie 都能通过。
+2. 静态 `/index.html` 不需要 token；`/api/github/callback` 依赖 SameSite=Lax cookie。
+
+## 限流与清理
+
+1. `GQY_RATE_LIMIT=2`：同一客户端第 3 个 `/api/*` 或 `/v1/*` 请求返回 429，静态资源不受影响。
+2. `go run ./cmd/gqy-clean -dry-run`：列出超过 TTL 的会话；去掉 `-dry-run` 后目录被删除。
+
+## 协议
+
+1. `POST /v1/messages`：Anthropic 文本块、图片块、tools 能翻译成内部消息；响应含 text / tool_use / usage。
+2. `POST /v1beta/models/{model}:generateContent`：Gemini contents / systemInstruction / functionDeclarations 能翻译；响应含 parts / usageMetadata。
+3. 流式 Anthropic / Gemini 当前明确返回 400。
+
 ## 网关
 
 1. 两个假上游 A/B，A 返回 500、B 返回 200：`/api/chat` 最终来自 B，`gateway/requests.jsonl` 记录两次 attempt，A 进入冷却。
@@ -45,6 +61,8 @@ npm run smoke      # 39 项端到端
 3. 路由组策略：`order` 按配置顺序，`rotate` 每轮换，`usage` 优先调用少的成员。
 4. 会话亲和：同一 `session` 第二次请求优先落到上次成功的 provider。
 5. 并发：`max_concurrency` 填满后，超出请求按 `queue_timeout_ms` 返回排队超时。
+6. 账号：provider 配两个账号，第一个 429 后换第二个；`daily_token_limit` 用尽后不再请求该账号。
+7. 管理：设置页新增/编辑 provider、账号、路由组；密钥留空保留，接口只回 keySet。
 
 ## 评测
 
@@ -58,6 +76,7 @@ go run ./cmd/gqy-eval -config ... -replay /path/to/trace
 - 真实运行需要 provider 和 `$GQY_HOME/plugins/echo`；宿主按 `tool` 前缀只加载对应插件。
 - 报告、`runs.jsonl`、trace、`best/current.json` 都在 `-out` 目录。
 - 单测：`go test ./internal/eval/...`；契约/宿主测试在 `internal/eval/host`。
+- `judge_model` 配置后启用模型裁判；规则判定仍是主判定。
 
 ## 自动冒烟
 
@@ -89,7 +108,10 @@ npm run smoke
 | 术语 | 正文装饰、代码块跳过 |
 | 设置 CRUD | 人设、记忆、自定义术语、知识文档新增 |
 | system 上下文 | 人设/记忆/知识库都进入 system，并与工具提示合并 |
-| 附件 | 文本文件上传、落盘、文本注入 user 消息 |
+| 附件 | 文本文件上传、落盘、文本注入；图片返回 data URL |
+| 黑暗/语言 | 暗色主题切换持久化；中文 / English 导航与设置标签 |
+| 长会话 | 只渲染最近 80 条，可加载更早 |
+| 多文件产物 | `artifact.files` 按真实路径建树并打开文件面板 |
 | 工具页 | 列出工具、切换外部注入 |
 | 软件包 | 发现示例插件、加载、卸载；扩展页有安装示例入口 |
 | 用量 / 账户 | 渲染真实数据 |

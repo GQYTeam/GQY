@@ -51,6 +51,10 @@ type Config struct {
 	ToolMaxOutput int
 	// ShellAllowlist 非空时，shell 只允许执行列表里的命令（首 token 的 basename）。
 	ShellAllowlist []string
+	// AuthToken 非空时，/api/* 与 /v1/* 要求 Bearer 或 HttpOnly cookie。
+	AuthToken string
+	// RateLimit 是每客户端每分钟请求上限；0 表示不限。
+	RateLimit int
 }
 
 // Provider 返回当前上游类型：真实密钥 → openai-compatible，否则 mock / none。
@@ -106,6 +110,8 @@ func Load() Config {
 		ShellTimeout:        EnvDuration("GQY_SHELL_TIMEOUT", DefaultShellTimeout),
 		ToolMaxOutput:       EnvInt("GQY_TOOL_MAX_OUTPUT", DefaultToolMaxOutput),
 		ShellAllowlist:      SplitList(os.Getenv("GQY_SHELL_ALLOWLIST")),
+		AuthToken:           os.Getenv("GQY_AUTH_TOKEN"),
+		RateLimit:           EnvInt("GQY_RATE_LIMIT", 0),
 	}
 }
 

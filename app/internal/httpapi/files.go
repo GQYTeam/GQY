@@ -3,6 +3,7 @@
 package httpapi
 
 import (
+	"encoding/base64"
 	"errors"
 	"io"
 	"net/http"
@@ -56,6 +57,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	name := safeUploadName(header.Filename)
 	text, truncated := extractUploadText(name, data)
+	dataURL := imageDataURL(name, data)
 	rel, size, err := s.saveUpload(sessionID, name, data)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "save_failed", err.Error())
@@ -63,7 +65,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "name": name, "path": rel, "size": size,
-		"text": text, "truncated": truncated,
+		"text": text, "truncated": truncated, "dataUrl": dataURL,
 	})
 }
 
@@ -126,6 +128,28 @@ func numberedUploadName(name string, i int) string {
 	}
 	ext := filepath.Ext(name)
 	return strings.TrimSuffix(name, ext) + "-" + strconv.Itoa(i) + ext
+}
+
+func imageDataURL(name string, data []byte) string {
+	const limit = 2 << 20
+	if len(data) > limit {
+		return ""
+	}
+	ext := strings.ToLower(filepath.Ext(name))
+	var mime string
+	switch ext {
+	case ".png":
+		mime = "image/png"
+	case ".jpg", ".jpeg":
+		mime = "image/jpeg"
+	case ".gif":
+		mime = "image/gif"
+	case ".webp":
+		mime = "image/webp"
+	default:
+		return ""
+	}
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
 }
 
 func extractUploadText(name string, data []byte) (string, bool) {

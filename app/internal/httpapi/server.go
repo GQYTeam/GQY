@@ -86,6 +86,7 @@ func New(root string, cfg config.Config, client *http.Client) *Server {
 	_ = registry.Register(tool.Edit{Policy: policy})
 	_ = registry.Register(tool.Shell{Policy: policy})
 	_ = registry.Register(tool.ListDir{Policy: policy})
+	_ = registry.Register(tool.Artifact{Policy: policy})
 	_ = registry.Register(tool.WebSearch{})
 	_ = registry.Register(tool.AskUser{})
 	// 外部工具：provider_usage（查余额）
@@ -132,6 +133,7 @@ func (s *Server) Close() {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/auth", s.handleAuth)
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/models", s.handleModels)
 	mux.HandleFunc("GET /api/usage", s.handleUsage)
@@ -148,9 +150,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/tools/external", s.handleToolExternal)
 	mux.HandleFunc("GET /v1/models", s.handleV1Models)
 	mux.HandleFunc("POST /v1/chat/completions", s.handleV1Chat)
+	mux.HandleFunc("POST /v1/messages", s.handleAnthropicMessages)
+	mux.HandleFunc("POST /v1beta/models/", s.handleGeminiGenerate)
 	mux.HandleFunc("GET /api/providers", s.handleProviders)
 	mux.HandleFunc("POST /api/providers", s.handleProviderUpsert)
 	mux.HandleFunc("DELETE /api/providers/{id}", s.handleProviderDelete)
+	mux.HandleFunc("POST /api/providers/{id}/accounts", s.handleAccountUpsert)
+	mux.HandleFunc("DELETE /api/providers/{id}/accounts/{account}", s.handleAccountDelete)
 	mux.HandleFunc("POST /api/routing/groups", s.handleGroupUpsert)
 	mux.HandleFunc("DELETE /api/routing/groups/{id}", s.handleGroupDelete)
 	mux.HandleFunc("PUT /api/routing/default", s.handleDefaultSet)
@@ -169,6 +175,7 @@ func (s *Server) Handler() http.Handler {
 			writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "只支持 "+methods)
 		}
 	}
+	mux.HandleFunc("/api/auth", allow("POST"))
 	mux.HandleFunc("/api/health", allow("GET"))
 	mux.HandleFunc("/api/models", allow("GET"))
 	mux.HandleFunc("/api/usage", allow("GET"))
@@ -185,8 +192,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/tools/external", allow("POST"))
 	mux.HandleFunc("/v1/models", allow("GET"))
 	mux.HandleFunc("/v1/chat/completions", allow("POST"))
+	mux.HandleFunc("/v1/messages", allow("POST"))
+	mux.HandleFunc("/v1beta/models/", allow("POST"))
 	mux.HandleFunc("/api/providers", allow("GET, POST"))
 	mux.HandleFunc("/api/providers/{id}", allow("DELETE"))
+	mux.HandleFunc("/api/providers/{id}/accounts", allow("POST"))
+	mux.HandleFunc("/api/providers/{id}/accounts/{account}", allow("DELETE"))
 	mux.HandleFunc("/api/routing/groups", allow("POST"))
 	mux.HandleFunc("/api/routing/groups/{id}", allow("DELETE"))
 	mux.HandleFunc("/api/routing/default", allow("PUT"))
@@ -200,7 +211,7 @@ func (s *Server) Handler() http.Handler {
 		writeErr(w, http.StatusNotFound, "not_found", "接口不存在")
 	})
 	mux.HandleFunc("/", s.handleStatic)
-	return s.withRequestID(s.logRequests(mux))
+	return s.withRequestID(s.logRequests(s.withRateLimit(s.withAuth(mux))))
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -392,6 +403,28 @@ func (s *Server) handleProviderUpsert(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleProviderDelete(w http.ResponseWriter, r *http.Request) {
 	if err := s.Gateway.DeleteProvider(r.PathValue("id")); err != nil {
 		writeErr(w, http.StatusBadRequest, "provider_delete_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "providers": s.Gateway.ProviderViews()})
+}
+
+func (s *Server) handleAccountUpsert(w http.ResponseWriter, r *http.Request) {
+	var a gateway.Account
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
+	if err := dec.Decode(&a); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_json", "请求体不是合法 JSON")
+		return
+	}
+	if err := s.Gateway.UpsertAccount(r.PathValue("id"), a); err != nil {
+		writeErr(w, http.StatusBadRequest, "account_invalid", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "providers": s.Gateway.ProviderViews()})
+}
+
+func (s *Server) handleAccountDelete(w http.ResponseWriter, r *http.Request) {
+	if err := s.Gateway.DeleteAccount(r.PathValue("id"), r.PathValue("account")); err != nil {
+		writeErr(w, http.StatusBadRequest, "account_delete_failed", err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "providers": s.Gateway.ProviderViews()})

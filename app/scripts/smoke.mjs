@@ -649,6 +649,31 @@ try {
     /【人设】/.test(systemCtx) && /【记忆】/.test(systemCtx) && /【知识库】/.test(systemCtx),
     systemCtx.slice(0, 100));
 
+  await evaluate('document.querySelector(\'[data-settings-tab="general"]\').click()');
+  await sleep(100);
+  const theme = await evaluate(`(() => {
+    const sw = document.querySelector('#themeSwitch');
+    sw.click();
+    const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const bg = getComputedStyle(document.body).backgroundColor;
+    const saved = JSON.parse(localStorage.getItem('claude-webchat:v7') || '{}').darkMode;
+    sw.click();
+    return { dark, bg, saved, back: document.documentElement.getAttribute('data-theme') === 'light' };
+  })()`);
+  check('暗色主题可切换并持久化', theme.dark && theme.saved === true && theme.back && theme.bg !== 'rgb(252, 252, 251)', JSON.stringify(theme));
+
+  const i18n = await evaluate(`(() => {
+    const sel = document.querySelector('#localeSelect');
+    sel.value = 'en';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    const en = document.querySelector('[data-i18n="tab.general"]').textContent;
+    const lang = document.documentElement.lang;
+    sel.value = 'zh';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    return { en, lang, zh: document.querySelector('[data-i18n="tab.general"]').textContent };
+  })()`);
+  check('语言可切换中文 / English', i18n.en === 'Settings' && i18n.lang === 'en' && i18n.zh === '设置', JSON.stringify(i18n));
+
   await evaluate('document.querySelector(\'[data-settings-tab="tools"]\').click()');
   await sleep(500);
   const toolsPanel = await evaluate(`(() => {
@@ -706,6 +731,19 @@ try {
     form.requestSubmit();
     await new Promise((r) => setTimeout(r, 700));
     const added = /smoke/.test(document.querySelector('#providerList').textContent);
+    document.querySelector('[data-provider-edit="smoke"]').click();
+    await new Promise((r) => setTimeout(r, 200));
+    const accountForm = document.querySelector('[data-account-form="smoke"]');
+    accountForm.querySelector('[name=id]').value = 'acct';
+    accountForm.querySelector('[name=name]').value = 'Account';
+    accountForm.querySelector('[name=api_key]').value = 'acct-key';
+    accountForm.querySelector('[name=daily_token_limit]').value = '1000';
+    accountForm.requestSubmit();
+    await new Promise((r) => setTimeout(r, 600));
+    const accountAdded = /acct/.test(document.querySelector('#providerEditor').textContent);
+    const accountDel = document.querySelector('[data-account-del="acct"]');
+    if (accountDel) accountDel.click();
+    await new Promise((r) => setTimeout(r, 400));
     const groupForm = document.querySelector('[data-group-form]');
     groupForm.querySelector('[name=id]').value = 'smoke-group';
     groupForm.querySelector('[name=strategy]').value = 'order';
@@ -720,9 +758,9 @@ try {
     if (delProvider) delProvider.click();
     await new Promise((r) => setTimeout(r, 500));
     const removed = !/smoke/.test(document.querySelector('#providerList').textContent);
-    return { added, grouped, removed };
+    return { added, accountAdded, grouped, removed };
   })()`);
-  check('provider / 路由组可增删', providerAdmin.added && providerAdmin.grouped && providerAdmin.removed, JSON.stringify(providerAdmin));
+  check('provider / 账号 / 路由组可增删', providerAdmin.added && providerAdmin.accountAdded && providerAdmin.grouped && providerAdmin.removed, JSON.stringify(providerAdmin));
 
   const cleared = await evaluate(`(() => {
     window.confirm = () => true;
@@ -740,6 +778,49 @@ try {
 
   await evaluate('document.querySelector("#settingsLayer [data-settings-close]").click()');
   await sleep(200);
+
+  const windowed = await evaluate(`(() => {
+    const app = GQY.app;
+    const conv = app.activeConv();
+    const old = conv.messages;
+    conv.messages = Array.from({ length: 100 }, (_, i) => ({
+      id: 'win-' + i, role: i % 2 ? 'assistant' : 'user', text: 'msg ' + i, ts: Date.now()
+    }));
+    app.renderLimit = 80;
+    app.renderThread();
+    const before = document.querySelectorAll('.msg').length;
+    const btn = document.querySelector('[data-load-earlier]');
+    const hasButton = !!btn;
+    if (btn) btn.click();
+    const after = document.querySelectorAll('.msg').length;
+    conv.messages = old;
+    app.renderLimit = 80;
+    app.renderThread();
+    return { before, after, hasButton };
+  })()`);
+  check('长会话分页渲染', windowed.hasButton && windowed.before === 80 && windowed.after === 100, JSON.stringify(windowed));
+
+  const multiArtifact = await evaluate(`(() => {
+    const app = GQY.app;
+    const conv = app.activeConv();
+    const msg = { id: 'multi-art', role: 'assistant', text: '', ts: Date.now(), artifact: {
+      title: '多文件产物', files: [
+        { path: 'src/a.go', content: 'package a' },
+        { path: 'docs/b.md', content: '# b' }
+      ]
+    } };
+    conv.messages.push(msg);
+    app.renderThread();
+    document.querySelector('[data-artifact="multi-art"]').click();
+    const tree = document.querySelector('#filesTree').textContent;
+    const open = document.querySelector('#filesPanel').classList.contains('is-open');
+    const shown = /src/.test(tree) && /docs/.test(tree);
+    app.closeFilesPanel();
+    conv.messages = conv.messages.filter((m) => m.id !== 'multi-art');
+    app.renderThread();
+    return { open, shown, tree: tree.slice(0, 80) };
+  })()`);
+  check('多文件产物进入文件面板', multiArtifact.open && multiArtifact.shown, JSON.stringify(multiArtifact));
 
   const uploaded = await evaluate(`(async () => {
     document.querySelector('#newChatBtn').click();
@@ -773,6 +854,18 @@ try {
     } catch (err) {}
   }
   check('附件上传并注入文本', uploaded.text === 'hello attachment' && uploadedFile, JSON.stringify(uploaded));
+
+  const imageUpload = await evaluate(`(async () => {
+    const bin = atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=');
+    const arr = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    const file = new File([arr], 'dot.png', { type: 'image/png' });
+    const fd = new FormData();
+    fd.append('session', GQY.app.state.activeConvId);
+    fd.append('file', file);
+    const res = await fetch('/api/files', { method: 'POST', body: fd });
+    return res.json();
+  })()`);
+  check('图片附件返回 data URL', /^data:image\/png;base64,/.test(imageUpload.dataUrl || ''), JSON.stringify(imageUpload).slice(0, 120));
 
   check('浏览器控制台无报错', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
 

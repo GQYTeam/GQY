@@ -12,6 +12,8 @@
 - 两种适配器：
   - `gqy-jsonrpc-v1`：原生 stdio JSON-RPC，manifest 声明 actions。
   - `mcp`：MCP stdio（initialize → tools/list → tools/call），启动时发现工具。
+- `unix` / `tcp`：连接已运行的远程插件服务，换行 JSON-RPC；不负责拉起进程。
+- `provides` / `requires`：服务依赖；缺依赖拒绝加载，仍有依赖时拒绝卸载。
 - 运行时：注册表、实例表、单插件状态机、调用超时、并发模型、关闭分级、进程组回收。
 - 插件动作注册成 `tool.Tool`（外部工具），随 `GQY_ENABLE_EXTERNAL=1` 注入模型；也可通过 HTTP 单独调用。
 - 插件管理接口与前端扩展页。

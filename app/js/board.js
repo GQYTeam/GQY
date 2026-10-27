@@ -8,6 +8,7 @@
 
   const STATUS = ['todo', 'doing', 'done'];
   const LABEL = { todo: '待办', doing: '进行中', done: '已完成' };
+  const label = (s) => (G.i18n ? G.i18n.t('board.' + s) : LABEL[s]);
 
   function cards() {
     if (!app.state.board || !Array.isArray(app.state.board.cards)) app.state.board = { cards: [] };
@@ -19,7 +20,7 @@
     STATUS.forEach((status) => {
       const node = status === 'todo' ? el.boardTodo : status === 'doing' ? el.boardDoing : el.boardDone;
       const list = cards().filter((c) => c.status === status);
-      node.innerHTML = list.length ? list.map((c) => cardHTML(c)).join('') : '<p class="board-empty">暂无卡片</p>';
+      node.innerHTML = list.length ? list.map((c) => cardHTML(c)).join('') : '<p class="board-empty">' + (G.i18n ? G.i18n.t('board.empty') : '暂无卡片') + '</p>';
     });
   }
 
@@ -29,7 +30,7 @@
     const right = c.status === 'done' ? '' : '<button class="board-mini" type="button" data-move="' + esc(c.id) + '" data-dir="1" aria-label="移到下一列">→</button>';
     return '<article class="board-card' + (c.status === 'done' ? ' is-done' : '') + '">' +
       '<div class="board-card-title">' + esc(c.title) + '</div>' +
-      '<div class="board-card-meta"><span>' + LABEL[c.status] + '</span><span class="board-card-actions">' +
+      '<div class="board-card-meta"><span>' + label(c.status) + '</span><span class="board-card-actions">' +
       conv + left + right +
       '<button class="board-mini danger" type="button" data-del-card="' + esc(c.id) + '" aria-label="删除卡片">×</button>' +
       '</span></div></article>';

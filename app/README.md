@@ -17,6 +17,7 @@ npm run files    # 列出项目文件
 
 go test ./...    # 各包单测（网关 / 插件 / 评测 / 工具沙箱）
 go run ./cmd/gqy-eval -config evals/echo/config.json -dry-run  # 只看评测矩阵
+go run ./cmd/gqy-clean -dry-run  # 按 TTL 检查过期会话
 ```
 
 `dev` 与 `start` 相同：Go 没有内置热重载，改后端后手动重启（前端改动刷新浏览器即可）。
@@ -37,6 +38,7 @@ go run ./cmd/gqy-import -src /path/to/gqy_backup_latest [-dst ~/.gqy] [-dry-run]
 cmd/gqy-server/    入口：装配 + 优雅关闭
 cmd/gqy-import/    旧备份导入器（sqlite3 → $GQY_HOME）
 cmd/gqy-eval/      工具调用评测 CLI
+cmd/gqy-clean/     过期会话清理
 internal/
   config/          环境变量解析（.env / 密钥 / 工具沙箱）
   catalog/         models.dev 拉取、缓存、过滤、元数据
@@ -100,7 +102,7 @@ agent loop 在 `internal/agent`：发请求 → 若模型返回工具调用则�
 {"providers":[{"id":"deepseek","display_name":"DeepSeek","base_url":"https://api.deepseek.com/v1","default_model":"deepseek-chat","models":["deepseek-chat"],"api_key":"sk-..."}]}
 ```
 
-`api_key` 为空时读 `GQY_PROVIDER_<ID>_API_KEY`。设计见 `docs/design/Gateway.md`，调研见 `docs/research/MagpieGateway.md`。
+`api_key` 为空时读 `GQY_PROVIDER_<ID>_API_KEY`。provider 下可配置多个 `accounts`，每个账号可设 `daily_token_limit`；候选按账号展开，配额用尽或 429 时换下一个账号。设计见 `docs/design/Gateway.md`，调研见 `docs/research/MagpieGateway.md`。
 
 ## 插件运行时
 
@@ -108,6 +110,9 @@ agent loop 在 `internal/agent`：发请求 → 若模型返回工具调用则�
 
 - `gqy-jsonrpc-v1`：换行分隔 JSON-RPC，manifest 声明 actions。
 - `mcp`：MCP stdio 最小集（initialize / tools/list / tools/call）。
+- `unix` / `tcp`：连接已经运行的插件服务，换行 JSON-RPC；不负责拉起进程。
+
+manifest 可用 `provides` / `requires` 声明服务依赖：缺依赖拒绝加载，仍有插件依赖时拒绝卸载。
 
 运行时负责实例表、状态机、调用超时、并发模型、进程组回收（SIGTERM → SIGKILL）和工具注册。插件动作注册成外部工具 `<id>__<action>`，只有 `GQY_ENABLE_EXTERNAL=1` 或设置页打开开关时注入模型。
 
@@ -128,14 +133,15 @@ go run ./cmd/gqy-eval -config evals/echo/config.json -dry-run
 go run ./cmd/gqy-eval -config evals/echo/config.json -out ../docs/test_call_echo
 ```
 
-评测宿主按 `config.tool` 的 `<pluginID>__` 前缀只加载对应插件；没有插件时用内置占位工具。结果写到 `-out` 目录：配置快照、`runs.jsonl`、trace、报告、`best/current.json`。配置与回放见 `docs/eval.md`，设计见 `docs/design/EvalGateway.md`。
+评测宿主按 `config.tool` 的 `<pluginID>__` 前缀只加载对应插件；没有插件时用内置占位工具。配置里可设 `judge_model` 启用模型裁判（规则判定仍是主判定）。结果写到 `-out` 目录：配置快照、`runs.jsonl`、trace、报告、`best/current.json`。配置与回放见 `docs/eval.md`，设计见 `docs/design/EvalGateway.md`。
 
 ## 前端页面
 
 - 首次打开出现引导（工作区 / 模型 / 动效），设置里可重新打开。
 - 侧栏「看板」：本机任务卡，三列、可关联当前会话。
 - 正文术语点击显示本地定义；术语表在设置 → 知识库维护。
-- 设置 10 个 tab：人设 / 记忆 / 知识库 / 工具 / 软件包 / 账户都已接真实数据；模型页显示 provider 与网关状态。
+- 设置 10 个 tab：人设 / 记忆 / 知识库 / 工具 / 软件包 / 账户都已接真实数据；模型页可管理 provider / 账号 / 配额 / 路由组与网关状态。
+- 暗色主题与中文 / English 导航切换；长会话分页渲染；`write_artifact` 支持多文件产物。
 - 扩展浮层管理 GitHub 账户和插件加载 / 卸载。
 
 ## 生产部署
@@ -206,6 +212,8 @@ npm start                 # cmd/gqy-server 自动读取 .env，真实环境变�
 | `GQY_SHELL_ALLOWLIST` | 空 | 非空时只允许列表里的命令，并拒绝 `; | & $` 等元字符 |
 | `GQY_TOOL_MAX_OUTPUT` | `16384` | shell 合并输出保留字节数 |
 | `GQY_PROVIDER_<ID>_API_KEY` | 空 | `providers.json` 里 provider 的密钥后备；ID 转大写、非字母数字转 `_` |
+| `GQY_AUTH_TOKEN` | 空 | 非空时 `/api/*` 与 `/v1/*` 要求 Bearer / `X-GQY-Token` / HttpOnly cookie；前端 401 时提示输入 |
+| `GQY_RATE_LIMIT` | `0` | 每客户端每分钟请求上限；`0` 不限 |
 | `GITHUB_CLIENT_ID` | 空 | GitHub App 的 Client ID，用于只读账户 OAuth |
 | `GITHUB_CLIENT_SECRET` | 空 | GitHub App 的 Client Secret |
 | `GITHUB_OAUTH_REDIRECT` | 空 | 回调地址；空时按请求 Host 推导 `/api/github/callback` |
@@ -220,13 +228,16 @@ npm start                 # cmd/gqy-server 自动读取 .env，真实环境变�
 | `GET` | `/api/usage` | 服务端聚合的真实用量：会话数、消息数、产物数、token、近 7 天消息量 |
 | `GET` | `/api/providers` | provider 列表（密钥只返回 `keySet` 状态） |
 | `POST` | `/api/providers` | 新增/更新 provider；`api_key` 留空保留原密钥，写回 `providers.json` |
+| `POST` | `/api/providers/{id}/accounts` | 新增/更新账号与日 token 配额 |
+| `DELETE` | `/api/providers/{id}/accounts/{account}` | 删除账号 |
 | `DELETE` | `/api/providers/{id}` | 删除 provider；`env` 不可删 |
 | `POST` | `/api/routing/groups` | 新增/更新路由组 `{id, strategy, members}` |
 | `DELETE` | `/api/routing/groups/{id}` | 删除路由组 |
 | `PUT` | `/api/routing/default` | `{provider, model}` 设置默认模型 |
 | `GET` | `/api/gateway/status` | provider 健康、调用数、冷却、路由组、会话亲和 |
 | `POST` | `/api/chat` | 请求 `{ messages, model, effort, session }`，返回 SSE：`thinking` / `tool` / `text` / `question` / `done` / `error` / `end` |
-| `POST` | `/api/files` | multipart `{session, file}`；写入 `$GQY_HOME/sessions/<id>/tmp/uploads/`，文本附件返回最多 2 万字符 |
+| `POST` | `/api/files` | multipart `{session, file}`；文本附件返回最多 2 万字符，图片返回 data URL，文件落 `tmp/uploads/` |
+| `POST` | `/api/auth` | 设置访问令牌 cookie；`GQY_AUTH_TOKEN` 为空时直接 ok |
 | `GET` | `/api/plugins` | 已发现插件、状态、actions、调用统计 |
 | `POST` | `/api/plugins/reload` | 重新扫描 manifest |
 | `POST` | `/api/plugins/install-example` | 复制 `plugins/echo` 与 `plugins/mcp-echo` 到 `$GQY_HOME/plugins/` |
@@ -237,6 +248,8 @@ npm start                 # cmd/gqy-server 自动读取 .env，真实环境变�
 | `POST` | `/api/tools/external` | `{ enabled }` 运行时切换外部工具注入 |
 | `GET` | `/v1/models` | OpenAI 风格模型列表（`provider/model` 与 `group/<id>`） |
 | `POST` | `/v1/chat/completions` | OpenAI 兼容端点；非流式 + 兼容流式（当前按最终文本分块） |
+| `POST` | `/v1/messages` | Anthropic Messages 非流式翻译 |
+| `POST` | `/v1beta/models/{model}:generateContent` | Gemini generateContent 非流式翻译 |
 | `GET` | `/api/github/auth` | `{ url }`：GitHub 授权页地址；未配置时 503 |
 | `GET` | `/api/github/callback` | OAuth 回调：换 token、读账户、落盘，然后跳回 `/?github=connected&login=...` |
 | `GET` | `/api/github/me` | `{ connected, account? }`；只返回账户信息，不返回 token |
@@ -275,6 +288,13 @@ $GQY_HOME/routing.json       # 默认模型与路由组（可选）
 $GQY_HOME/gateway/requests.jsonl  # 网关请求日志，不含正文
 $GQY_HOME/plugins/<id>/      # 插件 manifest 与代码
 $GQY_HOME/plugins/<id>.log   # 插件 stderr
+```
+
+清理过期会话：
+
+```bash
+go run ./cmd/gqy-clean -dry-run   # 只列出
+go run ./cmd/gqy-clean           # 删除超过 30 天的会话
 ```
 
 ## 目录
@@ -318,7 +338,7 @@ docs/                   架构、页面、数据、工具、测试、路线图
 - 前端以 `localStorage['claude-webchat:v7']` 为准，刷新不丢；配额写满会明确提示，不再静默失败。
 - 服务端可用时，每次保存会把当前会话镜像到 `$GQY_HOME/sessions/<id>/`，日志与产物落盘。镜像字段是 `text / thinking / tools / artifact / usage / attachments`（附件只带 name/size/path/truncated，不带正文）；`question` 不落服务端。
 - `ask_user` 的回答会先写成本地 user 消息，再触发一次新的 `/api/chat` 请求。
-- 附件：发送时上传到 `$GQY_HOME/sessions/<id>/tmp/uploads/`；文本附件抽取最多 2 万字符拼进该条 user 消息，二进制只落盘、不注入模型。图片预览仍用 `blob:`，序列化前剔除。
+- 附件：发送时上传到 `$GQY_HOME/sessions/<id>/tmp/uploads/`；文本附件抽取最多 2 万字符拼进该条 user 消息；图片附件返回 data URL，随 user 消息以 OpenAI 多模态 content 数组发给模型；其他二进制只落盘。
 
 ## 安全边界
 

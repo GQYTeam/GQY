@@ -27,6 +27,7 @@ npm run smoke    # 编译后端 + 无头 Chrome 端到端
 npm run files    # 列出项目文件
 go test ./...    # 网关 / 插件 / 评测 / 工具沙箱单测
 go run ./cmd/gqy-eval -config evals/echo/config.json -dry-run
+go run ./cmd/gqy-clean -dry-run
 go run ./cmd/gqy-import -src ... [-dry-run]  # 导入旧备份（需系统 sqlite3）
 go run ./cmd/gqy-eval -config internal/eval/testdata/sample.json -dry-run  # 评测网关矩阵
 ```
@@ -40,6 +41,7 @@ go.mod              module 声明（gqy）
 cmd/gqy-server/     服务端入口：装配 config/httpapi，处理信号与优雅关闭
 cmd/gqy-import/     旧备份导入器：sqlite3 导出 → session.Store / $GQY_HOME
 cmd/gqy-eval/       评测网关 CLI：矩阵执行、报告、trace 回放
+cmd/gqy-clean/      TTL 会话清理
 internal/
   config/           环境变量解析（.env / 密钥 / workspace / 工具沙箱）
   catalog/          models.dev 拉取、缓存、过滤、元数据（context/模态/成本）
@@ -103,7 +105,7 @@ CSS 按 `index.html` 的顺序级联，新样式放在 `responsive.css` 之前�
 ## 质量门槛（提交前）
 
 1. `npm run check` 全绿；`go test ./...` 全绿。
-2. `npm run smoke` 全绿（45 项：Go 编译、agent loop、网关、插件、模型目录、用量、流式、落盘、静态白名单、405、十个设置 tab、设置搜索、快捷键、导入、XSS、看板、引导、术语、人设/记忆/知识库/知识文档、system 上下文合并、工具/插件页、provider/路由组增删、安装示例入口、清空对话保留人设/记忆、附件上传注入）。
+2. `npm run smoke` 全绿（50 项：Go 编译、agent loop、网关、插件、模型目录、用量、流式、落盘、静态白名单、405、十个设置 tab、设置搜索、快捷键、导入、XSS、看板、引导、术语、人设/记忆/知识库/知识文档、system 上下文合并、工具/插件页、provider/账号/路由组增删、安装示例入口、清空对话保留人设/记忆、长会话分页、多文件产物、附件上传、图片 data URL）。
 3. 浏览器控制台无报错；`js/api.js` 探测失败时优雅降级（不报错、不阻塞）。
 4. 键盘可用：Tab 能到所有控件，Esc 能关浮层（含搜索框），焦点不丢。
 5. 减少动效模式（设置 → 外观）下无闪烁、无无限动画；系统 `prefers-reduced-motion` 首次访问即生效。

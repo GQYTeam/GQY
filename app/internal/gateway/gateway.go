@@ -28,15 +28,27 @@ import (
 
 // Provider 是一个 OpenAI 兼容上游。
 type Provider struct {
-	ID             string   `json:"id"`
-	Name           string   `json:"display_name"`
-	BaseURL        string   `json:"base_url"`
-	Protocol       string   `json:"protocol"`
-	DefaultModel   string   `json:"default_model"`
-	Models         []string `json:"models"`
-	APIKey         string   `json:"api_key"`
-	UserAgent      string   `json:"user_agent"`
-	MaxConcurrency int      `json:"max_concurrency"`
+	ID             string    `json:"id"`
+	Name           string    `json:"display_name"`
+	BaseURL        string    `json:"base_url"`
+	Protocol       string    `json:"protocol"`
+	DefaultModel   string    `json:"default_model"`
+	Models         []string  `json:"models"`
+	APIKey         string    `json:"api_key"`
+	UserAgent      string    `json:"user_agent"`
+	MaxConcurrency int       `json:"max_concurrency"`
+	Accounts       []Account `json:"accounts,omitempty"`
+}
+
+// Account 是 provider 下的一把密钥或一个订阅账号。
+// 配额按自然日累计，0 表示不限；UsedTokens 只存在内存，重启归零。
+type Account struct {
+	ID              string `json:"id"`
+	Name            string `json:"name,omitempty"`
+	APIKey          string `json:"api_key,omitempty"`
+	Weight          int    `json:"weight,omitempty"`
+	DailyTokenLimit int64  `json:"daily_token_limit,omitempty"`
+	Disabled        bool   `json:"disabled,omitempty"`
 }
 
 // Group 是一组候选，按 strategy 排序。
@@ -69,6 +81,11 @@ type providerState struct {
 	failures      atomic.Int64
 }
 
+type quotaState struct {
+	day  string
+	used int64
+}
+
 // Router 实现 agent.Completer。
 type Router struct {
 	mu        sync.RWMutex
@@ -85,6 +102,7 @@ type Router struct {
 	home   string
 
 	states      map[string]*providerState
+	quota       map[string]*quotaState
 	affinity    map[string]string
 	groupCursor map[string]uint64
 
@@ -109,6 +127,7 @@ func New(cfg config.Config, client *http.Client) *Router {
 		cooldown:     30 * time.Second,
 		queueTimeout: 1500 * time.Millisecond,
 		states:       map[string]*providerState{},
+		quota:        map[string]*quotaState{},
 		affinity:     map[string]string{},
 		groupCursor:  map[string]uint64{},
 		now:          time.Now,
@@ -248,6 +267,49 @@ func sessionOf(ctx context.Context) string {
 type Candidate struct {
 	Provider *Provider
 	Model    string
+	Account  *Account
+}
+
+func stateKey(c Candidate) string {
+	if c.Account == nil {
+		return c.Provider.ID
+	}
+	return c.Provider.ID + "|" + c.Account.ID
+}
+
+func (p *Provider) accounts() []Account {
+	if len(p.Accounts) == 0 {
+		if p.APIKey == "" {
+			return nil
+		}
+		return []Account{{ID: "default", Name: "默认", APIKey: p.APIKey}}
+	}
+	out := make([]Account, 0, len(p.Accounts))
+	for _, a := range p.Accounts {
+		if a.Disabled || a.APIKey == "" {
+			continue
+		}
+		if a.ID == "" {
+			a.ID = "account"
+		}
+		if a.Name == "" {
+			a.Name = a.ID
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+func (p *Provider) hasKey() bool { return len(p.accounts()) > 0 }
+
+func providerCandidates(p *Provider, model string) []Candidate {
+	accounts := p.accounts()
+	out := make([]Candidate, 0, len(accounts))
+	for i := range accounts {
+		a := accounts[i]
+		out = append(out, Candidate{Provider: p, Model: model, Account: &a})
+	}
+	return out
 }
 
 // Available 表示至少有一个配置了密钥的 provider。
@@ -255,7 +317,7 @@ func (r *Router) Available() bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, p := range r.providers {
-		if p.APIKey != "" {
+		if p.hasKey() {
 			return true
 		}
 	}
@@ -290,7 +352,7 @@ func (r *Router) candidatesLocked(model, session string) []Candidate {
 		return r.order(out)
 	}
 	if p, m, ok := r.splitProviderModel(model); ok {
-		out := []Candidate{{Provider: p, Model: m}}
+		out := providerCandidates(p, m)
 		r.applyAffinity(out, session)
 		return out
 	}
@@ -303,12 +365,12 @@ func (r *Router) candidatesLocked(model, session string) []Candidate {
 	out := make([]Candidate, 0, 2)
 	for _, p := range r.providers {
 		if p.DefaultModel == model || contains(p.Models, model) {
-			out = append(out, Candidate{Provider: p, Model: model})
+			out = append(out, providerCandidates(p, model)...)
 		}
 	}
 	if len(out) == 0 && r.def.Provider != "" {
 		if p := r.byID[r.def.Provider]; p != nil {
-			out = append(out, Candidate{Provider: p, Model: model})
+			out = append(out, providerCandidates(p, model)...)
 		}
 	}
 	r.applyAffinity(out, session)
@@ -322,12 +384,12 @@ func (r *Router) defaultCandidates() []Candidate {
 			if m == "" {
 				m = p.DefaultModel
 			}
-			return []Candidate{{Provider: p, Model: m}}
+			return providerCandidates(p, m)
 		}
 	}
 	if len(r.providers) > 0 {
 		p := r.providers[0]
-		return []Candidate{{Provider: p, Model: p.DefaultModel}}
+		return providerCandidates(p, p.DefaultModel)
 	}
 	return nil
 }
@@ -359,12 +421,12 @@ func (r *Router) groupCandidates(g *Group) []Candidate {
 			continue
 		}
 		if p, m, ok := r.splitProviderModel(member); ok {
-			out = append(out, Candidate{Provider: p, Model: m})
+			out = append(out, providerCandidates(p, m)...)
 			continue
 		}
 		for _, p := range r.providers {
 			if p.DefaultModel == member || contains(p.Models, member) {
-				out = append(out, Candidate{Provider: p, Model: member})
+				out = append(out, providerCandidates(p, member)...)
 				break
 			}
 		}
@@ -378,7 +440,7 @@ func (r *Router) groupCandidates(g *Group) []Candidate {
 		}
 	case "usage":
 		sort.SliceStable(out, func(i, j int) bool {
-			return r.callsOf(out[i].Provider.ID) < r.callsOf(out[j].Provider.ID)
+			return r.callsOf(stateKey(out[i])) < r.callsOf(stateKey(out[j]))
 		})
 	}
 	return out
@@ -393,7 +455,7 @@ func (r *Router) applyAffinity(out []Candidate, session string) {
 		return
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		return out[i].Provider.ID == want && out[j].Provider.ID != want
+		return stateKey(out[i]) == want && stateKey(out[j]) != want
 	})
 }
 
@@ -404,6 +466,17 @@ func (r *Router) callsOf(id string) int64 {
 		return s.calls.Load()
 	}
 	return 0
+}
+
+func (r *Router) providerCalls(id string) int64 {
+	var n int64
+	prefix := id + "|"
+	for key, st := range r.states {
+		if key == id || strings.HasPrefix(key, prefix) {
+			n += st.calls.Load()
+		}
+	}
+	return n
 }
 
 /* ---------------- 调用 ---------------- */
@@ -418,6 +491,17 @@ func (r *Router) Complete(ctx context.Context, req provider.Request) (provider.M
 	if len(cands) == 0 {
 		return provider.Message{}, nil, ErrNoCandidate
 	}
+	// 过滤掉当日配额已用尽的账号。
+	allowed := cands[:0]
+	for _, c := range cands {
+		if r.accountAllowed(c) {
+			allowed = append(allowed, c)
+		}
+	}
+	if len(allowed) == 0 {
+		return provider.Message{}, nil, errors.New("所有候选账号的当日配额已用尽")
+	}
+	cands = allowed
 
 	attempts := r.maxAttempts
 	if attempts > len(cands) {
@@ -426,14 +510,15 @@ func (r *Router) Complete(ctx context.Context, req provider.Request) (provider.M
 	var last error
 	for i := 0; i < attempts; i++ {
 		c := cands[i]
+		key := stateKey(c)
 		if ctx.Err() != nil {
 			return provider.Message{}, nil, ctx.Err()
 		}
-		if until := r.cooldownUntil(c.Provider.ID); until.After(r.now()) {
-			last = fmt.Errorf("%s 冷却中，至 %s", c.Provider.ID, until.Format(time.RFC3339))
+		if until := r.cooldownUntil(key); until.After(r.now()) {
+			last = fmt.Errorf("%s 冷却中，至 %s", key, until.Format(time.RFC3339))
 			continue
 		}
-		release, err := r.acquire(ctx, c.Provider.ID)
+		release, err := r.acquire(ctx, c.Provider, key)
 		if err != nil {
 			last = err
 			continue
@@ -441,9 +526,13 @@ func (r *Router) Complete(ctx context.Context, req provider.Request) (provider.M
 		start := r.now()
 		creq := req
 		creq.Model = c.Model
+		apiKey := c.Provider.APIKey
+		if c.Account != nil {
+			apiKey = c.Account.APIKey
+		}
 		up := &provider.Upstream{
 			APIBase: c.Provider.BaseURL,
-			APIKey:  c.Provider.APIKey,
+			APIKey:  apiKey,
 			APIUA:   c.Provider.UserAgent,
 			Model:   c.Model,
 			Wire:    "chat",
@@ -452,18 +541,21 @@ func (r *Router) Complete(ctx context.Context, req provider.Request) (provider.M
 		msg, usage, err := up.Complete(ctx, creq)
 		release()
 
-		r.noteCall(c.Provider.ID, err)
+		r.noteCall(key, err)
 		r.logRequest(session, c, err, r.now().Sub(start), i+1)
 
 		if err == nil {
-			r.setAffinity(session, c.Provider.ID)
+			if usage != nil {
+				r.noteQuota(key, usage.TotalTokens)
+			}
+			r.setAffinity(session, key)
 			return msg, usage, nil
 		}
 		last = err
 		if !retryable(err) {
 			return msg, usage, err
 		}
-		r.markFailure(c.Provider.ID, err)
+		r.markFailure(key, err)
 	}
 	if last == nil {
 		last = ErrNoCandidate
@@ -471,13 +563,14 @@ func (r *Router) Complete(ctx context.Context, req provider.Request) (provider.M
 	return provider.Message{}, nil, fmt.Errorf("所有候选失败: %w", last)
 }
 
-func (r *Router) acquire(ctx context.Context, id string) (func(), error) {
-	r.mu.RLock()
-	st := r.states[id]
-	r.mu.RUnlock()
+func (r *Router) acquire(ctx context.Context, p *Provider, key string) (func(), error) {
+	r.mu.Lock()
+	st := r.states[key]
 	if st == nil {
-		return func() {}, nil
+		st = &providerState{sem: make(chan struct{}, p.MaxConcurrency)}
+		r.states[key] = st
 	}
+	r.mu.Unlock()
 	timer := time.NewTimer(r.queueTimeout)
 	defer timer.Stop()
 	select {
@@ -486,11 +579,13 @@ func (r *Router) acquire(ctx context.Context, id string) (func(), error) {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-timer.C:
-		return nil, fmt.Errorf("%s 并发已满，排队超时", id)
+		return nil, fmt.Errorf("%s 并发已满，排队超时", key)
 	}
 }
 
 func (r *Router) noteCall(id string, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if s := r.states[id]; s != nil {
 		s.calls.Add(1)
 		if err != nil {
@@ -501,6 +596,8 @@ func (r *Router) noteCall(id string, err error) {
 }
 
 func (r *Router) markFailure(id string, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if s := r.states[id]; s != nil {
 		until := r.now().Add(r.cooldown)
 		var ue *provider.UpstreamError
@@ -517,10 +614,40 @@ func (r *Router) markFailure(id string, err error) {
 }
 
 func (r *Router) cooldownUntil(id string) time.Time {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	if s := r.states[id]; s != nil {
 		return s.cooldownUntil
 	}
 	return time.Time{}
+}
+
+func (r *Router) accountAllowed(c Candidate) bool {
+	if c.Account == nil || c.Account.DailyTokenLimit <= 0 {
+		return true
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	q := r.quota[stateKey(c)]
+	if q == nil || q.day != r.now().Format("2006-01-02") {
+		return true
+	}
+	return q.used < c.Account.DailyTokenLimit
+}
+
+func (r *Router) noteQuota(key string, tokens int) {
+	if tokens <= 0 {
+		return
+	}
+	day := r.now().Format("2006-01-02")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	q := r.quota[key]
+	if q == nil || q.day != day {
+		q = &quotaState{day: day}
+		r.quota[key] = q
+	}
+	q.used += int64(tokens)
 }
 
 func (r *Router) setAffinity(session, providerID string) {
@@ -560,19 +687,34 @@ func retryable(err error) bool {
 
 // ProviderStatus 是脱敏后的 provider 状态。
 type ProviderStatus struct {
-	ID             string   `json:"id"`
-	Name           string   `json:"name"`
-	BaseURL        string   `json:"baseUrl"`
-	Protocol       string   `json:"protocol"`
-	DefaultModel   string   `json:"defaultModel"`
-	Models         []string `json:"models"`
-	MaxConcurrency int      `json:"maxConcurrency"`
-	KeySet         bool     `json:"keySet"`
-	Inflight       int      `json:"inflight"`
-	Calls          int64    `json:"calls"`
-	Failures       int64    `json:"failures"`
-	CooldownAt     *string  `json:"cooldownUntil"`
-	LastError      string   `json:"lastError"`
+	ID             string          `json:"id"`
+	Name           string          `json:"name"`
+	BaseURL        string          `json:"baseUrl"`
+	Protocol       string          `json:"protocol"`
+	DefaultModel   string          `json:"defaultModel"`
+	Models         []string        `json:"models"`
+	MaxConcurrency int             `json:"maxConcurrency"`
+	KeySet         bool            `json:"keySet"`
+	Inflight       int             `json:"inflight"`
+	Calls          int64           `json:"calls"`
+	Failures       int64           `json:"failures"`
+	CooldownAt     *string         `json:"cooldownUntil"`
+	LastError      string          `json:"lastError"`
+	Accounts       []AccountStatus `json:"accounts"`
+}
+
+// AccountStatus 是 provider 下单个账号的脱敏状态。
+type AccountStatus struct {
+	ID              string  `json:"id"`
+	Name            string  `json:"name"`
+	KeySet          bool    `json:"keySet"`
+	DailyTokenLimit int64   `json:"dailyTokenLimit"`
+	UsedTokens      int64   `json:"usedTokens"`
+	Inflight        int     `json:"inflight"`
+	Calls           int64   `json:"calls"`
+	Failures        int64   `json:"failures"`
+	CooldownAt      *string `json:"cooldownUntil"`
+	LastError       string  `json:"lastError"`
 }
 
 // GroupStatus 是路由组状态。
@@ -596,21 +738,39 @@ func (r *Router) Status() Status {
 	defer r.mu.RUnlock()
 	out := Status{Default: r.def, Affinity: map[string]string{}, Providers: []ProviderStatus{}, Groups: []GroupStatus{}}
 	for _, p := range r.providers {
-		st := r.states[p.ID]
 		ps := ProviderStatus{
 			ID: p.ID, Name: p.Name, BaseURL: p.BaseURL, Protocol: p.Protocol,
 			DefaultModel: p.DefaultModel, Models: append([]string{}, p.Models...),
-			MaxConcurrency: p.MaxConcurrency, KeySet: p.APIKey != "",
+			MaxConcurrency: p.MaxConcurrency, KeySet: p.hasKey(),
+			Accounts: []AccountStatus{},
 		}
-		if st != nil {
-			ps.Inflight = len(st.sem)
-			ps.Calls = st.calls.Load()
-			ps.Failures = st.failures.Load()
-			ps.LastError = st.lastErr
-			if st.cooldownUntil.After(r.now()) {
-				s := st.cooldownUntil.UTC().Format(time.RFC3339)
-				ps.CooldownAt = &s
+		for _, a := range p.accounts() {
+			key := p.ID + "|" + a.ID
+			ast := r.states[key]
+			as := AccountStatus{ID: a.ID, Name: a.Name, KeySet: a.APIKey != "", DailyTokenLimit: a.DailyTokenLimit}
+			if q := r.quota[key]; q != nil && q.day == r.now().Format("2006-01-02") {
+				as.UsedTokens = q.used
 			}
+			if ast != nil {
+				as.Inflight = len(ast.sem)
+				as.Calls = ast.calls.Load()
+				as.Failures = ast.failures.Load()
+				as.LastError = ast.lastErr
+				if ast.cooldownUntil.After(r.now()) {
+					s := ast.cooldownUntil.UTC().Format(time.RFC3339)
+					as.CooldownAt = &s
+				}
+				ps.Calls += as.Calls
+				ps.Failures += as.Failures
+				ps.Inflight += as.Inflight
+				if as.LastError != "" {
+					ps.LastError = as.LastError
+				}
+				if as.CooldownAt != nil && ps.CooldownAt == nil {
+					ps.CooldownAt = as.CooldownAt
+				}
+			}
+			ps.Accounts = append(ps.Accounts, as)
 		}
 		out.Providers = append(out.Providers, ps)
 	}
@@ -631,7 +791,7 @@ func (r *Router) Models() []map[string]any {
 	defer r.mu.RUnlock()
 	out := []map[string]any{}
 	for _, p := range r.providers {
-		if p.APIKey == "" {
+		if !p.hasKey() {
 			continue
 		}
 		models := p.Models
