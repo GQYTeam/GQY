@@ -41,7 +41,8 @@
 | 插件：加载 mcp-echo、调用 add | 正常；`tools/list` 发现 add，`2+3` 返回 5 |
 | 远程插件：Unix socket JSON-RPC | 单测通过 |
 | 协议：Anthropic / Gemini 非流式 + 流式 | 单测通过（假上游） |
-| 鉴权：无 token / Bearer / cookie | 单测通过；`/api/auth` 设置 HttpOnly cookie |
+| 鉴权：无 token / Bearer / cookie | 单测 + 手工验证：401 / 200 / cookie 200；静态页 200 |
+| 清理：`gqy-clean -dry-run` / 实际删除 | 手工验证：旧会话删除、新会话保留 |
 | 插件：安装示例接口 | 首次复制 echo + mcp-echo；再次返回 409 |
 | 评测：假上游 + 真实 echo 插件 | `gqy-eval` 1/1 通过，报告 / runs / trace 落盘正确 |
 | 评测 dry-run | 6 配置 × 3 用例矩阵正确打印 |
