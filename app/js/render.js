@@ -261,6 +261,14 @@
 
   /* ---------------- 侧栏 / 线程 ---------------- */
 
+  function pinMark(c) {
+    if (c.pinned) {
+      return '<svg class="ico conv-pin" aria-hidden="true"><use href="#i-pin"/></svg>' +
+        '<span class="sr-only">已置顶</span>';
+    }
+    return '<span class="conv-dot" aria-hidden="true"></span>';
+  }
+
   function renderSidebar() {
     const q = app.searchQuery.trim().toLowerCase();
     let html = '';
@@ -273,17 +281,37 @@
       shown++;
 
       html += '<section class="ws-group">';
-      html += '<button type="button" class="ws-name" data-ws="' + ws.id + '">' + esc(ws.name) + '</button>';
+      html += '<button type="button" class="ws-name" data-ws="' + esc(ws.id) + '">' + esc(ws.name) + '</button>';
       convs.forEach((c) => {
         const active = c.id === app.state.activeConvId;
+        const title = c.title || '新会话';
         html += '<div class="conv-wrap">';
-        html += '<button type="button" class="conv-row' + (active ? ' active' : '') + '" data-conv="' + c.id + '"' + (active ? ' aria-current="true"' : '') + '>';
-        html += '<span class="conv-dot" aria-hidden="true"></span>';
-        html += '<span class="conv-title">' + esc(c.title || '新会话') + '</span>';
-        html += '<span class="conv-time">' + esc(timeAgo(c.updatedAt || now())) + '</span>';
-        html += '</button>';
-        html += '<button type="button" class="conv-del" data-del="' + c.id + '" title="删除对话" aria-label="删除对话 ' + esc(c.title || '新会话') + '">';
-        html += '<svg class="ico" aria-hidden="true"><use href="#i-trash"/></svg></button>';
+        if (app.manageMode) {
+          html += '<label class="conv-row conv-row--manage' + (active ? ' active' : '') + (c.pinned ? ' is-pinned' : '') + '">';
+          html += '<input type="checkbox" class="conv-check" data-check="' + esc(c.id) + '"' +
+            (app.manageSelected.has(c.id) ? ' checked' : '') +
+            ' aria-label="选择会话 ' + esc(title) + '">';
+          if (c.pinned) html += '<svg class="ico conv-pin" aria-hidden="true"><use href="#i-pin"/></svg>';
+          html += '<span class="conv-title">' + esc(title) + '</span>';
+          html += '<span class="conv-time">' + esc(timeAgo(c.updatedAt || now())) + '</span>';
+          html += '</label>';
+        } else if (app.renamingId === c.id) {
+          html += '<div class="conv-row conv-row--edit">';
+          html += '<span class="conv-dot" aria-hidden="true"></span>';
+          html += '<input class="conv-rename" type="text" maxlength="80" value="' + esc(title) + '"' +
+            ' aria-label="重命名会话" data-rename-input="' + esc(c.id) + '" autocomplete="off" spellcheck="false">';
+          html += '</div>';
+        } else {
+          html += '<button type="button" class="conv-row' + (active ? ' active' : '') + (c.pinned ? ' is-pinned' : '') + '" data-conv="' + esc(c.id) + '"' + (active ? ' aria-current="true"' : '') + '>';
+          html += pinMark(c);
+          html += '<span class="conv-title">' + esc(title) + '</span>';
+          html += '<span class="conv-time">' + esc(timeAgo(c.updatedAt || now())) + '</span>';
+          html += '</button>';
+          html += '<button type="button" class="conv-more" data-more="' + esc(c.id) + '" title="会话操作" aria-label="会话操作 ' + esc(title) + '" aria-haspopup="menu" aria-expanded="false">';
+          html += '<svg class="ico" aria-hidden="true"><use href="#i-more"/></svg></button>';
+          html += '<button type="button" class="conv-del" data-del="' + esc(c.id) + '" title="删除对话" aria-label="删除对话 ' + esc(title) + '">';
+          html += '<svg class="ico" aria-hidden="true"><use href="#i-trash"/></svg></button>';
+        }
         html += '</div>';
       });
       html += '</section>';
@@ -291,6 +319,12 @@
 
     if (q && shown === 0) html = '<div id="noResults">没有找到匹配的对话</div>';
     el.wsList.innerHTML = html;
+
+    if (app.renamingId) {
+      const input = el.wsList.querySelector('.conv-rename');
+      if (input) { input.focus({ preventScroll: true }); input.select(); }
+    }
+    if (app.manageMode && app.refreshManageBar) app.refreshManageBar();
   }
 
   function announce(text) {

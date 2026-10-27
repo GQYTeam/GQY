@@ -24,12 +24,30 @@
     });
   }
 
+  /* 置顶会话只在置顶组内提前；未置顶会话不会跑到置顶会话前面。 */
   function moveConvToTop(conv) {
     const found = app.findConv(conv.id);
     if (!found) return;
     const list = found.ws.convs;
     const idx = list.indexOf(conv);
-    if (idx > 0) { list.splice(idx, 1); list.unshift(conv); }
+    if (idx < 0) return;
+    list.splice(idx, 1);
+    if (conv.pinned) {
+      list.unshift(conv);
+      return;
+    }
+    let at = 0;
+    while (at < list.length && list[at] && list[at].pinned) at += 1;
+    list.splice(at, 0, conv);
+  }
+
+  /* 标题变化只刷新侧栏与顶栏，避免流式期间重建消息区。 */
+  function refreshConvChrome(conv) {
+    app.renderSidebar();
+    if (!conv || conv.id !== app.state.activeConvId) return;
+    const empty = !conv.messages || conv.messages.length === 0;
+    el.topbarTitle.hidden = empty || app.view !== 'chat';
+    el.topbarTitle.textContent = (empty || app.view !== 'chat') ? '' : (conv.title || '新会话');
   }
 
   function handleSend() {
@@ -40,7 +58,7 @@
     let conv = app.activeConv();
     if (!conv) {
       const ws = app.activeWs();
-      conv = { id: uid(), title: '新会话', messages: [], updatedAt: now() };
+      conv = { id: uid(), title: '新会话', pinned: false, messages: [], updatedAt: now() };
       ws.convs.unshift(conv);
       app.state.activeConvId = conv.id;
     }
@@ -320,7 +338,7 @@
     if (!ws) return;
     let conv = ws.convs[0];
     if (!conv) {
-      conv = { id: uid(), title: '新会话', messages: [], updatedAt: now() };
+      conv = { id: uid(), title: '新会话', pinned: false, messages: [], updatedAt: now() };
       ws.convs.unshift(conv);
     }
     app.state.activeWorkspaceId = ws.id;
@@ -341,7 +359,7 @@
     const ws = app.activeWs();
     let conv = app.activeConv();
     if (!conv || conv.messages.length > 0) {
-      conv = { id: uid(), title: '新会话', messages: [], updatedAt: now() };
+      conv = { id: uid(), title: '新会话', pinned: false, messages: [], updatedAt: now() };
       ws.convs.unshift(conv);
     }
     app.state.activeWorkspaceId = ws.id;
@@ -355,6 +373,318 @@
     el.scroller.scrollTop = 0;
   }
 
+  /* ---------------- 会话管理：重命名 / 置顶 / 多选删除 / 导出 ---------------- */
+
+  function startRename(id) {
+    const found = app.findConv(id);
+    if (!found) return;
+    if (app.manageMode) exitManageMode();
+    if (app.closeMenu) app.closeMenu(false);
+    app.renamingId = id;
+    app.renderSidebar();
+  }
+
+  function commitRename(id, raw, cancelled) {
+    if (app.renamingId !== id) return;
+    const found = app.findConv(id);
+    app.renamingId = null;
+    if (!found) { app.renderSidebar(); return; }
+    if (!cancelled) {
+      const title = String(raw == null ? '' : raw).trim().slice(0, 80);
+      if (!title) {
+        app.toast('标题不能为空，已保留原名');
+      } else if (title !== found.conv.title) {
+        found.conv.title = title;
+        app.save();
+        app.announce('已重命名为 ' + title);
+      }
+    }
+    refreshConvChrome(found.conv);
+  }
+
+  function cancelRename(id) {
+    commitRename(id, '', true);
+  }
+
+  function togglePin(id) {
+    const found = app.findConv(id);
+    if (!found) return;
+    found.conv.pinned = !found.conv.pinned;
+    moveConvToTop(found.conv);
+    if (app.sortConvs) app.sortConvs(found.ws);
+    app.save();
+    app.renderSidebar();
+    app.toast(found.conv.pinned ? '已置顶会话' : '已取消置顶');
+    app.announce(found.conv.pinned ? '已置顶会话' : '已取消置顶');
+  }
+
+  function pad2(n) {
+    return String(n).padStart(2, '0');
+  }
+
+  function fmtDateTime(ts) {
+    const d = new Date(ts || now());
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) +
+      ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  }
+
+  /* 文件名只保留安全字符，避免路径分隔符与保留字符。 */
+  function safeFilename(title, id, ext) {
+    const clean = String(title || '')
+      .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-')
+      .replace(/\s+/g, ' ')
+      .replace(/^[. ]+|[. ]+$/g, '')
+      .slice(0, 40);
+    const fallback = 'conv-' + String(id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 16);
+    const d = new Date();
+    const stamp = d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()) + '-' + pad2(d.getHours()) + pad2(d.getMinutes());
+    return 'gqy-' + (clean || fallback || 'session') + '-' + stamp + '.' + ext;
+  }
+
+  function downloadText(filename, content, type) {
+    try {
+      const blob = new Blob([content], { type: type });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function convMarkdown(conv, ws) {
+    const lines = [];
+    lines.push('# ' + (conv.title || '新会话'));
+    lines.push('');
+    lines.push('- 会话 ID：' + conv.id);
+    if (ws) lines.push('- 工作区：' + ws.name);
+    lines.push('- 更新时间：' + fmtDateTime(conv.updatedAt));
+    lines.push('- 置顶：' + (conv.pinned ? '是' : '否'));
+    lines.push('');
+    (conv.messages || []).forEach((m) => {
+      lines.push('## ' + (m.role === 'user' ? '用户' : '助手') + ' · ' + fmtDateTime(m.ts));
+      lines.push('');
+      if (m.text) lines.push(String(m.text).trim());
+      else if (!m.thinking && !(m.tools && m.tools.length)) lines.push('（空消息）');
+      if (m.tools && m.tools.length) {
+        lines.push('');
+        lines.push('**工具轨迹**');
+        m.tools.forEach((t) => {
+          if (!t || !t.name) return;
+          const secs = t.ms ? ' · ' + (t.ms / 1000).toFixed(1) + 's' : '';
+          lines.push('- ' + t.name + (t.detail ? '：' + t.detail : '') + secs + ' · ' + (t.status || 'done'));
+          if (t.output) {
+            const first = String(t.output).split('\n')[0].trim().slice(0, 200);
+            if (first) lines.push('  - 输出：' + first);
+          }
+        });
+      }
+      if (m.error) {
+        lines.push('');
+        lines.push('**错误**：' + (m.error.message || '请求失败'));
+      }
+      lines.push('');
+      lines.push('---');
+      lines.push('');
+    });
+    return lines.join('\n');
+  }
+
+  function exportConv(id, format) {
+    const found = app.findConv(id);
+    if (!found) return;
+    const conv = found.conv;
+    const ws = found.ws;
+    let text;
+    let filename;
+    let type;
+    if (format === 'md') {
+      text = convMarkdown(conv, ws);
+      filename = safeFilename(conv.title, conv.id, 'md');
+      type = 'text/markdown;charset=utf-8';
+    } else {
+      text = JSON.stringify({
+        id: conv.id,
+        title: conv.title || '新会话',
+        pinned: !!conv.pinned,
+        updatedAt: conv.updatedAt || now(),
+        messages: conv.messages || [],
+        workspace: ws ? ws.name : '',
+        exportedAt: now()
+      }, app.dropBlobUrls, 2);
+      filename = safeFilename(conv.title, conv.id, 'json');
+      type = 'application/json;charset=utf-8';
+    }
+    if (downloadText(filename, text, type)) app.toast('已导出' + (format === 'md' ? ' Markdown' : ' JSON'));
+    else app.toast('导出失败');
+  }
+
+  function openConvMenu(id, anchor) {
+    const found = app.findConv(id);
+    if (!found || !app.openMenu || !app.menuItem) return;
+    app.openMenu(anchor, (node) => {
+      node.appendChild(app.menuItem('重命名', {
+        icon: 'i-pencil',
+        onSelect: () => startRename(id)
+      }));
+      node.appendChild(app.menuItem(found.conv.pinned ? '取消置顶' : '置顶', {
+        icon: 'i-pin',
+        onSelect: () => togglePin(id)
+      }));
+      const sep1 = document.createElement('div');
+      sep1.className = 'menu-sep';
+      node.appendChild(sep1);
+      node.appendChild(app.menuItem('导出 JSON', {
+        icon: 'i-file',
+        onSelect: () => exportConv(id, 'json')
+      }));
+      node.appendChild(app.menuItem('导出 Markdown', {
+        icon: 'i-book',
+        onSelect: () => exportConv(id, 'md')
+      }));
+      const sep2 = document.createElement('div');
+      sep2.className = 'menu-sep';
+      node.appendChild(sep2);
+      const del = app.menuItem('删除', {
+        icon: 'i-trash',
+        onSelect: () => app.deleteConv(id)
+      });
+      del.classList.add('is-danger');
+      node.appendChild(del);
+    }, { align: 'right', place: 'auto' });
+  }
+
+  function refreshManageBar() {
+    if (!el.manageBar) return;
+    el.manageBar.hidden = !app.manageMode;
+    if (el.manageBtn) el.manageBtn.setAttribute('aria-pressed', String(!!app.manageMode));
+    if (!app.manageMode) return;
+    const alive = new Set();
+    app.state.workspaces.forEach((ws) => ws.convs.forEach((c) => alive.add(c.id)));
+    Array.from(app.manageSelected).forEach((id) => { if (!alive.has(id)) app.manageSelected.delete(id); });
+    const count = app.manageSelected.size;
+    if (el.manageCount) el.manageCount.textContent = '已选 ' + count;
+    if (el.manageDelete) el.manageDelete.disabled = count === 0;
+  }
+
+  function enterManageMode() {
+    if (app.manageMode) return;
+    app.renamingId = null;
+    app.manageMode = true;
+    app.manageSelected.clear();
+    if (app.searchOpen) {
+      app.searchOpen = false;
+      if (el.searchWrap) el.searchWrap.hidden = true;
+      if (el.searchBtn) el.searchBtn.setAttribute('aria-expanded', 'false');
+      if (el.searchInput) el.searchInput.value = '';
+      app.searchQuery = '';
+    }
+    if (app.closeMenu) app.closeMenu(false);
+    app.renderSidebar();
+    refreshManageBar();
+    app.announce('已进入会话管理模式');
+  }
+
+  function exitManageMode() {
+    if (!app.manageMode) return;
+    app.manageMode = false;
+    app.manageSelected.clear();
+    app.renderSidebar();
+    refreshManageBar();
+    app.announce('已退出会话管理模式');
+  }
+
+  function toggleManageMode() {
+    if (app.manageMode) exitManageMode();
+    else enterManageMode();
+  }
+
+  function setManageChecked(id, checked) {
+    if (!app.manageMode) return;
+    if (checked) app.manageSelected.add(id);
+    else app.manageSelected.delete(id);
+    refreshManageBar();
+  }
+
+  function selectAllConvs() {
+    if (!app.manageMode) return;
+    app.manageSelected.clear();
+    app.state.workspaces.forEach((ws) => ws.convs.forEach((c) => app.manageSelected.add(c.id)));
+    el.wsList.querySelectorAll('.conv-check').forEach((cb) => { cb.checked = true; });
+    refreshManageBar();
+  }
+
+  function clearManageSelection() {
+    if (!app.manageMode) return;
+    app.manageSelected.clear();
+    el.wsList.querySelectorAll('.conv-check').forEach((cb) => { cb.checked = false; });
+    refreshManageBar();
+  }
+
+  function firstRemainingConv() {
+    let ws = app.state.workspaces.find((w) => w.id === app.state.activeWorkspaceId) || app.state.workspaces[0];
+    let next = ws && ws.convs[0];
+    if (!next) {
+      const other = app.state.workspaces.find((w) => w.convs.length);
+      if (other) { ws = other; next = other.convs[0]; }
+    }
+    if (!next) {
+      next = { id: uid(), title: '新会话', pinned: false, messages: [], updatedAt: now() };
+      if (!ws) {
+        ws = { id: uid(), name: 'gqy', convs: [next] };
+        app.state.workspaces.push(ws);
+      } else {
+        ws.convs.unshift(next);
+      }
+    }
+    return { ws: ws, conv: next };
+  }
+
+  function deleteSelectedConvs() {
+    if (!app.manageMode) return;
+    const alive = new Set();
+    app.state.workspaces.forEach((ws) => ws.convs.forEach((c) => alive.add(c.id)));
+    const ids = Array.from(app.manageSelected).filter((id) => alive.has(id));
+    if (!ids.length) { app.toast('先选择要删除的会话'); refreshManageBar(); return; }
+    if (app.stream && ids.indexOf(app.stream.convId) >= 0) {
+      app.toast('正在流式回复的会话不能删除，请先停止生成');
+      return;
+    }
+    if (!window.confirm('确定删除选中的 ' + ids.length + ' 个会话？删除后不可撤销。')) return;
+
+    const selected = new Set(ids);
+    const activeDeleted = selected.has(app.state.activeConvId);
+    let removed = 0;
+    app.state.workspaces.forEach((ws) => {
+      ws.convs = ws.convs.filter((c) => {
+        if (!selected.has(c.id)) return true;
+        delete app.state.drafts[c.id];
+        removed += 1;
+        return false;
+      });
+    });
+
+    if (activeDeleted) {
+      const next = firstRemainingConv();
+      app.state.activeWorkspaceId = next.ws.id;
+      app.state.activeConvId = next.conv.id;
+    }
+
+    exitManageMode();
+    app.save();
+    app.renderAll();
+    restoreDraft();
+    app.toast('已删除 ' + removed + ' 个会话');
+    app.announce('已删除 ' + removed + ' 个会话');
+  }
+
   function deleteConv(id) {
     if (app.stream && app.stream.convId === id) app.stopStreaming();
     const found = app.findConv(id);
@@ -363,13 +693,15 @@
     const index = ws.convs.findIndex((c) => c.id === id);
     const removed = ws.convs.splice(index, 1)[0];
     if (!removed) return;
+    const draft = app.state.drafts[id];
+    delete app.state.drafts[id];
 
     if (app.state.activeConvId === id) {
       const next = ws.convs[Math.max(0, index - 1)] || ws.convs[0];
       if (next) {
         app.state.activeConvId = next.id;
       } else {
-        const fresh = { id: uid(), title: '新会话', messages: [], updatedAt: now() };
+        const fresh = { id: uid(), title: '新会话', pinned: false, messages: [], updatedAt: now() };
         ws.convs.unshift(fresh);
         app.state.activeConvId = fresh.id;
       }
@@ -382,6 +714,8 @@
       const target = app.state.workspaces.find((w) => w.id === ws.id);
       if (!target) return;
       target.convs.splice(Math.min(index, target.convs.length), 0, removed);
+      if (app.sortConvs) app.sortConvs(target);
+      if (typeof draft === 'string') app.state.drafts[removed.id] = draft;
       app.state.activeWorkspaceId = target.id;
       app.state.activeConvId = removed.id;
       app.save();
@@ -407,9 +741,13 @@
   }
 
   Object.assign(app, {
-    mirrorSession, moveConvToTop, handleSend, respond, startApiStream,
+    mirrorSession, moveConvToTop, refreshConvChrome, handleSend, respond, startApiStream,
     liveMsg, scheduleStreamPaint, paintStream, stopStreaming, finishStream,
     focusInput, closeDrawer, setSidebarCollapsed, saveDraft, restoreDraft,
-    selectConv, selectWorkspace, newChat, deleteConv, retryMessage
+    selectConv, selectWorkspace, newChat, deleteConv, retryMessage,
+    startRename, commitRename, cancelRename, togglePin, openConvMenu,
+    exportConv, convMarkdown, safeFilename,
+    refreshManageBar, enterManageMode, exitManageMode, toggleManageMode,
+    setManageChecked, selectAllConvs, clearManageSelection, deleteSelectedConvs
   });
 })();

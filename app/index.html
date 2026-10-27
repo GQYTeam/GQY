@@ -41,6 +41,9 @@
   <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2.6"/><path d="M15 6.4A2.4 2.4 0 0 0 12.6 4h-6A2.6 2.6 0 0 0 4 6.6v6A2.4 2.4 0 0 0 6.4 15"/></symbol>
   <symbol id="i-retry" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4.6V10h-5.4"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 7h14.8M9.4 7V5.3A1.3 1.3 0 0 1 10.7 4h2.6a1.3 1.3 0 0 1 1.3 1.3V7M6.4 7l.8 11.1A1.9 1.9 0 0 0 9.1 20h5.8a1.9 1.9 0 0 0 1.9-1.9L17.6 7"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.2V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.8a2 2 0 0 0-1.1-1.8l-1.8-.9A2 2 0 0 1 15 10.8V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.35"/><circle cx="12" cy="12" r="1.35"/><circle cx="19" cy="12" r="1.35"/></symbol>
+  <symbol id="i-check-square" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.6" y="3.6" width="16.8" height="16.8" rx="3.2"/><path d="m7.8 12.2 3 3 5.6-6"/></symbol>
   <symbol id="i-wrap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h13M4 18h9"/><path d="m16.5 15.5 2.5 2.5-2.5 2.5"/></symbol>
   <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13.6 3.6H7.4a2 2 0 0 0-2 2v12.8a2 2 0 0 0 2 2h9.2a2 2 0 0 0 2-2V8.6Z"/><path d="M13.6 3.6v5h5"/></symbol>
   <symbol id="i-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.4"/><path d="M9.6 9.5c.2-1.5 1.3-2.4 2.7-2.4 1.5 0 2.5 1 2.5 2.2 0 1.2-.8 1.8-1.8 2.3-.8.4-1.1.9-1.1 1.8v.3"/><path d="M12 17.1h.01"/></symbol>
@@ -93,6 +96,9 @@
           <button class="icon-btn sm" id="searchBtn" type="button" aria-label="搜索对话" title="搜索对话" aria-expanded="false">
             <svg class="ico" aria-hidden="true"><use href="#i-search"/></svg>
           </button>
+          <button class="icon-btn sm" id="manageBtn" type="button" aria-label="管理会话" title="管理会话" aria-pressed="false">
+            <svg class="ico" aria-hidden="true"><use href="#i-check-square"/></svg>
+          </button>
           <button class="icon-btn sm" id="newWsBtn" type="button" aria-label="新建工作区" title="新建工作区">
             <svg class="ico" aria-hidden="true"><use href="#i-folder-plus"/></svg>
           </button>
@@ -101,6 +107,15 @@
       <div class="search-wrap" id="searchWrap" hidden>
         <svg class="ico search-ico" aria-hidden="true"><use href="#i-search"/></svg>
         <input id="searchInput" type="search" placeholder="搜索对话" aria-label="搜索对话" autocomplete="off">
+      </div>
+      <div class="manage-bar" id="manageBar" hidden>
+        <span class="manage-count" id="manageCount">已选 0</span>
+        <div class="manage-actions">
+          <button class="btn btn-sm" id="manageAll" type="button">全选</button>
+          <button class="btn btn-sm" id="manageNone" type="button">清空</button>
+          <button class="btn btn-sm btn-danger" id="manageDelete" type="button" disabled>删除</button>
+          <button class="btn btn-sm" id="manageCancel" type="button">取消</button>
+        </div>
       </div>
       <div class="ws-scroll" id="wsList"></div>
 

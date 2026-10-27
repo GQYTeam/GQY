@@ -58,13 +58,68 @@
   });
 
   el.wsList.addEventListener('click', (e) => {
+    const more = e.target.closest('[data-more]');
+    if (more) { e.stopPropagation(); app.openConvMenu(more.getAttribute('data-more'), more); return; }
     const del = e.target.closest('[data-del]');
     if (del) { app.deleteConv(del.getAttribute('data-del')); return; }
+    if (e.target.closest('.conv-check, .conv-row--manage, .conv-rename')) return;
     const conv = e.target.closest('[data-conv]');
     if (conv) { app.selectConv(conv.getAttribute('data-conv')); return; }
     const ws = e.target.closest('[data-ws]');
     if (ws) { app.selectWorkspace(ws.getAttribute('data-ws')); }
   });
+
+  el.wsList.addEventListener('change', (e) => {
+    const check = e.target.closest('.conv-check');
+    if (!check) return;
+    app.setManageChecked(check.getAttribute('data-check'), check.checked);
+  });
+
+  el.wsList.addEventListener('dblclick', (e) => {
+    if (app.manageMode || app.renamingId) return;
+    const title = e.target.closest('.conv-title');
+    const row = title && title.closest('[data-conv]');
+    if (row) app.startRename(row.getAttribute('data-conv'));
+  });
+
+  el.wsList.addEventListener('contextmenu', (e) => {
+    if (app.manageMode) return;
+    const row = e.target.closest('[data-conv]');
+    if (!row) return;
+    e.preventDefault();
+    app.openConvMenu(row.getAttribute('data-conv'), row);
+  });
+
+  el.wsList.addEventListener('keydown', (e) => {
+    const input = e.target.closest('.conv-rename');
+    if (!input) return;
+    const id = input.getAttribute('data-rename-input');
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      app.commitRename(id, input.value, false);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      app.cancelRename(id);
+    }
+  });
+
+  el.wsList.addEventListener('focusout', (e) => {
+    const input = e.target.closest('.conv-rename');
+    if (!input) return;
+    const id = input.getAttribute('data-rename-input');
+    const value = input.value;
+    // 让点击其他会话的 click 先完成，再按失焦保存。
+    setTimeout(() => app.commitRename(id, value, false), 0);
+  });
+
+  if (el.manageBtn) el.manageBtn.addEventListener('click', app.toggleManageMode);
+  if (el.manageAll) el.manageAll.addEventListener('click', app.selectAllConvs);
+  if (el.manageNone) el.manageNone.addEventListener('click', app.clearManageSelection);
+  if (el.manageDelete) el.manageDelete.addEventListener('click', app.deleteSelectedConvs);
+  if (el.manageCancel) el.manageCancel.addEventListener('click', app.exitManageMode);
 
   el.newWsBtn.addEventListener('click', app.openWsDialog);
   el.form.addEventListener('submit', (e) => {
@@ -292,7 +347,7 @@
     const name = el.wsName.value.trim();
     if (!name) { el.wsName.focus(); return; }
     if (app.stream) app.stopStreaming();
-    const conv = { id: uid(), title: '新会话', messages: [], updatedAt: now() };
+    const conv = { id: uid(), title: '新会话', pinned: false, messages: [], updatedAt: now() };
     const ws = { id: uid(), name: name.slice(0, 40), convs: [conv] };
     app.state.workspaces.unshift(ws);
     app.state.activeWorkspaceId = ws.id;

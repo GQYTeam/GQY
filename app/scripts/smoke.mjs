@@ -325,6 +325,100 @@ try {
   })()`);
   check('切换会话保留草稿', draft.cleared === '' && draft.restored === '草稿内容 ABC', JSON.stringify(draft));
 
+  /* 会话管理：重命名 / 置顶 / 批量删除 */
+  const renamed = await evaluate(`(async () => {
+    const app = GQY.app;
+    const target = app.state.workspaces.flatMap((w) => w.convs).find((c) => c.messages && c.messages.length);
+    if (!target) return { error: 'no message conv' };
+    const row = document.querySelector('[data-conv="' + target.id + '"]');
+    if (!row) return { error: 'no row' };
+    row.click();
+    await new Promise((r) => setTimeout(r, 120));
+    const titleNode = document.querySelector('.conv-row.active .conv-title');
+    if (!titleNode) return { error: 'no title' };
+    titleNode.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    const input = document.querySelector('.conv-rename');
+    if (!input) return { error: 'no rename input' };
+    input.value = '重命名冒烟会话';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 160));
+    const saved = JSON.parse(localStorage.getItem('claude-webchat:v7'));
+    const conv = saved.workspaces.flatMap((w) => w.convs).find((c) => c.id === target.id);
+    return {
+      id: target.id,
+      title: conv && conv.title,
+      topbar: document.querySelector('#topbarTitle').textContent,
+      inputGone: !document.querySelector('.conv-rename')
+    };
+  })()`);
+  check('重命名会话并持久化到标题',
+    renamed.title === '重命名冒烟会话' && renamed.topbar === '重命名冒烟会话' && renamed.inputGone,
+    JSON.stringify(renamed));
+
+  const pinned = await evaluate(`(async () => {
+    const app = GQY.app;
+    const ws = app.state.workspaces.find((w) => w.convs.some((c) => c.id === '${renamed.id}'));
+    app.togglePin('${renamed.id}');
+    await new Promise((r) => setTimeout(r, 100));
+    const saved = JSON.parse(localStorage.getItem('claude-webchat:v7'));
+    const conv = saved.workspaces.flatMap((w) => w.convs).find((c) => c.id === '${renamed.id}');
+    return {
+      pinned: !!(conv && conv.pinned),
+      first: !!ws && ws.convs[0].id === '${renamed.id}',
+      icon: !!document.querySelector('.conv-row.is-pinned .conv-pin')
+    };
+  })()`);
+  check('置顶持久化并排在同工作区最前',
+    pinned.pinned === true && pinned.first === true && pinned.icon === true,
+    JSON.stringify(pinned));
+
+  const exported = await evaluate(`(() => {
+    const app = GQY.app;
+    const found = app.findConv('${renamed.id}');
+    if (!found) return { error: 'conv gone' };
+    const md = app.convMarkdown(found.conv, found.ws);
+    const name = app.safeFilename('项目/会话:草稿*?', found.conv.id, 'json');
+    return {
+      title: md.indexOf('# 重命名冒烟会话') === 0,
+      roles: md.indexOf('## 用户') >= 0 && md.indexOf('## 助手') >= 0,
+      trace: md.indexOf('**工具轨迹**') >= 0,
+      safe: !/[\\\\/:*?"<>|]/.test(name) && /\\.json$/.test(name),
+      name
+    };
+  })()`);
+  check('单会话导出内容与文件名安全',
+    exported.title === true && exported.roles === true && exported.trace === true && exported.safe === true,
+    JSON.stringify(exported));
+
+  const batch = await evaluate(`(async () => {
+    const app = GQY.app;
+    document.querySelector('#newChatBtn').click();
+    await new Promise((r) => setTimeout(r, 120));
+    const stateCount = app.state.workspaces.reduce((n, w) => n + w.convs.length, 0);
+    document.querySelector('#manageBtn').click();
+    await new Promise((r) => setTimeout(r, 120));
+    const before = document.querySelectorAll('.conv-check').length;
+    const first = document.querySelector('.conv-check');
+    if (!first) return { error: 'no checkbox', stateCount, before };
+    first.click();
+    const count = document.querySelector('#manageCount').textContent;
+    window.confirm = () => true;
+    document.querySelector('#manageDelete').click();
+    await new Promise((r) => setTimeout(r, 200));
+    return {
+      stateCount,
+      before,
+      after: document.querySelectorAll('.conv-row').length,
+      count,
+      manageGone: document.querySelector('#manageBar').hidden
+    };
+  })()`);
+  check('批量删除选中会话并退出管理',
+    batch.before === batch.stateCount && batch.after === batch.stateCount - 1 &&
+    batch.after >= 2 && batch.count === '已选 1' && batch.manageGone === true,
+    JSON.stringify(batch));
+
   /* 导入：导出结构能原样回灌 */
   const imported = await evaluate(`(async () => {
     const data = JSON.parse(localStorage.getItem('claude-webchat:v7'));
