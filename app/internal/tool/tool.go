@@ -10,6 +10,14 @@ import (
 	"sync"
 )
 
+// Kind 标记工具来源：核心工具（agent 内置）还是外部工具（插件/skill/mcp）。
+type Kind int
+
+const (
+	KindCore Kind = iota
+	KindExternal
+)
+
 // Tool 是 agent 可调用的最小契约。
 type Tool interface {
 	Name() string
@@ -18,6 +26,8 @@ type Tool interface {
 	Schema() map[string]any
 	// Execute 执行工具，返回给模型回填的结果文本。
 	Execute(ctx context.Context, args map[string]any) (string, error)
+	// Kind 返回工具类别（核心 / 外部）。
+	Kind() Kind
 }
 
 // Registry 是线程安全的工具注册表（读多写少，读写锁足够）。
@@ -48,12 +58,39 @@ func (r *Registry) Get(name string) (Tool, bool) {
 	return t, ok
 }
 
+// List 返回所有工具。
 func (r *Registry) List() []Tool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := make([]Tool, 0, len(r.tools))
 	for _, t := range r.tools {
 		out = append(out, t)
+	}
+	return out
+}
+
+// ListCore 返回核心工具。
+func (r *Registry) ListCore() []Tool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]Tool, 0, len(r.tools))
+	for _, t := range r.tools {
+		if t.Kind() == KindCore {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// ListExternal 返回外部工具。
+func (r *Registry) ListExternal() []Tool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]Tool, 0, len(r.tools))
+	for _, t := range r.tools {
+		if t.Kind() == KindExternal {
+			out = append(out, t)
+		}
 	}
 	return out
 }

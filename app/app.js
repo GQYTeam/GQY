@@ -101,6 +101,8 @@
   el.usageBtn.addEventListener('click', app.openContextPanel);
   if (el.usageTopBtn) el.usageTopBtn.addEventListener('click', app.openUsage);
   if (el.extensionsBtn) el.extensionsBtn.addEventListener('click', app.openExtensions);
+  if (el.githubConnectBtn) el.githubConnectBtn.addEventListener('click', app.connectGithub);
+  if (el.githubDisconnectBtn) el.githubDisconnectBtn.addEventListener('click', app.disconnectGithub);
   el.filesTree.addEventListener('click', (e) => {
     const row = e.target.closest('[role="treeitem"]');
     if (!row) return;

@@ -3,6 +3,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,15 @@ type Config struct {
 	Wire    string // auto | chat | responses
 	Home    string
 	Mock    bool
+	// EnableExternal 为 true 时把外部工具（插件/skill/mcp）也注入模型。
+	EnableExternal bool
+	// LowBalance 是 provider_usage 的余额阈值（低于时提醒模型收尾）。
+	LowBalance float64
+	// GitHub OAuth 凭据（可选，用于只读账户插件）
+	GitHubClientID     string
+	GitHubClientSecret string
+	// GitHubOAuthRedirect 是 OAuth 回调地址（默认 http://127.0.0.1:PORT/api/github/callback）
+	GitHubOAuthRedirect string
 }
 
 // Provider 返回当前上游类型：真实密钥 → openai-compatible，否则 mock / none。
@@ -35,21 +45,38 @@ func (c Config) Provider() string {
 // Load 从环境变量（含已加载的 .env）构造配置。
 func Load() Config {
 	return Config{
-		Host:    Env("HOST", "127.0.0.1"),
-		Port:    Env("PORT", "5173"),
-		APIBase: strings.TrimRight(Env("GQY_API_BASE", "https://api.deepseek.com/v1"), "/"),
-		APIKey:  os.Getenv("GQY_API_KEY"),
-		APIUA:   os.Getenv("GQY_API_UA"),
-		Model:   Env("GQY_MODEL", "deepseek-chat"),
-		Wire:    strings.ToLower(Env("GQY_API_WIRE", "auto")),
-		Home:    Env("GQY_HOME", filepath.Join(HomeDir(), ".gqy")),
-		Mock:    IsTruthy(os.Getenv("GQY_MOCK")),
+		Host:                Env("HOST", "127.0.0.1"),
+		Port:                Env("PORT", "5173"),
+		APIBase:             strings.TrimRight(Env("GQY_API_BASE", "https://api.deepseek.com/v1"), "/"),
+		APIKey:              os.Getenv("GQY_API_KEY"),
+		APIUA:               os.Getenv("GQY_API_UA"),
+		Model:               Env("GQY_MODEL", "deepseek-chat"),
+		Wire:                strings.ToLower(Env("GQY_API_WIRE", "auto")),
+		Home:                Env("GQY_HOME", filepath.Join(HomeDir(), ".gqy")),
+		Mock:                IsTruthy(os.Getenv("GQY_MOCK")),
+		EnableExternal:      IsTruthy(os.Getenv("GQY_ENABLE_EXTERNAL")),
+		LowBalance:          EnvFloat("GQY_LOW_BALANCE", 0),
+		GitHubClientID:      os.Getenv("GITHUB_CLIENT_ID"),
+		GitHubClientSecret:  os.Getenv("GITHUB_CLIENT_SECRET"),
+		GitHubOAuthRedirect: os.Getenv("GITHUB_OAUTH_REDIRECT"),
 	}
 }
 
 func Env(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func EnvFloat(key string, fallback float64) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	var f float64
+	if _, err := fmt.Sscanf(v, "%f", &f); err == nil {
+		return f
 	}
 	return fallback
 }

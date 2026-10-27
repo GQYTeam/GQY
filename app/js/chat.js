@@ -117,7 +117,7 @@
       mode: 'api', convId: conv.id, msgId: msg.id, demo: false,
       thinking: '', thinkingShown: 0, tools: [], toolIndex: 0,
       full: '', shown: 0, stage: 'thinking', started: now(), timer: 0,
-      controller: controller, usage: null, error: null
+      controller: controller, usage: null, error: null, question: null
     };
     app.updateSendState();
     G.clawd.set('thinking');
@@ -140,6 +140,8 @@
           s.shown = s.full.length;
         } else if (event.type === 'tool') {
           upsertTool(s.tools, event.tool);
+        } else if (event.type === 'question') {
+          s.question = event.question || null;
         } else if (event.type === 'done') {
           s.usage = event.usage || null;
         }
@@ -229,6 +231,16 @@
         }));
         if (s.usage) msg.usage = s.usage;
         if (s.error) msg.error = s.error;
+        // ask_user → question 卡片（复用现有 askHTML）
+        if (s.question) {
+          msg.question = {
+            header: '需要确认',
+            text: s.question.text,
+            multiSelect: false,
+            options: (s.question.options || []).map((o) => ({ label: o, desc: '' })),
+            answer: null
+          };
+        }
         msg.ts = now();
       }
       found.conv.updatedAt = now();

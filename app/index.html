@@ -493,6 +493,14 @@
     </header>
     <div class="settings-body">
       <div class="ext-body">
+        <div class="ext-section">
+          <div class="ext-section-head"><b>GitHub 账户</b><small>只读查看账户信息</small></div>
+          <div class="ext-gh" id="extGithub">
+            <span class="ext-gh-status" id="githubStatus">未连接</span>
+            <button class="btn" id="githubConnectBtn" type="button">连接 GitHub</button>
+            <button class="btn btn-danger" id="githubDisconnectBtn" type="button" hidden>断开</button>
+          </div>
+        </div>
         <p class="ext-empty">插件与模型管理即将接入。这里会像 Claude Customize / Cursor Customize 一样，统一管理插件、技能与模型市场。</p>
       </div>
     </div>

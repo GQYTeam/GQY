@@ -60,12 +60,19 @@ type ToolEvent struct {
 }
 
 type Event struct {
-	Type    string     `json:"type"`
-	Delta   string     `json:"delta,omitempty"`
-	Tool    *ToolEvent `json:"tool,omitempty"`
-	Usage   *Usage     `json:"usage,omitempty"`
-	Code    string     `json:"code,omitempty"`
-	Message string     `json:"message,omitempty"`
+	Type     string     `json:"type"`
+	Delta    string     `json:"delta,omitempty"`
+	Tool     *ToolEvent `json:"tool,omitempty"`
+	Usage    *Usage     `json:"usage,omitempty"`
+	Code     string     `json:"code,omitempty"`
+	Message  string     `json:"message,omitempty"`
+	Question *Question  `json:"question,omitempty"`
+}
+
+// Question 是 ask_user 事件的载荷。
+type Question struct {
+	Text    string   `json:"text"`
+	Options []string `json:"options,omitempty"`
 }
 
 // Writer 串行化写 SSE，保证心跳和事件不交错。

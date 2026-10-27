@@ -1,11 +1,11 @@
-// 内置工具：读文件、列目录、写文件、跑 shell 命令。
+// 核心工具：read（支持图片）、edit、shell、websearch、list_dir。
 //
-// 安全模型（本阶段）：信任本机，工具拥有完整本机权限。
-// 后续接 AboutPlugin.md 的工作区隔离 / 人工确认时，在 Execute 前统一加闸。
+// 核心工具由 agent 内置，直接暴露给模型；其余能力走外部工具（插件/skill/mcp）。
 package tool
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,15 +13,16 @@ import (
 	"strings"
 )
 
-/* ---------------- 读文件 ---------------- */
+/* ---------------- read（读取文件，支持图片） ---------------- */
 
-type ReadFile struct{}
+type Read struct{}
 
-func (ReadFile) Name() string { return "read_file" }
-func (ReadFile) Description() string {
-	return "读取一个文件的文本内容。返回文件全文。用于查看代码、配置或文档。"
+func (Read) Name() string { return "read" }
+func (Read) Kind() Kind   { return KindCore }
+func (Read) Description() string {
+	return "读取一个文件的内容。文本文件返回全文；图片（png/jpg/jpeg/gif/webp）返回 base64 数据供视觉理解。"
 }
-func (ReadFile) Schema() map[string]any {
+func (Read) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -30,7 +31,7 @@ func (ReadFile) Schema() map[string]any {
 		"required": []any{"path"},
 	}
 }
-func (ReadFile) Execute(ctx context.Context, args map[string]any) (string, error) {
+func (Read) Execute(ctx context.Context, args map[string]any) (string, error) {
 	path, _ := args["path"].(string)
 	if strings.TrimSpace(path) == "" {
 		return "", fmt.Errorf("path 不能为空")
@@ -39,16 +40,91 @@ func (ReadFile) Execute(ctx context.Context, args map[string]any) (string, error
 	if err != nil {
 		return "", err
 	}
+	// 图片：转 base64 供视觉模型
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
+		return "data:image/" + strings.TrimPrefix(filepath.Ext(path), ".") + ";base64," + base64.StdEncoding.EncodeToString(b), nil
+	}
 	return string(b), nil
 }
 
-/* ---------------- 列目录 ---------------- */
+/* ---------------- edit（写入/覆盖文件） ---------------- */
+
+type Edit struct{}
+
+func (Edit) Name() string { return "edit" }
+func (Edit) Kind() Kind   { return KindCore }
+func (Edit) Description() string {
+	return "写入（覆盖）一个文件。会自动创建父目录。用于产出或修改代码/配置。"
+}
+func (Edit) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"path":    map[string]any{"type": "string", "description": "要写入的文件路径"},
+			"content": map[string]any{"type": "string", "description": "完整文件内容"},
+		},
+		"required": []any{"path", "content"},
+	}
+}
+func (Edit) Execute(ctx context.Context, args map[string]any) (string, error) {
+	path, _ := args["path"].(string)
+	content, _ := args["content"].(string)
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("path 不能为空")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("已写入 %s（%d 字节）", path, len(content)), nil
+}
+
+/* ---------------- shell（跑 shell 命令） ---------------- */
+
+type Shell struct{}
+
+func (Shell) Name() string { return "shell" }
+func (Shell) Kind() Kind   { return KindCore }
+func (Shell) Description() string {
+	return "执行一条 shell 命令，返回合并后的 stdout+stderr（最多 16KB）。用于编译、测试、git 等。"
+}
+func (Shell) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"command": map[string]any{"type": "string", "description": "要执行的 shell 命令"},
+		},
+		"required": []any{"command"},
+	}
+}
+func (Shell) Execute(ctx context.Context, args map[string]any) (string, error) {
+	command, _ := args["command"].(string)
+	if strings.TrimSpace(command) == "" {
+		return "", fmt.Errorf("command 不能为空")
+	}
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	out, err := cmd.CombinedOutput()
+	const max = 16 * 1024
+	if len(out) > max {
+		out = append(append([]byte{}, out[:max]...), []byte("\n...[截断]")...)
+	}
+	if err != nil {
+		return string(out), fmt.Errorf("exit %v: %s", err, string(out))
+	}
+	return string(out), nil
+}
+
+/* ---------------- list_dir（列目录） ---------------- */
 
 type ListDir struct{}
 
 func (ListDir) Name() string { return "list_dir" }
+func (ListDir) Kind() Kind   { return KindCore }
 func (ListDir) Description() string {
-	return "列出目录下的文件和子目录名。返回每项一行（目录以 / 结尾）。"
+	return "列出目录下的文件和子目录名（目录以 / 结尾），每项一行。"
 }
 func (ListDir) Schema() map[string]any {
 	return map[string]any{
@@ -79,69 +155,25 @@ func (ListDir) Execute(ctx context.Context, args map[string]any) (string, error)
 	return b.String(), nil
 }
 
-/* ---------------- 写文件 ---------------- */
+/* ---------------- websearch（网络搜索） ---------------- */
 
-type WriteFile struct{}
+type WebSearch struct{}
 
-func (WriteFile) Name() string { return "write_file" }
-func (WriteFile) Description() string {
-	return "写入（覆盖）一个文件。会自动创建父目录。用于产出代码或修改文件。"
+func (WebSearch) Name() string { return "websearch" }
+func (WebSearch) Kind() Kind   { return KindCore }
+func (WebSearch) Description() string {
+	return "在网络上搜索信息。需要服务端配置搜索 API（未配置时返回提示）。"
 }
-func (WriteFile) Schema() map[string]any {
+func (WebSearch) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"path":    map[string]any{"type": "string", "description": "要写入的文件路径"},
-			"content": map[string]any{"type": "string", "description": "完整文件内容"},
+			"query": map[string]any{"type": "string", "description": "搜索关键词（英文效果更好）"},
 		},
-		"required": []any{"path", "content"},
+		"required": []any{"query"},
 	}
 }
-func (WriteFile) Execute(ctx context.Context, args map[string]any) (string, error) {
-	path, _ := args["path"].(string)
-	content, _ := args["content"].(string)
-	if strings.TrimSpace(path) == "" {
-		return "", fmt.Errorf("path 不能为空")
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("已写入 %s（%d 字节）", path, len(content)), nil
-}
-
-/* ---------------- 跑 shell ---------------- */
-
-type RunShell struct{}
-
-func (RunShell) Name() string { return "run_shell" }
-func (RunShell) Description() string {
-	return "执行一条 shell 命令，返回合并后的 stdout+stderr（最多截断到 16KB）。用于编译、运行测试、查 git 状态等。"
-}
-func (RunShell) Schema() map[string]any {
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"command": map[string]any{"type": "string", "description": "要执行的 shell 命令"},
-		},
-		"required": []any{"command"},
-	}
-}
-func (RunShell) Execute(ctx context.Context, args map[string]any) (string, error) {
-	command, _ := args["command"].(string)
-	if strings.TrimSpace(command) == "" {
-		return "", fmt.Errorf("command 不能为空")
-	}
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
-	out, err := cmd.CombinedOutput()
-	const max = 16 * 1024
-	if len(out) > max {
-		out = append(append([]byte{}, out[:max]...), []byte("\n...[截断]")...)
-	}
-	if err != nil {
-		return string(out), fmt.Errorf("exit %v: %s", err, string(out))
-	}
-	return string(out), nil
+func (WebSearch) Execute(ctx context.Context, args map[string]any) (string, error) {
+	// 未接搜索后端：明确返回，让模型不要编造
+	return "", fmt.Errorf("websearch 尚未接入搜索后端，请用 shell 调用本地工具，或等待后续接入")
 }

@@ -7,8 +7,10 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"gqy/internal/provider"
@@ -33,11 +35,17 @@ type Loop struct {
 	Upstream *provider.Upstream
 	Registry *tool.Registry
 	OnTool   OnTool
+	// IncludeExternal 为 true 时把外部工具也注入模型；默认只注入核心工具。
+	IncludeExternal bool
 }
 
-// ToolsSchema 把注册表里的工具转成 OpenAI function calling 的 tools 数组。
+// ToolsSchema 把核心工具转成 OpenAI function calling 的 tools 数组。
+// 外部工具（插件/skill/mcp）默认不注入，需要时通过 EnableExternal 开启。
 func (l *Loop) ToolsSchema() []any {
-	tools := l.Registry.List()
+	tools := l.Registry.ListCore()
+	if l.IncludeExternal {
+		tools = l.Registry.List()
+	}
 	out := make([]any, 0, len(tools))
 	for _, t := range tools {
 		out = append(out, map[string]any{
@@ -52,15 +60,42 @@ func (l *Loop) ToolsSchema() []any {
 	return out
 }
 
-// Run 跑一轮 agent loop：从 messages 出发，直到模型返回最终答案或达到轮次上限。
-// 返回最终的 assistant 消息（文本 + 累积 usage）。
-func (l *Loop) Run(ctx context.Context, messages []provider.Message, model, effort string) (provider.Message, *provider.Usage, error) {
+// systemPrompt 告诉模型它有哪些工具、怎么用。
+// 没有它，模型会凭「自我认知」声称自己没有工具（即使 tools 已随请求发出）。
+func (l *Loop) systemPrompt() string {
+	var b strings.Builder
+	b.WriteString("你是顾清影，运行在本机（macOS）的 AI 助手，拥有以下可主动调用的工具：\n")
+	tools := l.Registry.ListCore()
+	if l.IncludeExternal {
+		tools = l.Registry.List()
+	}
+	for _, t := range tools {
+		fmt.Fprintf(&b, "- %s: %s\n", t.Name(), t.Description())
+	}
+	b.WriteString(`
+使用规则：
+- 需要真实信息（文件内容、目录、命令输出）时必须调用工具获取，不要凭空编造。
+- 被问到「你有没有工具/能不能联网」这类关于自身能力的问题时，回答「有」并按需演示。
+- 工具结果已由系统执行并回填，直接基于结果继续推理。
+- 简单寒暄或纯创作类问题不需要调用工具。`)
+	return b.String()
+}
+
+// Run 跑一轮 agent loop：从 messages 出发，直到模型返回最终答案、需要询问用户、或达到轮次上限。
+// 返回最终的 assistant 消息、累积 usage、以及可能的 ask（需要询问用户时非 nil）。
+func (l *Loop) Run(ctx context.Context, messages []provider.Message, model, effort string) (provider.Message, *provider.Usage, *tool.Ask, error) {
 	totalUsage := &provider.Usage{}
-	msgs := append([]provider.Message(nil), messages...)
+	msgs := make([]provider.Message, 0, len(messages)+1)
+	// 系统提示插最前；若用户消息里已带 system 则替换
+	hasSystem := len(messages) > 0 && messages[0].Role == "system"
+	if !hasSystem {
+		msgs = append(msgs, provider.Message{Role: "system", Content: l.systemPrompt()})
+	}
+	msgs = append(msgs, messages...)
 
 	for round := 0; round < maxRounds; round++ {
 		if ctx.Err() != nil {
-			return provider.Message{}, totalUsage, ctx.Err()
+			return provider.Message{}, totalUsage, nil, ctx.Err()
 		}
 		assistant, usage, err := l.Upstream.Complete(ctx, provider.Request{
 			Messages: msgs,
@@ -74,12 +109,12 @@ func (l *Loop) Run(ctx context.Context, messages []provider.Message, model, effo
 			totalUsage.TotalTokens += usage.TotalTokens
 		}
 		if err != nil {
-			return assistant, totalUsage, err
+			return assistant, totalUsage, nil, err
 		}
 
 		// 没有工具调用 → 最终答案
 		if len(assistant.ToolCalls) == 0 {
-			return assistant, totalUsage, nil
+			return assistant, totalUsage, nil, nil
 		}
 
 		// 有工具调用 → 执行并回填
@@ -88,6 +123,11 @@ func (l *Loop) Run(ctx context.Context, messages []provider.Message, model, effo
 			result := l.execute(ctx, tc)
 			if l.OnTool != nil {
 				l.OnTool(result)
+			}
+			// ask_user：中断，把问题抛给上层
+			var askErr *tool.ErrAskUser
+			if errors.As(result.Error, &askErr) {
+				return provider.Message{}, totalUsage, &askErr.Ask, nil
 			}
 			role := "tool"
 			content := result.Output
@@ -101,7 +141,7 @@ func (l *Loop) Run(ctx context.Context, messages []provider.Message, model, effo
 			})
 		}
 	}
-	return provider.Message{}, totalUsage, fmt.Errorf("工具调用超过 %d 轮，已中止", maxRounds)
+	return provider.Message{}, totalUsage, nil, fmt.Errorf("工具调用超过 %d 轮，已中止", maxRounds)
 }
 
 func (l *Loop) execute(ctx context.Context, tc provider.ToolCall) ToolResult {

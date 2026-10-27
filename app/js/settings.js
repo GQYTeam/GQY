@@ -179,6 +179,40 @@
     el.extensionsLayer.hidden = false;
     app.syncInert();
     el.extensionsLayer.querySelector('#extensionsWindow').focus({ preventScroll: true });
+    refreshGithub();
+  }
+
+  async function refreshGithub() {
+    if (!G.api || !G.api.githubMe) return;
+    try {
+      const data = await G.api.githubMe();
+      if (el.githubStatus) {
+        el.githubStatus.textContent = data.connected
+          ? ('已连接 · @' + (data.account && data.account.login || ''))
+          : '未连接';
+      }
+      if (el.githubConnectBtn) el.githubConnectBtn.hidden = !!data.connected;
+      if (el.githubDisconnectBtn) el.githubDisconnectBtn.hidden = !data.connected;
+    } catch (err) {
+      if (el.githubStatus) el.githubStatus.textContent = '未连接';
+    }
+  }
+
+  async function connectGithub() {
+    if (!G.api || !G.api.githubAuth) return;
+    try {
+      const data = await G.api.githubAuth();
+      if (data && data.url) window.location.href = data.url;
+    } catch (err) {
+      app.toast('GitHub 未配置：请在 .env 填 GITHUB_CLIENT_ID / SECRET');
+    }
+  }
+
+  async function disconnectGithub() {
+    if (!G.api || !G.api.githubDisconnect) return;
+    await G.api.githubDisconnect();
+    refreshGithub();
+    app.toast('已断开 GitHub');
   }
 
   function closeExtensions() {
@@ -320,7 +354,8 @@
   Object.assign(app, {
     syncSettingsUI, applyFontSize, usageSnapshot, renderServerStatus, refreshUsage,
     openSettingsTab, openSettings, closeSettings, openUsage, closeUsage,
-    openExtensions, closeExtensions, trapTab, setView,
+    openExtensions, closeExtensions, refreshGithub, connectGithub, disconnectGithub,
+    trapTab, setView,
     exportData, importData, setupDetectedApi, openWsDialog, applyReduceMotion, clearEverything
   });
 })();

@@ -67,7 +67,8 @@
     fileInput: $('#fileInput'), importInput: $('#importInput'), importData: $('#importData'),
     scrollBtn: $('#scrollBtn'), liveStatus: $('#liveStatus'), serverStatus: $('#serverStatus'),
     usageTopBtn: $('#usageTopBtn'), usageLayer: $('#usageLayer'),
-    extensionsBtn: $('#extensionsBtn'), extensionsLayer: $('#extensionsLayer')
+    extensionsBtn: $('#extensionsBtn'), extensionsLayer: $('#extensionsLayer'),
+    githubStatus: $('#githubStatus'), githubConnectBtn: $('#githubConnectBtn'), githubDisconnectBtn: $('#githubDisconnectBtn')
   };
 
   app.prefersReducedMotion = () => {

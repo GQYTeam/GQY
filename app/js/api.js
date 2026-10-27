@@ -139,5 +139,22 @@
     }, delay == null ? 1200 : delay);
   }
 
-  G.api = { detect, available, info, chat, models, usage, syncSession };
+  /* GitHub 只读账户：auth URL / 当前账户 / 断开 */
+  async function githubAuth() {
+    const res = await fetch('/api/github/auth', { headers: { accept: 'application/json' } });
+    if (!res.ok) throw new Error('GitHub 未配置');
+    return res.json();
+  }
+
+  async function githubMe() {
+    const res = await fetch('/api/github/me', { headers: { accept: 'application/json' } });
+    if (!res.ok) return { connected: false };
+    return res.json();
+  }
+
+  async function githubDisconnect() {
+    await fetch('/api/github', { method: 'DELETE' });
+  }
+
+  G.api = { detect, available, info, chat, models, usage, syncSession, githubAuth, githubMe, githubDisconnect };
 })();

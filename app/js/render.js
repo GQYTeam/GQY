@@ -16,12 +16,19 @@
   function contextSnapshot() {
     const meta = currentModelMeta();
     const total = meta && meta.context ? meta.context : 128000;
+    // 真实上下文占用 = 当前会话最近一次请求的 prompt_tokens（含完整历史），
+    // 不是服务端累计值。取最后一条带 usage 的 assistant 消息。
     let used = 0;
-    if (app.usageData && app.usageData.promptTokens != null) {
-      used = app.usageData.promptTokens;
-    } else {
-      const conv = app.activeConv();
-      if (conv) used = estimateTokens(conv.messages.map((m) => m.text || '').join(''));
+    const conv = app.activeConv();
+    if (conv) {
+      for (let i = conv.messages.length - 1; i >= 0; i--) {
+        const m = conv.messages[i];
+        if (m.usage && m.usage.prompt_tokens != null) {
+          used = m.usage.prompt_tokens;
+          break;
+        }
+      }
+      if (!used) used = estimateTokens(conv.messages.map((m) => m.text || '').join(''));
     }
     const pct = Math.max(0, Math.min(100, Math.round((used / total) * 100)));
     return { used: used, total: total, pct: pct, model: meta };

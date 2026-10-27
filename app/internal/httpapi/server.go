@@ -20,6 +20,7 @@ import (
 	"gqy/internal/agent"
 	"gqy/internal/catalog"
 	"gqy/internal/config"
+	"gqy/internal/github"
 	"gqy/internal/provider"
 	"gqy/internal/session"
 	"gqy/internal/tool"
@@ -51,6 +52,7 @@ type Server struct {
 	Session  *session.Store
 	Upstream *provider.Upstream
 	Agent    *agent.Loop
+	GitHub   *github.Client
 }
 
 func New(root string, cfg config.Config, client *http.Client) *Server {
@@ -64,10 +66,19 @@ func New(root string, cfg config.Config, client *http.Client) *Server {
 		Client:  client,
 	}
 	registry := tool.NewRegistry()
-	_ = registry.Register(tool.ReadFile{})
+	_ = registry.Register(tool.Read{})
+	_ = registry.Register(tool.Edit{})
+	_ = registry.Register(tool.Shell{})
 	_ = registry.Register(tool.ListDir{})
-	_ = registry.Register(tool.WriteFile{})
-	_ = registry.Register(tool.RunShell{})
+	_ = registry.Register(tool.WebSearch{})
+	_ = registry.Register(tool.AskUser{})
+	// 外部工具：provider_usage（查余额）
+	_ = registry.Register(tool.ProviderUsage{
+		APIBase:    cfg.APIBase,
+		APIKey:     cfg.APIKey,
+		Client:     client,
+		LowBalance: cfg.LowBalance,
+	})
 
 	return &Server{
 		Root:     root,
@@ -76,7 +87,13 @@ func New(root string, cfg config.Config, client *http.Client) *Server {
 		Catalog:  catalog.New(client),
 		Session:  session.New(cfg.Home),
 		Upstream: upstream,
-		Agent:    &agent.Loop{Upstream: upstream, Registry: registry},
+		Agent:    &agent.Loop{Upstream: upstream, Registry: registry, IncludeExternal: cfg.EnableExternal},
+		GitHub: &github.Client{
+			ClientID:     cfg.GitHubClientID,
+			ClientSecret: cfg.GitHubClientSecret,
+			Home:         cfg.Home,
+			HTTP:         client,
+		},
 	}
 }
 
@@ -86,6 +103,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/models", s.handleModels)
 	mux.HandleFunc("GET /api/usage", s.handleUsage)
 	mux.HandleFunc("POST /api/chat", s.handleChat)
+	mux.HandleFunc("GET /api/github/auth", s.handleGitHubAuth)
+	mux.HandleFunc("GET /api/github/callback", s.handleGitHubCallback)
+	mux.HandleFunc("GET /api/github/me", s.handleGitHubMe)
+	mux.HandleFunc("DELETE /api/github", s.handleGitHubDisconnect)
 	mux.HandleFunc("GET /api/sessions", s.handleSessionList)
 	mux.HandleFunc("GET /api/sessions/{id}", s.handleSessionGet)
 	mux.HandleFunc("PUT /api/sessions/{id}", s.handleSessionPut)
@@ -101,6 +122,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/models", allow("GET"))
 	mux.HandleFunc("/api/usage", allow("GET"))
 	mux.HandleFunc("/api/chat", allow("POST"))
+	mux.HandleFunc("/api/github/auth", allow("GET"))
+	mux.HandleFunc("/api/github/callback", allow("GET"))
+	mux.HandleFunc("/api/github/me", allow("GET"))
+	mux.HandleFunc("/api/github", allow("DELETE"))
 	mux.HandleFunc("/api/sessions", allow("GET"))
 	mux.HandleFunc("/api/sessions/{id}", allow("GET, PUT, DELETE"))
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
@@ -201,9 +226,19 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	final, usage, err := s.Agent.Run(ctx, messages, req.Model, req.Effort)
+	final, usage, ask, err := s.Agent.Run(ctx, messages, req.Model, req.Effort)
 	if err != nil && ctx.Err() == nil {
 		out.Send(provider.Event{Type: "error", Code: "agent_failed", Message: err.Error()})
+		out.Send(provider.Event{Type: "end"})
+		return
+	}
+
+	// ask_user：发 question 事件让前端渲染提问卡片，等待用户回答（下一轮请求）
+	if ask != nil {
+		out.Send(provider.Event{Type: "question", Question: &provider.Question{
+			Text:    ask.Question,
+			Options: ask.Options,
+		}})
 		out.Send(provider.Event{Type: "end"})
 		return
 	}
@@ -255,6 +290,71 @@ func normalizeMessages(in []provider.Message) []provider.Message {
 		kept = append(kept, provider.Message{Role: role, Content: content})
 	}
 	return kept
+}
+
+/* ---------------- GitHub 只读账户 ---------------- */
+
+// redirectURI 计算 OAuth 回调地址。
+func (s *Server) redirectURI(r *http.Request) string {
+	if s.Cfg.GitHubOAuthRedirect != "" {
+		return s.Cfg.GitHubOAuthRedirect
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host + "/api/github/callback"
+}
+
+func (s *Server) handleGitHubAuth(w http.ResponseWriter, r *http.Request) {
+	if s.GitHub == nil || s.GitHub.ClientID == "" {
+		writeErr(w, http.StatusServiceUnavailable, "github_not_configured", "未配置 GITHUB_CLIENT_ID")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"url": s.GitHub.AuthURL(s.redirectURI(r)),
+	})
+}
+
+func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
+	if s.GitHub == nil || s.GitHub.ClientID == "" {
+		writeErr(w, http.StatusServiceUnavailable, "github_not_configured", "未配置 GITHUB_CLIENT_ID")
+		return
+	}
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		writeErr(w, http.StatusBadRequest, "no_code", "缺少授权码")
+		return
+	}
+	acct, err := s.GitHub.Exchange(r.Context(), code, s.redirectURI(r))
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "github_exchange_failed", err.Error())
+		return
+	}
+	// 回调成功后跳回前端（携带成功标记）
+	http.Redirect(w, r, "/?github=connected&login="+acct.Login, http.StatusFound)
+}
+
+func (s *Server) handleGitHubMe(w http.ResponseWriter, r *http.Request) {
+	if s.GitHub == nil {
+		writeErr(w, http.StatusServiceUnavailable, "github_not_configured", "GitHub 插件未配置")
+		return
+	}
+	acct, err := s.GitHub.Me()
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"connected": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"connected": true, "account": acct})
+}
+
+func (s *Server) handleGitHubDisconnect(w http.ResponseWriter, r *http.Request) {
+	if s.GitHub == nil {
+		writeErr(w, http.StatusServiceUnavailable, "github_not_configured", "GitHub 插件未配置")
+		return
+	}
+	_ = s.GitHub.Disconnect()
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 /* ---------------- 会话 ---------------- */
