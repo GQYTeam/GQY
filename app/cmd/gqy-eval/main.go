@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"gqy/internal/config"
 	"gqy/internal/eval/cases"
 	evalconfig "gqy/internal/eval/config"
 	"gqy/internal/eval/engine"
@@ -26,7 +27,7 @@ import (
 	"gqy/internal/eval/replay"
 	"gqy/internal/eval/report"
 	"gqy/internal/eval/result"
-	"gqy/internal/provider"
+	"gqy/internal/gateway"
 	"gqy/internal/tool"
 )
 
@@ -43,6 +44,7 @@ func main() {
 }
 
 func run(args []string) int {
+	config.LoadDotEnv(".env")
 	fs := flag.NewFlagSet("gqy-eval", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	var (
@@ -152,24 +154,14 @@ func runEval(cfg *evalconfig.Config, set *cases.Set, exps []matrix.Experiment, o
 		return 2
 	}
 
-	apiKey := os.Getenv("GQY_API_KEY")
-	if strings.TrimSpace(apiKey) == "" {
-		fmt.Fprintln(os.Stderr, "运行错误: 未配置 GQY_API_KEY，无法真实调用模型；可先用 -dry-run 检查矩阵")
+	appCfg := config.Load()
+	router := gateway.New(appCfg, &http.Client{})
+	defer router.Close()
+	if !router.Available() {
+		fmt.Fprintln(os.Stderr, "运行错误: 没有可用 provider（配置 GQY_API_KEY 或 $GQY_HOME/providers.json）；可先用 -dry-run 检查矩阵")
 		return 2
 	}
-	apiBase := os.Getenv("GQY_API_BASE")
-	if strings.TrimSpace(apiBase) == "" {
-		apiBase = "https://api.deepseek.com/v1"
-	}
-	apiBase = strings.TrimRight(apiBase, "/")
-	upstream := &provider.Upstream{
-		APIBase: apiBase,
-		APIKey:  apiKey,
-		APIUA:   os.Getenv("GQY_API_UA"),
-		Model:   cfg.Model,
-		Wire:    "chat",
-		Client:  &http.Client{},
-	}
+	upstream := router
 
 	rec, err := recorder.New(outDir, cfg.Round, time.Now())
 	if err != nil {

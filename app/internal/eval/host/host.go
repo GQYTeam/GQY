@@ -8,8 +8,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 
+	"gqy/internal/config"
 	"gqy/internal/tool"
 )
 
@@ -53,13 +55,23 @@ func (Echo) Execute(ctx context.Context, args map[string]any) (string, error) {
 
 // DefaultRegistry 返回评测默认可用的工具集。
 // 不注册 ask_user：评测里等待人工输入会挂住对话循环。
+// 文件与 shell 工具复用服务端的路径沙箱配置，避免评测进程绕过权限策略。
 func DefaultRegistry() (*tool.Registry, error) {
+	appCfg := config.Load()
+	policy := tool.Policy{
+		Workspace:      appCfg.Workspace,
+		Roots:          appCfg.ToolRoots,
+		Denied:         []string{filepath.Join(appCfg.Home, "github_token.json")},
+		ShellTimeout:   appCfg.ShellTimeout,
+		MaxOutput:      appCfg.ToolMaxOutput,
+		ShellAllowlist: appCfg.ShellAllowlist,
+	}
 	reg := tool.NewRegistry()
 	tools := []tool.Tool{
-		tool.Read{},
-		tool.Edit{},
-		tool.Shell{},
-		tool.ListDir{},
+		tool.Read{Policy: policy},
+		tool.Edit{Policy: policy},
+		tool.Shell{Policy: policy},
+		tool.ListDir{Policy: policy},
 		tool.WebSearch{},
 		Echo{},
 	}
