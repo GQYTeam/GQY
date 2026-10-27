@@ -295,3 +295,25 @@ func TestResolveEmptyPath(t *testing.T) {
 		t.Fatal("空路径应报错")
 	}
 }
+
+func TestResolveDeniedPath(t *testing.T) {
+	ws := t.TempDir()
+	writeFile(t, filepath.Join(ws, "github_token.json"), `{"access_token":"secret"}`)
+	writeFile(t, filepath.Join(ws, "notes.txt"), "ok")
+	p := testPolicy(t, ws)
+	p.Denied = []string{filepath.Join(ws, "github_token.json")}
+
+	if _, err := p.Resolve("github_token.json"); err == nil || !strings.Contains(err.Error(), "受保护路径") {
+		t.Fatalf("token 文件应被拒绝，实际: %v", err)
+	}
+	// 同目录其它文件仍可访问。
+	out, err := (Read{Policy: p}).Execute(context.Background(), map[string]any{"path": "notes.txt"})
+	if err != nil || out != "ok" {
+		t.Fatalf("普通文件应可读: out=%q err=%v", out, err)
+	}
+	// 拒绝目录时，目录内所有路径都不可访问。
+	p.Denied = []string{ws}
+	if _, err := p.Resolve("notes.txt"); err == nil {
+		t.Fatal("拒绝目录后其子路径应被拒绝")
+	}
+}

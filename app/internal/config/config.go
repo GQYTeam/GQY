@@ -41,7 +41,7 @@ type Config struct {
 
 	// Workspace 是相对路径的解析基准，也是 shell 的固定工作目录。默认启动目录。
 	Workspace string
-	// ToolRoots 是 read / edit / list_dir 允许访问的根目录；默认 workspace + $GQY_HOME。
+	// ToolRoots 是 read / edit / list_dir 允许访问的根目录；默认 workspace + $GQY_HOME/sessions。
 	ToolRoots []string
 	// ToolTimeout 是 agent loop 里单次工具调用的上限。
 	ToolTimeout time.Duration
@@ -80,8 +80,9 @@ func Load() Config {
 	}
 	home := Env("GQY_HOME", filepath.Join(HomeDir(), ".gqy"))
 
-	// 默认允许根：workspace + $GQY_HOME；GQY_TOOL_ROOTS 追加（冒号或逗号分隔）。
-	roots := []string{workspace, home}
+	// 默认允许根：workspace + $GQY_HOME/sessions（只暴露会话产物，不暴露 token 等凭据）；
+	// GQY_TOOL_ROOTS 追加（冒号或逗号分隔）。
+	roots := []string{workspace, filepath.Join(home, "sessions")}
 	roots = append(roots, SplitList(os.Getenv("GQY_TOOL_ROOTS"))...)
 
 	return Config{

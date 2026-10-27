@@ -570,12 +570,12 @@ try {
       // 第一次：返回 list_dir 工具调用；第二次：返回最终答案
       if (upstreamCalls === 1) {
         res.end(JSON.stringify({
-          choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'list_dir', arguments: '{"path":"/tmp"}' } }] } }],
+          choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'list_dir', arguments: '{"path":"."}' } }] } }],
           usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 }
         }));
       } else {
         res.end(JSON.stringify({
-          choices: [{ message: { role: 'assistant', content: '已列出 /tmp，模型是 ' + parsed.model } }],
+          choices: [{ message: { role: 'assistant', content: '已列出当前目录，模型是 ' + parsed.model } }],
           usage: { prompt_tokens: 4, completion_tokens: 3, total_tokens: 7 }
         }));
       }
@@ -602,7 +602,7 @@ try {
   const sse = await fetch('http://127.0.0.1:' + realPort + '/api/chat', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ messages: [{ role: 'user', content: '列一下 /tmp' }], effort: 'High' })
+    body: JSON.stringify({ messages: [{ role: 'user', content: '列一下当前目录' }], effort: 'High' })
   }).then((res) => res.text());
   const events = sse.split('\n\n').filter((b) => b.startsWith('data:')).map((b) => JSON.parse(b.slice(5)));
   const text = events.filter((e) => e.type === 'text').map((e) => e.delta).join('');
@@ -610,8 +610,8 @@ try {
   const done = events.find((e) => e.type === 'done');
   check('agent loop：工具调用 + 最终答案 + 累积 usage',
     upstreamCalls === 2 && tool && tool.tool && tool.tool.name === 'list_dir' &&
-    /smoke-model/.test(text) && done && done.usage.total_tokens === 12,
-    JSON.stringify({ upstreamCalls, text: text.slice(0, 40), tool: tool && tool.tool && tool.tool.name, usage: done && done.usage }));
+    tool.tool.status === 'done' && /smoke-model/.test(text) && done && done.usage.total_tokens === 12,
+    JSON.stringify({ upstreamCalls, text: text.slice(0, 40), tool: tool && tool.tool && tool.tool.name, status: tool && tool.tool && tool.tool.status, usage: done && done.usage }));
 } catch (err) {
   failed += 1;
   console.error('\n  FATAL ' + err.message);

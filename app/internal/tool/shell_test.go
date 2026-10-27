@@ -141,6 +141,34 @@ func TestShellDescriptionMentionsRestrictions(t *testing.T) {
 	}
 }
 
+func TestShellAllowlistRejectsCompoundCommand(t *testing.T) {
+	ws := t.TempDir()
+	p := testPolicy(t, ws)
+	p.ShellAllowlist = []string{"echo"}
+	sh := Shell{Policy: p}
+
+	for _, command := range []string{
+		`echo ok; touch pwned.txt`,
+		`echo ok && touch pwned.txt`,
+		`echo ok | sh`,
+		`echo $(touch pwned.txt)`,
+		"echo ok\ntouch pwned.txt",
+	} {
+		if _, err := sh.Execute(context.Background(), map[string]any{"command": command}); err == nil ||
+			!strings.Contains(err.Error(), "元字符") {
+			t.Fatalf("复合命令 %q 应被白名单拒绝，实际: %v", command, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(ws, "pwned.txt")); !os.IsNotExist(err) {
+		t.Fatalf("被拒绝的复合命令不应落盘，stat err=%v", err)
+	}
+
+	out, err := sh.Execute(context.Background(), map[string]any{"command": "echo ok"})
+	if err != nil || strings.TrimSpace(out) != "ok" {
+		t.Fatalf("简单白名单命令应放行: out=%q err=%v", out, err)
+	}
+}
+
 func TestFirstToken(t *testing.T) {
 	cases := map[string]string{
 		"echo hi":        "echo",

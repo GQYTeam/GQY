@@ -32,6 +32,9 @@ type Policy struct {
 	Workspace string
 	// Roots 是允许访问的根目录；Workspace 会自动追加。
 	Roots []string
+	// Denied 是显式拒绝访问的路径（可以位于 Roots 内部，例如 token 文件）。
+	// Resolve 时优先于 Roots 判断。
+	Denied []string
 	// ShellTimeout 是单条 shell 命令的上限，零值回退 DefaultShellTimeout。
 	ShellTimeout time.Duration
 	// MaxOutput 是 shell 合并输出保留的最大字节数，零值回退 DefaultMaxOutput。
@@ -74,9 +77,17 @@ func (p Policy) workspaceAbs() string {
 func (p Policy) canonicalRoots() []string {
 	in := make([]string, 0, len(p.Roots)+1)
 	in = append(in, p.Roots...)
-	ws := p.workspaceAbs()
-	in = append(in, ws)
+	in = append(in, p.workspaceAbs())
+	return canonicalList(in)
+}
 
+// canonicalDenied 返回规范化后的拒绝路径。
+func (p Policy) canonicalDenied() []string {
+	return canonicalList(p.Denied)
+}
+
+// canonicalList 把路径列表规范化、去重；无法解析的项跳过。
+func canonicalList(in []string) []string {
 	seen := make(map[string]bool, len(in))
 	out := make([]string, 0, len(in))
 	for _, root := range in {
@@ -112,6 +123,12 @@ func (p Policy) Resolve(raw string) (string, error) {
 	resolved, err := canonicalPath(abs)
 	if err != nil {
 		return "", fmt.Errorf("无法解析路径 %q: %w", raw, err)
+	}
+
+	for _, denied := range p.canonicalDenied() {
+		if withinRoot(denied, resolved) {
+			return "", fmt.Errorf("路径 %q 被拒绝：命中受保护路径 %s", raw, denied)
+		}
 	}
 
 	roots := p.canonicalRoots()

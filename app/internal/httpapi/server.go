@@ -68,10 +68,12 @@ func New(root string, cfg config.Config, client *http.Client) *Server {
 		Mock:    cfg.Mock,
 		Client:  client,
 	}
-	// 工具权限沙箱：文件工具只允许访问 workspace / $GQY_HOME / GQY_TOOL_ROOTS。
+	// 工具权限沙箱：文件工具只允许访问 workspace / $GQY_HOME/sessions / GQY_TOOL_ROOTS；
+	// GitHub token 即使在允许根内也显式拒绝。
 	policy := tool.Policy{
 		Workspace:      cfg.Workspace,
 		Roots:          cfg.ToolRoots,
+		Denied:         []string{filepath.Join(cfg.Home, "github_token.json")},
 		ShellTimeout:   cfg.ShellTimeout,
 		MaxOutput:      cfg.ToolMaxOutput,
 		ShellAllowlist: cfg.ShellAllowlist,

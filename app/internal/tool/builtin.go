@@ -142,6 +142,11 @@ func (s Shell) Execute(ctx context.Context, args map[string]any) (string, error)
 		if !allowedCommand(base, s.Policy.ShellAllowlist) {
 			return "", fmt.Errorf("命令 %q 不在允许列表中（GQY_SHELL_ALLOWLIST=%s）；请改用允许的命令，或由运维调整环境变量", base, strings.Join(s.Policy.ShellAllowlist, ","))
 		}
+		// 白名单只校验首 token；复合命令能绕过，例如 "echo x; rm -rf ..."。
+		// 白名单模式下拒绝一切可串联、重定向或替换的控制字符。
+		if bad := shellMetaChar(command); bad != 0 {
+			return "", fmt.Errorf("白名单模式不允许 shell 元字符 %q（防止用 ; | & 等绕过命令限制）；请拆成单条命令，或由运维调整策略", string(bad))
+		}
 	}
 
 	timeout := s.Policy.shellTimeout()
@@ -199,6 +204,19 @@ func firstToken(command string) string {
 		}
 	}
 	return first
+}
+
+// shellMetaChar 返回命令里第一个可串联、重定向或命令替换的控制字符。
+// 用于白名单模式阻断 "allowed; arbitrary" 这类绕过；引号内的同类字符也会被拒绝，
+// 这是有意的保守取舍：白名单模式只接受单条简单命令。
+func shellMetaChar(command string) rune {
+	for _, r := range command {
+		switch r {
+		case ';', '|', '&', '>', '<', '`', '$', '(', ')', '\n', '\r', 0:
+			return r
+		}
+	}
+	return 0
 }
 
 func allowedCommand(base string, allowlist []string) bool {
