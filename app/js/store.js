@@ -82,6 +82,7 @@
     personasPanel: $('#personasPanel'), memoryPanel: $('#memoryPanel'), knowledgePanel: $('#knowledgePanel'),
     packagesPanel: $('#packagesPanel'), toolsPanel: $('#toolsPanel'), usagePanel: $('#usagePanel'),
     accountsPanel: $('#accountsPanel'), gatewayPanel: $('#gatewayPanel'), providerEditor: $('#providerEditor'), extensionsPlugins: $('#extensionsPlugins'),
+    installExampleBtn: $('#installExampleBtn'),
     voiceNote: $('#voiceNote'), reopenOnboarding: $('#reopenOnboarding'), boardTitle: $('#boardTitle')
   };
 
