@@ -24,7 +24,8 @@ func (s *Server) withRateLimit(next http.Handler) http.Handler {
 	}
 	lim := &rateLimiter{buckets: map[string]*bucket{}}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/") && !strings.HasPrefix(r.URL.Path, "/v1/") {
+		if !strings.HasPrefix(r.URL.Path, "/api/") && !strings.HasPrefix(r.URL.Path, "/v1/") &&
+			!strings.HasPrefix(r.URL.Path, "/v1beta/") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -51,6 +52,8 @@ func (s *Server) withRateLimit(next http.Handler) http.Handler {
 			w.Header().Set("Retry-After", "60")
 			if strings.HasPrefix(r.URL.Path, "/v1/") {
 				writeOpenAIError(w, http.StatusTooManyRequests, "rate_limited", "请求过于频繁")
+			} else if strings.HasPrefix(r.URL.Path, "/v1beta/") {
+				writeGeminiError(w, http.StatusTooManyRequests, "请求过于频繁，请稍后再试")
 			} else {
 				writeErr(w, http.StatusTooManyRequests, "rate_limited", "请求过于频繁，请稍后再试")
 			}

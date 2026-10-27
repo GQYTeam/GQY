@@ -24,6 +24,8 @@ func TestAuthMiddleware(t *testing.T) {
 		{"bearer", "/api/health", func(r *http.Request) { r.Header.Set("Authorization", "Bearer secret") }, 200},
 		{"header", "/v1/models", func(r *http.Request) { r.Header.Set("X-GQY-Token", "secret") }, 200},
 		{"cookie", "/api/health", func(r *http.Request) { r.AddCookie(&http.Cookie{Name: authCookie, Value: "secret"}) }, 200},
+		{"gemini no token", "/v1beta/models/x:generateContent", nil, 401},
+		{"gemini bearer", "/v1beta/models/x:generateContent", func(r *http.Request) { r.Header.Set("Authorization", "Bearer secret") }, 200},
 		{"static", "/index.html", nil, 200},
 		{"auth endpoint", "/api/auth", nil, 200},
 	}

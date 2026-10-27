@@ -29,6 +29,10 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			writeOpenAIError(w, http.StatusUnauthorized, "unauthorized", "需要 Authorization: Bearer <GQY_AUTH_TOKEN>")
 			return
 		}
+		if strings.HasPrefix(r.URL.Path, "/v1beta/") {
+			writeGeminiError(w, http.StatusUnauthorized, "需要访问令牌")
+			return
+		}
 		writeErr(w, http.StatusUnauthorized, "unauthorized", "需要访问令牌")
 	})
 }
@@ -37,7 +41,7 @@ func protectedPath(p string) bool {
 	if p == "/api/auth" {
 		return false
 	}
-	return strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/v1/")
+	return strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/v1/") || strings.HasPrefix(p, "/v1beta/")
 }
 
 func (s *Server) validToken(r *http.Request) bool {
