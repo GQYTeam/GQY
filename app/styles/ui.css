@@ -93,3 +93,27 @@
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.001ms!important;animation-delay:0ms!important;transition-duration:.001ms!important}
 }
+
+/* ---------- 回到最新 / 消息错误态 ---------- */
+.scroll-bottom{
+  position:absolute;left:50%;bottom:calc(100% + 10px);transform:translateX(-50%);
+  width:34px;height:34px;border-radius:50%;display:grid;place-items:center;z-index:12;
+  background:var(--card);color:var(--ink-2);border:1px solid var(--line);
+  box-shadow:0 6px 18px -8px rgba(48,42,32,.32);
+  transition:opacity .16s,transform .16s,background .16s;
+}
+.scroll-bottom .ico{width:16px;height:16px;transform:rotate(180deg)}
+.scroll-bottom:hover{background:var(--hover);color:var(--ink)}
+.scroll-bottom[hidden]{display:none}
+
+.btn-sm{height:28px;padding:0 10px;font-size:12.5px;border-radius:7px}
+.msg-error{
+  display:flex;align-items:center;gap:10px;margin:10px 0 2px;padding:10px 12px;
+  border:1px solid #e7cfc7;border-radius:10px;background:#fdf6f2;color:var(--danger);
+}
+.msg-error .ico{width:18px;height:18px;color:var(--danger)}
+.msg-error div{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.msg-error b{font-size:13px;font-weight:600;color:#8a4b35}
+.msg-error small{font-size:12px;color:#8a6a5e;overflow-wrap:anywhere}
+.msg-error .btn{background:#fff;border-color:#e7cfc7;color:var(--danger)}
+.msg-error .btn:hover{background:#fbefea}

@@ -12,6 +12,8 @@
 | 代码灯箱 | `#lightbox` | `panels.css` | `openViewer()` |
 | 图片灯箱 | `#imgbox` | `media.css` | `openImgbox()` |
 | 消息菜单/推理滑块 | `.menu` / `.effort` | `ui.css` | `openMenu()`、`mountEffort()` |
+| 回到最新 | `#scrollBtn` | `ui.css` | `updateScrollBtn()` |
+| 无障碍播报 | `#liveStatus` | — | `announce()` |
 
 ## 对话消息的形状
 
@@ -23,11 +25,13 @@
   tools: [{ name, detail, icon, args, output, ms, status }],
   artifact: { title, path, lang, content, lines },
   question: { header, text, multiSelect, options:[{label,desc}], answer:{picks,custom} },
-  attachments: [{ name, type, size, url }]
+  attachments: [{ name, type, size, url }],
+  error: { code, message },     // 服务端流式失败时出现，渲染错误卡片 + 重试
+  usage: { prompt_tokens, completion_tokens }  // 真实后端返回时记录
 }
 ```
 
-`messageHTML(m, live)` 按顺序渲染：思考 → 工具轨迹 → Markdown → 产物 → 提问 → 操作行。
+`messageHTML(m, live)` 按顺序渲染：思考 → 工具轨迹 → Markdown → 错误卡片 → 产物 → 提问 → 操作行。
 `liveMsg()` 在流式期间只暴露已生成的部分，并把 `stage` 传给渲染器（光标位置、工具 running 态）。
 
 ## 新增页面的检查清单

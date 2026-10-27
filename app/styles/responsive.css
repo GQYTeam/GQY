@@ -66,8 +66,6 @@
 @media (max-width:720px){
   .settings-layer{padding:0}
   .settings-window{width:100vw;height:100dvh;max-height:none;border-radius:0}
-  .settings-titlebar{cursor:default}
-  .settings-window-hint{display:none}
   .settings-body{flex-direction:column}
   .settings-sidebar{width:100%;flex:none;border-right:0;border-bottom:1px solid #e6e6e5;padding:10px 12px}
   .settings-profile{display:none}
