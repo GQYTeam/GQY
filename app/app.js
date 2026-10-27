@@ -2587,11 +2587,14 @@
   });
 
   el.input.addEventListener('input', () => {
+    G.clawd.wake();
     autoGrow();
     updateSendState();
     clearTimeout(draftTimer);
     draftTimer = setTimeout(() => { saveDraft(); save(); }, 500);
   });
+
+  el.input.addEventListener('focus', () => G.clawd.wake());
 
   el.input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.isComposing && e.keyCode !== 229 && !mqMobile.matches) {
