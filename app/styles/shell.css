@@ -64,6 +64,33 @@
 .conv-wrap:hover .conv-del,.conv-wrap:focus-within .conv-del{opacity:1}
 .conv-row.active .conv-time{display:none}
 .conv-wrap:hover .conv-time,.conv-wrap:focus-within .conv-time{opacity:0}
+
+/* ---------- conversation management ---------- */
+.conv-pin{width:13px;height:13px;flex:none;color:var(--clay);margin-left:2px}
+.conv-row.is-pinned .conv-title{color:var(--ink)}
+.conv-more{position:absolute;right:29px;top:50%;transform:translateY(-50%);width:24px;height:24px;border-radius:6px;display:grid;place-items:center;color:var(--muted);opacity:0;transition:opacity .12s,background .12s,color .12s}
+.conv-more .ico{width:16px;height:16px}
+.conv-more:hover{background:var(--hover);color:var(--ink)}
+.conv-wrap:hover .conv-more,.conv-wrap:focus-within .conv-more{opacity:1}
+.conv-more:focus-visible{opacity:1;outline:2px solid var(--clay);outline-offset:-2px}
+.conv-row--edit{padding-right:12px}
+.conv-rename{flex:1;min-width:0;height:26px;border:1px solid var(--line);border-radius:6px;background:#fff;padding:0 7px;font-size:13px;color:var(--ink);outline:none}
+.conv-rename:focus{border-color:#c9c9c7;box-shadow:0 0 0 3px rgba(217,119,87,.12)}
+.manage-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 12px 8px;padding:8px 9px;border:1px solid var(--line);border-radius:10px;background:#f7f7f6}
+.manage-bar[hidden]{display:none}
+.manage-count{font-size:12px;color:var(--muted);white-space:nowrap}
+.manage-actions{display:flex;flex-wrap:wrap;gap:4px;margin-left:auto}
+.manage-actions .btn-sm{height:26px;padding:0 8px;font-size:12px}
+.conv-row--manage{cursor:pointer;padding-right:12px}
+.conv-row--manage .conv-check{width:15px;height:15px;flex:none;accent-color:var(--clay);cursor:pointer;margin:0}
+.conv-row--manage .conv-title{flex:1}
+.conv-row--manage .conv-time{opacity:.9}
+.conv-row--manage.active{background:var(--active)}
+.conv-row--manage:focus-within{background:var(--hover)}
+@media (hover:none){
+  .conv-more{opacity:.55}
+  .conv-more:focus-visible{opacity:1}
+}
 .ws-empty,#noResults{font-size:12.5px;color:var(--faint);padding:4px 12px 2px}
 #noResults{padding:16px 12px;text-align:center;font-size:13px}
 .side-bottom{padding:10px 10px 12px;border-top:1px solid var(--line-soft)}

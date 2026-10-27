@@ -31,6 +31,8 @@
     app: $('#app'), sidebar: $('#sidebar'), collapseBtn: $('#collapseBtn'), openSideBtn: $('#openSideBtn'),
     newChatBtn: $('#newChatBtn'),
     searchBtn: $('#searchBtn'), newWsBtn: $('#newWsBtn'), searchWrap: $('#searchWrap'), searchInput: $('#searchInput'),
+    manageBtn: $('#manageBtn'), manageBar: $('#manageBar'), manageCount: $('#manageCount'),
+    manageAll: $('#manageAll'), manageNone: $('#manageNone'), manageDelete: $('#manageDelete'), manageCancel: $('#manageCancel'),
     wsList: $('#wsList'), accountBtn: $('#accountBtn'), scrim: $('#scrim'),
     body: $('#body'), scroller: $('#scroller'), thread: $('#thread'), hero: $('#hero'),
     topbarTitle: $('#topbarTitle'), fullBtn: $('#fullBtn'),
@@ -87,6 +89,9 @@
   app.dragDepth = 0;
   app.searchOpen = false;
   app.searchQuery = '';
+  app.manageMode = false;
+  app.manageSelected = new Set();
+  app.renamingId = null;
   app.menu = null;
   app.menuAnchor = null;
   app.toastTimer = 0;
@@ -119,7 +124,7 @@
         {
           id: wsId,
           name: 'gqy',
-          convs: [{ id: convId, title: '新会话', messages: [], updatedAt: now() }]
+          convs: [{ id: convId, title: '新会话', pinned: false, messages: [], updatedAt: now() }]
         }
       ],
       activeWorkspaceId: wsId,
@@ -134,6 +139,30 @@
     };
   }
 
+  /* 置顶会话稳定排在同工作区未置顶会话之前；其余保持原有先后。 */
+  function sortConvs(ws) {
+    if (!ws || !Array.isArray(ws.convs)) return;
+    const pinned = [];
+    const rest = [];
+    ws.convs.forEach((c) => { (c && c.pinned ? pinned : rest).push(c); });
+    ws.convs.splice(0, ws.convs.length, ...pinned, ...rest);
+  }
+
+  /* 旧数据迁移：补齐/校验 pinned、title、updatedAt，不丢历史会话。 */
+  function normalizeConv(c) {
+    if (!c || typeof c !== 'object') return false;
+    if (!Array.isArray(c.messages)) c.messages = [];
+    if (typeof c.title !== 'string' || !c.title.trim()) {
+      c.title = '新会话';
+    } else {
+      const title = c.title.trim().slice(0, 80);
+      c.title = title || '新会话';
+    }
+    c.pinned = c.pinned === true;
+    if (typeof c.updatedAt !== 'number' || !isFinite(c.updatedAt)) c.updatedAt = now();
+    return true;
+  }
+
   function loadState() {
     try {
       const raw = localStorage.getItem(app.STORE_KEY);
@@ -142,7 +171,8 @@
       if (!s || !Array.isArray(s.workspaces) || !s.workspaces.length) return seedState();
       s.workspaces.forEach((ws) => {
         if (!Array.isArray(ws.convs)) ws.convs = [];
-        ws.convs.forEach((c) => { if (!Array.isArray(c.messages)) c.messages = []; });
+        ws.convs = ws.convs.filter(normalizeConv);
+        sortConvs(ws);
       });
       s.effort = app.EFFORTS.indexOf(s.effort) >= 0 ? s.effort : 'High';
       s.fontSize = app.FONT_SIZES[s.fontSize] ? s.fontSize : 'normal';
@@ -157,7 +187,7 @@
       let conv = ws.convs.find((c) => c.id === s.activeConvId);
       if (!conv) conv = ws.convs[0];
       if (!conv) {
-        conv = { id: uid(), title: '新会话', messages: [], updatedAt: now() };
+        conv = { id: uid(), title: '新会话', pinned: false, messages: [], updatedAt: now() };
         ws.convs.unshift(conv);
       }
       s.activeConvId = conv.id;
@@ -172,6 +202,7 @@
   // reloadState：从 localStorage 重新读取（导入后）；resetState：回到全新种子状态。
   app.reloadState = () => { app.state = loadState(); };
   app.resetState = () => { app.state = seedState(); };
+  app.sortConvs = sortConvs;
 
   /* ---------------- 基础函数 ---------------- */
   app.activeWs = () => app.state.workspaces.find((w) => w.id === app.state.activeWorkspaceId) || app.state.workspaces[0];
