@@ -778,6 +778,7 @@
 
   Object.assign(app, {
     mirrorSession, moveConvToTop, refreshConvChrome, handleSend, respond, startApiStream,
+    systemContext, apiMessages, matchKnowledge,
     liveMsg, scheduleStreamPaint, paintStream, stopStreaming, finishStream,
     focusInput, closeDrawer, setSidebarCollapsed, saveDraft, restoreDraft,
     selectConv, selectWorkspace, newChat, deleteConv, retryMessage,

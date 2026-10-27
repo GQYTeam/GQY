@@ -10,7 +10,7 @@
 | 竞态 | `go test -race ./internal/plugin ./internal/gateway ./internal/eval/host` | 全绿 |
 | vet / JS 语法 | `npm run check` | 全绿 |
 | 构建 | `go build ./cmd/gqy-server ./cmd/gqy-eval ./cmd/gqy-import` | 通过 |
-| 端到端 | `npm run smoke` | 42 项全绿 |
+| 端到端 | `npm run smoke` | 44 项全绿 |
 
 冒烟覆盖（摘要）：
 
@@ -21,6 +21,7 @@
 - 新页面：首次引导、看板、术语浮窗、人设/记忆/知识库 CRUD。
 - 工具/插件：工具清单、外部注入开关、示例插件发现/加载/卸载、安装示例入口。
 - 设置：10 tab、搜索、用量、账户、provider/路由组增删、清空对话保留人设/记忆。
+- 上下文：人设/记忆/知识文档注入 system，并与工具系统提示合并。
 - agent loop：假上游两轮工具调用 + 最终答案 + 累计 usage。
 
 ## 手工验证
