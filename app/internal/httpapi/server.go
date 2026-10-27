@@ -455,32 +455,40 @@ func (s *Server) handlePluginReload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePluginInstallExample(w http.ResponseWriter, r *http.Request) {
-	src := filepath.Join(s.Root, "plugins", "echo")
-	dst := filepath.Join(s.Cfg.Home, "plugins", "echo")
-	if _, err := os.Stat(src); err != nil {
-		writeErr(w, http.StatusNotFound, "example_missing", "仓库里没有 plugins/echo")
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+	examples := []string{"echo", "mcp-echo"}
+	base := filepath.Join(s.Cfg.Home, "plugins")
+	if err := os.MkdirAll(base, 0o700); err != nil {
 		writeErr(w, http.StatusInternalServerError, "install_failed", err.Error())
 		return
 	}
-	// 先独占创建目标目录：并发安装时只有一个请求能成功，已存在直接 409。
-	if err := os.Mkdir(dst, 0o700); err != nil {
-		if os.IsExist(err) {
-			writeErr(w, http.StatusConflict, "already_installed", "示例插件已存在")
+	var installed []string
+	for _, id := range examples {
+		src := filepath.Join(s.Root, "plugins", id)
+		dst := filepath.Join(base, id)
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		// 独占创建目标目录：并发安装时只有一个请求能成功，已存在则跳过。
+		if err := os.Mkdir(dst, 0o700); err != nil {
+			if os.IsExist(err) {
+				continue
+			}
+			writeErr(w, http.StatusInternalServerError, "install_failed", err.Error())
 			return
 		}
-		writeErr(w, http.StatusInternalServerError, "install_failed", err.Error())
-		return
+		if err := copyPluginTree(src, dst); err != nil {
+			_ = os.RemoveAll(dst) // 不留半装状态
+			writeErr(w, http.StatusInternalServerError, "install_failed", err.Error())
+			return
+		}
+		installed = append(installed, id)
 	}
-	if err := copyPluginTree(src, dst); err != nil {
-		_ = os.RemoveAll(dst) // 不留半装状态
-		writeErr(w, http.StatusInternalServerError, "install_failed", err.Error())
+	if len(installed) == 0 {
+		writeErr(w, http.StatusConflict, "already_installed", "示例插件已存在")
 		return
 	}
 	_ = s.Plugins.Reload()
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "plugins": s.Plugins.List()})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "installed": installed, "plugins": s.Plugins.List()})
 }
 
 func copyPluginTree(src, dst string) error {

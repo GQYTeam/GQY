@@ -36,7 +36,7 @@ npm run smoke      # 39 项端到端
 7. 轮次上限：用假上游持续返回工具调用，确认 20 轮后返回错误而不是死循环。
 8. 路径沙箱：让 `read` 读 `/etc/passwd`、`GQY_HOME/github_token.json`，确认被拒绝；设 `GQY_TOOL_ROOTS` 后放行追加根。
 9. shell 白名单：设 `GQY_SHELL_ALLOWLIST=echo`，确认 `echo ok` 可执行、`echo x; rm` 被拒绝。
-10. 插件：复制 `plugins/echo` 到 `$GQY_HOME/plugins/echo`，扩展页加载后 `/api/tools` 出现 `echo__echo`，调用返回 `hello`，卸载后消失。
+10. 插件：扩展页安装示例，加载 `echo` 后 `/api/tools` 出现 `echo__echo`，调用返回 `hello`；加载 `mcp-echo` 后 `add` 返回两数之和；卸载后消失。
 
 ## 网关
 

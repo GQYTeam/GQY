@@ -33,7 +33,8 @@
 | `/v1/chat/completions` 非流式 | 正常返回 OpenAI 风格 JSON + usage |
 | `/v1/chat/completions` `stream:true` | SSE chunk + usage + `[DONE]`（当前按最终文本分块，不是逐 token 透传） |
 | 插件：加载 echo、`/api/plugins/echo/call`、`/api/tools`、卸载 | 正常；工具名 `echo__echo` 出现和消失 |
-| 插件：安装示例接口 | 首次复制成功；再次返回 409 |
+| 插件：加载 mcp-echo、调用 add | 正常；`tools/list` 发现 add，`2+3` 返回 5 |
+| 插件：安装示例接口 | 首次复制 echo + mcp-echo；再次返回 409 |
 | 评测：假上游 + 真实 echo 插件 | `gqy-eval` 1/1 通过，报告 / runs / trace 落盘正确 |
 | 评测 dry-run | 6 配置 × 3 用例矩阵正确打印 |
 
