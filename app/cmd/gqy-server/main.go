@@ -43,9 +43,12 @@ func main() {
 		},
 	}
 
+	api := httpapi.New(root, cfg, client)
+	defer api.Close()
+
 	srv := &http.Server{
 		Addr:              net.JoinHostPort(cfg.Host, cfg.Port),
-		Handler:           httpapi.New(root, cfg, client).Handler(),
+		Handler:           api.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}

@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"gqy/internal/config"
 	"gqy/internal/gateway"
 	"gqy/internal/github"
+	"gqy/internal/plugin"
 	"gqy/internal/provider"
 	"gqy/internal/session"
 	"gqy/internal/tool"
@@ -56,6 +58,7 @@ type Server struct {
 	Agent    *agent.Loop
 	GitHub   *github.Client
 	Tools    *tool.Registry
+	Plugins  *plugin.Manager
 }
 
 func New(root string, cfg config.Config, client *http.Client) *Server {
@@ -84,6 +87,8 @@ func New(root string, cfg config.Config, client *http.Client) *Server {
 	})
 
 	router := gateway.New(cfg, client)
+	plugins := plugin.NewManager(cfg.Home, registry)
+	_ = plugins.Discover()
 
 	return &Server{
 		Root:     root,
@@ -95,12 +100,23 @@ func New(root string, cfg config.Config, client *http.Client) *Server {
 		Gateway:  router,
 		Agent:    &agent.Loop{Upstream: router, Registry: registry, IncludeExternal: cfg.EnableExternal},
 		Tools:    registry,
+		Plugins:  plugins,
 		GitHub: &github.Client{
 			ClientID:     cfg.GitHubClientID,
 			ClientSecret: cfg.GitHubClientSecret,
 			Home:         cfg.Home,
 			HTTP:         client,
 		},
+	}
+}
+
+// Close 关闭插件进程与网关日志。
+func (s *Server) Close() {
+	if s.Plugins != nil {
+		s.Plugins.Close()
+	}
+	if s.Gateway != nil {
+		_ = s.Gateway.Close()
 	}
 }
 
@@ -111,6 +127,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/usage", s.handleUsage)
 	mux.HandleFunc("POST /api/chat", s.handleChat)
 	mux.HandleFunc("GET /api/gateway/status", s.handleGatewayStatus)
+	mux.HandleFunc("GET /api/plugins", s.handlePluginList)
+	mux.HandleFunc("POST /api/plugins/reload", s.handlePluginReload)
+	mux.HandleFunc("POST /api/plugins/{id}/load", s.handlePluginLoad)
+	mux.HandleFunc("POST /api/plugins/{id}/unload", s.handlePluginUnload)
+	mux.HandleFunc("POST /api/plugins/{id}/call", s.handlePluginCall)
+	mux.HandleFunc("GET /api/tools", s.handleToolList)
+	mux.HandleFunc("POST /api/tools/external", s.handleToolExternal)
 	mux.HandleFunc("GET /v1/models", s.handleV1Models)
 	mux.HandleFunc("POST /v1/chat/completions", s.handleV1Chat)
 	mux.HandleFunc("GET /api/providers", s.handleProviders)
@@ -134,6 +157,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/usage", allow("GET"))
 	mux.HandleFunc("/api/chat", allow("POST"))
 	mux.HandleFunc("/api/gateway/status", allow("GET"))
+	mux.HandleFunc("/api/plugins", allow("GET"))
+	mux.HandleFunc("/api/plugins/reload", allow("POST"))
+	mux.HandleFunc("/api/plugins/{id}/load", allow("POST"))
+	mux.HandleFunc("/api/plugins/{id}/unload", allow("POST"))
+	mux.HandleFunc("/api/plugins/{id}/call", allow("POST"))
+	mux.HandleFunc("/api/tools", allow("GET"))
+	mux.HandleFunc("/api/tools/external", allow("POST"))
 	mux.HandleFunc("/v1/models", allow("GET"))
 	mux.HandleFunc("/v1/chat/completions", allow("POST"))
 	mux.HandleFunc("/api/providers", allow("GET"))
@@ -332,6 +362,120 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"providers": data.Providers})
+}
+
+/* ---------------- 插件与工具 ---------------- */
+
+func (s *Server) handlePluginList(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"plugins": s.Plugins.List(),
+		"dir":     s.Plugins.Dir(),
+	})
+}
+
+func (s *Server) handlePluginReload(w http.ResponseWriter, r *http.Request) {
+	errs := s.Plugins.Reload()
+	msgs := make([]string, 0, len(errs))
+	for _, err := range errs {
+		msgs = append(msgs, err.Error())
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "errors": msgs, "plugins": s.Plugins.List()})
+}
+
+func (s *Server) handlePluginLoad(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.Plugins.Load(r.Context(), id); err != nil {
+		writePluginErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "plugins": s.Plugins.List()})
+}
+
+func (s *Server) handlePluginUnload(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.Plugins.Unload(r.Context(), id); err != nil {
+		writePluginErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "plugins": s.Plugins.List()})
+}
+
+func (s *Server) handlePluginCall(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Action    string         `json:"action"`
+		Arguments map[string]any `json:"arguments"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err := dec.Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_json", "请求体不是合法 JSON")
+		return
+	}
+	if req.Action == "" {
+		writeErr(w, http.StatusBadRequest, "action_required", "action 不能为空")
+		return
+	}
+	start := time.Now()
+	out, err := s.Plugins.Call(r.Context(), id, req.Action, req.Arguments)
+	if err != nil {
+		writePluginErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "content": out, "durationMs": time.Since(start).Milliseconds(),
+	})
+}
+
+func writePluginErr(w http.ResponseWriter, err error) {
+	status := http.StatusInternalServerError
+	code := "plugin_error"
+	switch {
+	case errors.Is(err, plugin.ErrNotFound):
+		status, code = http.StatusNotFound, "plugin_not_found"
+	case errors.Is(err, plugin.ErrNotReady):
+		status, code = http.StatusConflict, "plugin_not_ready"
+	case errors.Is(err, plugin.ErrExited):
+		status, code = http.StatusConflict, "plugin_exited"
+	case errors.Is(err, context.DeadlineExceeded):
+		status, code = http.StatusGatewayTimeout, "plugin_timeout"
+	}
+	writeErr(w, status, code, err.Error())
+}
+
+type toolInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Kind        string `json:"kind"`
+}
+
+func (s *Server) handleToolList(w http.ResponseWriter, r *http.Request) {
+	list := s.Tools.List()
+	out := make([]toolInfo, 0, len(list))
+	for _, t := range list {
+		kind := "external"
+		if t.Kind() == tool.KindCore {
+			kind = "core"
+		}
+		out = append(out, toolInfo{Name: t.Name(), Description: t.Description(), Kind: kind})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	writeJSON(w, http.StatusOK, map[string]any{
+		"tools":    out,
+		"external": s.Agent.ExternalEnabled(),
+	})
+}
+
+func (s *Server) handleToolExternal(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+	if err := dec.Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_json", "请求体不是合法 JSON")
+		return
+	}
+	s.Agent.SetExternal(req.Enabled)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "external": req.Enabled})
 }
 
 /* ---------------- 本地网关 ---------------- */

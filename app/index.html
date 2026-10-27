@@ -16,6 +16,7 @@
 <link rel="stylesheet" href="styles/panels.css">
 <link rel="stylesheet" href="styles/media.css">
 <link rel="stylesheet" href="styles/settings.css">
+<link rel="stylesheet" href="styles/features.css">
 <link rel="stylesheet" href="styles/responsive.css">
 </head>
 <body>
@@ -105,6 +106,10 @@
       <div class="ws-scroll" id="wsList"></div>
 
       <div class="side-bottom">
+        <button class="side-action" id="boardBtn" type="button">
+          <span class="side-ico" aria-hidden="true"><svg class="ico"><use href="#i-folder"/></svg></span>
+          <span>看板</span>
+        </button>
         <button class="side-action side-action-ext" id="extensionsBtn" type="button">
           <span class="side-ico" aria-hidden="true"><svg class="ico"><use href="#i-panel"/></svg></span>
           <span>扩展</span>
@@ -227,6 +232,33 @@
       </div>
     </aside>
     </div>
+
+    <section class="view board-view" id="boardView" hidden aria-labelledby="boardTitle">
+      <div class="board-head">
+        <div>
+          <h2 id="boardTitle">看板</h2>
+          <p>把当前工作区要做的事放在这里；卡片可以关联会话。</p>
+        </div>
+        <form class="board-form" id="boardForm">
+          <input id="boardInput" type="text" maxlength="120" placeholder="添加一张卡片…" aria-label="新卡片标题">
+          <button class="btn btn-primary" type="submit">添加</button>
+        </form>
+      </div>
+      <div class="board-cols">
+        <section class="board-col" data-status="todo">
+          <h3>待办</h3>
+          <div class="board-list" id="boardTodo"></div>
+        </section>
+        <section class="board-col" data-status="doing">
+          <h3>进行中</h3>
+          <div class="board-list" id="boardDoing"></div>
+        </section>
+        <section class="board-col" data-status="done">
+          <h3>已完成</h3>
+          <div class="board-list" id="boardDone"></div>
+        </section>
+      </div>
+    </section>
     <!-- 设置改为浮层窗口，见页面底部 settingsLayer -->
   </main>
 </div>
@@ -437,6 +469,9 @@
             <div class="about-row"><span>版本</span><b>1.2.0</b></div>
             <div class="about-row"><span>服务端</span><b id="serverStatus">检测中…</b></div>
           </div>
+          <div class="set-actions">
+            <button class="btn" id="reopenOnboarding" type="button">重新打开引导</button>
+          </div>
           <p class="panel-note">模型与推理强度在输入框左侧「模型」按钮切换。</p>
         </section>
 
@@ -453,22 +488,23 @@
             <div class="panel-list-row"><span>供应商</span><b id="providerCount">—</b></div>
             <div class="provider-list" id="providerList"></div>
           </div>
+          <div class="panel-card" id="gatewayPanel"></div>
           <p class="panel-note">供应商池从 $GQY_HOME/providers.json 读取；编辑待接入。</p>
         </section>
 
         <section class="settings-panel" id="settings-panel-personas" role="tabpanel" aria-labelledby="settings-tab-personas" data-settings-panel="personas" hidden>
-          <header class="panel-head"><h2>人设 & 预设</h2><p>创建、基于已有预设派生、同名覆盖。</p></header>
-          <div class="panel-card panel-placeholder">人设与预设待接入</div>
+          <header class="panel-head"><h2>人设 & 预设</h2><p>当前人设的 system 会随每条消息发送。</p></header>
+          <div class="panel-card" id="personasPanel"></div>
         </section>
 
         <section class="settings-panel" id="settings-panel-memory" role="tabpanel" aria-labelledby="settings-tab-memory" data-settings-panel="memory" hidden>
-          <header class="panel-head"><h2>记忆</h2><p>查看、搜索、编辑、删除；三种清除方式。</p></header>
-          <div class="panel-card panel-placeholder">记忆管理待接入</div>
+          <header class="panel-head"><h2>记忆</h2><p>启用的记忆会拼进每条请求的 system 上下文。</p></header>
+          <div class="panel-card" id="memoryPanel"></div>
         </section>
 
         <section class="settings-panel" id="settings-panel-knowledge" role="tabpanel" aria-labelledby="settings-tab-knowledge" data-settings-panel="knowledge" hidden>
-          <header class="panel-head"><h2>知识库</h2><p>添加文档、挂载目录、查看索引进度。</p></header>
-          <div class="panel-card panel-placeholder">知识库待接入</div>
+          <header class="panel-head"><h2>知识库</h2><p>关键词匹配注入，不做向量检索；术语同时用于正文浮窗。</p></header>
+          <div class="panel-card" id="knowledgePanel"></div>
         </section>
 
         <section class="settings-panel" id="settings-panel-voice" role="tabpanel" aria-labelledby="settings-tab-voice" data-settings-panel="voice" hidden>
@@ -479,31 +515,28 @@
               <button class="switch" id="voiceSwitch" type="button" role="switch" aria-checked="false" aria-label="语音输入"></button>
             </div>
           </div>
-          <p class="panel-note">声音与唤醒词待接入。</p>
+          <p class="panel-note" id="voiceNote">声音与唤醒词待接入；语音输入依赖浏览器 SpeechRecognition。</p>
         </section>
 
         <section class="settings-panel" id="settings-panel-packages" role="tabpanel" aria-labelledby="settings-tab-packages" data-settings-panel="packages" hidden>
-          <header class="panel-head"><h2>软件包</h2><p>已安装的软件包及其在预设中的启用情况。</p></header>
-          <div class="panel-card panel-placeholder">软件包管理待接入</div>
+          <header class="panel-head"><h2>软件包</h2><p>已发现的插件、协议、状态与动作数。</p></header>
+          <div class="panel-card" id="packagesPanel"></div>
         </section>
 
         <section class="settings-panel" id="settings-panel-tools" role="tabpanel" aria-labelledby="settings-tab-tools" data-settings-panel="tools" hidden>
-          <header class="panel-head"><h2>工具</h2><p>每个工具的加载模式（全量/存根/关）、分组与预算。</p></header>
-          <div class="panel-card">
-            <div class="panel-list-row"><span>核心工具</span><b>read · edit · shell · websearch · list_dir · ask_user</b></div>
-            <div class="panel-list-row"><span>外部工具</span><b>provider_usage</b></div>
-          </div>
-          <p class="panel-note">工具加载模式与预算条待接入。</p>
+          <header class="panel-head"><h2>工具</h2><p>核心工具始终注入；外部工具（provider_usage、插件）按开关注入。</p></header>
+          <div class="panel-card" id="toolsPanel"></div>
+          <p class="panel-note">外部工具开关只影响模型能否看到工具，不是权限系统。</p>
         </section>
 
         <section class="settings-panel" id="settings-panel-usage" role="tabpanel" aria-labelledby="settings-tab-usage" data-settings-panel="usage" hidden>
-          <header class="panel-head"><h2>用量</h2><p>按会话、按模型的用量与价格。</p></header>
-          <div class="panel-card panel-placeholder">用量详情可点顶栏 ⚡ 图标查看实时用量</div>
+          <header class="panel-head"><h2>用量</h2><p>本机存储与服务端聚合；顶栏 ⚡ 是同一份数据的浮层。</p></header>
+          <div class="panel-card" id="usagePanel"></div>
         </section>
 
         <section class="settings-panel" id="settings-panel-accounts" role="tabpanel" aria-labelledby="settings-tab-accounts" data-settings-panel="accounts" hidden>
-          <header class="panel-head"><h2>账户 & 权限</h2><p>成员、分组、邀请与能力（仅管理员）。</p></header>
-          <div class="panel-card panel-placeholder">账户与权限待接入（单用户模式）</div>
+          <header class="panel-head"><h2>账户 & 权限</h2><p>本机单用户模式；这里显示服务端与 GitHub 连接状态。</p></header>
+          <div class="panel-card" id="accountsPanel"></div>
         </section>
         </section>
       </div>
@@ -569,10 +602,34 @@
             <button class="btn btn-danger" id="githubDisconnectBtn" type="button" hidden>断开</button>
           </div>
         </div>
-        <p class="ext-empty">插件与模型管理即将接入。这里会像 Claude Customize / Cursor Customize 一样，统一管理插件、技能与模型市场。</p>
+        <div class="ext-section">
+          <div class="ext-section-head"><b>插件</b><small>原生 stdio JSON-RPC / MCP stdio</small></div>
+          <div class="ext-plugins" id="extensionsPlugins"></div>
+        </div>
+        <p class="ext-empty">插件放在 $GQY_HOME/plugins/&lt;id&gt;/manifest.json；模型市场后置。</p>
       </div>
     </div>
   </section>
+</div>
+
+<div class="onboarding" id="onboarding" hidden>
+  <div class="onboarding-card" role="dialog" aria-modal="true" aria-labelledby="onboardTitle">
+    <span class="onboarding-mark" aria-hidden="true">顾</span>
+    <h2 id="onboardTitle">开始使用顾清影</h2>
+    <p>先定三件事，之后都能在设置里改。</p>
+    <label class="field" for="onboardWs"><span>工作区名称</span><input id="onboardWs" type="text" maxlength="40" placeholder="例如：gqy"></label>
+    <label class="field" for="onboardModel"><span>默认模型（可留空）</span><input id="onboardModel" type="text" maxlength="120" placeholder="例如：deepseek/deepseek-chat"></label>
+    <label class="onboarding-check"><input id="onboardMotion" type="checkbox"> 减少动效</label>
+    <div class="onboarding-actions">
+      <button class="btn" id="onboardSkip" type="button">跳过</button>
+      <button class="btn btn-primary" id="onboardStart" type="button">开始使用</button>
+    </div>
+  </div>
+</div>
+
+<div class="term-pop" id="termPop" hidden role="dialog" aria-labelledby="termPopTitle">
+  <div class="term-pop-head"><b id="termPopTitle"></b><button class="icon-btn" id="termPopClose" type="button" aria-label="关闭术语说明"><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+  <p id="termPopBody"></p>
 </div>
 
 <input type="file" id="fileInput" multiple hidden>
@@ -587,6 +644,9 @@
 <script src="js/files.js" defer></script>
 <script src="js/menu.js" defer></script>
 <script src="js/settings.js" defer></script>
+<script src="js/glossary.js" defer></script>
+<script src="js/board.js" defer></script>
+<script src="js/onboarding.js" defer></script>
 <script src="app.js" defer></script>
 </body>
 </html>

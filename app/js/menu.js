@@ -488,6 +488,7 @@
   }
 
   function toggleMic() {
+    if (!app.state.voiceEnabled) { app.toast('语音输入已关闭：设置 → 语音'); return; }
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { app.toast('当前浏览器不支持语音输入'); return; }
     if (app.recog) {

@@ -71,7 +71,16 @@
     scrollBtn: $('#scrollBtn'), liveStatus: $('#liveStatus'), serverStatus: $('#serverStatus'),
     usageTopBtn: $('#usageTopBtn'), usageLayer: $('#usageLayer'),
     extensionsBtn: $('#extensionsBtn'), extensionsLayer: $('#extensionsLayer'),
-    githubStatus: $('#githubStatus'), githubConnectBtn: $('#githubConnectBtn'), githubDisconnectBtn: $('#githubDisconnectBtn')
+    githubStatus: $('#githubStatus'), githubConnectBtn: $('#githubConnectBtn'), githubDisconnectBtn: $('#githubDisconnectBtn'),
+    boardBtn: $('#boardBtn'), boardView: $('#boardView'), boardForm: $('#boardForm'), boardInput: $('#boardInput'),
+    boardTodo: $('#boardTodo'), boardDoing: $('#boardDoing'), boardDone: $('#boardDone'),
+    onboarding: $('#onboarding'), onboardWs: $('#onboardWs'), onboardModel: $('#onboardModel'),
+    onboardMotion: $('#onboardMotion'), onboardStart: $('#onboardStart'), onboardSkip: $('#onboardSkip'),
+    termPop: $('#termPop'), termPopTitle: $('#termPopTitle'), termPopBody: $('#termPopBody'), termPopClose: $('#termPopClose'),
+    personasPanel: $('#personasPanel'), memoryPanel: $('#memoryPanel'), knowledgePanel: $('#knowledgePanel'),
+    packagesPanel: $('#packagesPanel'), toolsPanel: $('#toolsPanel'), usagePanel: $('#usagePanel'),
+    accountsPanel: $('#accountsPanel'), gatewayPanel: $('#gatewayPanel'), extensionsPlugins: $('#extensionsPlugins'),
+    voiceNote: $('#voiceNote'), reopenOnboarding: $('#reopenOnboarding'), boardTitle: $('#boardTitle')
   };
 
   app.prefersReducedMotion = () => {
@@ -130,9 +139,19 @@
       thinkOpen: false,
       sidebarCollapsed: false,
       reduceMotion: app.prefersReducedMotion(),
-      drafts: {}
+      drafts: {},
+      onboarded: false,
+      voiceEnabled: false,
+      activePersonaId: 'default',
+      personas: [{ id: 'default', name: '默认', system: '', enabled: true }],
+      memories: [],
+      knowledge: [],
+      glossary: [],
+      board: { cards: [] }
     };
   }
+
+  app.DEFAULT_PERSONA = { id: 'default', name: '默认', system: '', enabled: true };
 
   function loadState() {
     try {
@@ -152,6 +171,19 @@
       s.drafts = (s.drafts && typeof s.drafts === 'object' && !Array.isArray(s.drafts)) ? s.drafts : {};
       Object.keys(s.drafts).forEach((k) => { if (typeof s.drafts[k] !== 'string') delete s.drafts[k]; });
       s.model = typeof s.model === 'string' ? s.model : '';
+      s.onboarded = !!s.onboarded;
+      s.voiceEnabled = !!s.voiceEnabled;
+      s.personas = Array.isArray(s.personas) ? s.personas.filter((p) => p && typeof p.id === 'string' && typeof p.name === 'string') : [];
+      if (!s.personas.some((p) => p.id === 'default')) s.personas.unshift(Object.assign({}, app.DEFAULT_PERSONA));
+      s.personas.forEach((p) => { p.system = typeof p.system === 'string' ? p.system : ''; p.enabled = p.enabled !== false; });
+      if (!s.personas.some((p) => p.id === s.activePersonaId)) s.activePersonaId = 'default';
+      s.memories = Array.isArray(s.memories) ? s.memories.filter((m) => m && typeof m.text === 'string') : [];
+      s.memories.forEach((m) => { m.enabled = m.enabled !== false; m.id = typeof m.id === 'string' ? m.id : uid(); });
+      s.knowledge = Array.isArray(s.knowledge) ? s.knowledge.filter((k) => k && typeof k.title === 'string') : [];
+      s.knowledge.forEach((k) => { k.content = typeof k.content === 'string' ? k.content : ''; k.enabled = k.enabled !== false; });
+      s.glossary = Array.isArray(s.glossary) ? s.glossary.filter((g) => g && typeof g.term === 'string' && typeof g.definition === 'string') : [];
+      s.board = (s.board && Array.isArray(s.board.cards)) ? s.board : { cards: [] };
+      s.board.cards = s.board.cards.filter((c) => c && typeof c.title === 'string');
       let ws = s.workspaces.find((w) => w.id === s.activeWorkspaceId) || s.workspaces[0];
       s.activeWorkspaceId = ws.id;
       let conv = ws.convs.find((c) => c.id === s.activeConvId);

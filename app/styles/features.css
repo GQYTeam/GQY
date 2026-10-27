@@ -1,0 +1,84 @@
+/* 顾清影 · 引导 / 看板 / 术语浮窗 / 设置列表 */
+
+/* ---------------- 引导 ---------------- */
+.onboarding{position:fixed;inset:0;z-index:220;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(20,20,19,.32);backdrop-filter:blur(6px)}
+.onboarding-card{width:min(440px,100%);background:var(--card);border:1px solid var(--line);border-radius:18px;padding:30px 30px 24px;box-shadow:var(--shadow-card);display:flex;flex-direction:column;gap:14px}
+.onboarding-mark{width:42px;height:42px;border-radius:12px;background:var(--clay-soft);color:var(--clay-deep);display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-size:22px}
+.onboarding-card h2{margin:0;font:600 22px/1.25 var(--serif)}
+.onboarding-card p{margin:0;color:var(--muted);font-size:13.5px}
+.onboarding-card .field{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--ink-2)}
+.onboarding-card .field input{height:40px;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:var(--paper);outline:none}
+.onboarding-card .field input:focus{border-color:#c98a70}
+.onboarding-check{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink-2)}
+.onboarding-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:4px}
+
+/* ---------------- 术语浮窗 ---------------- */
+.term{display:inline;padding:0 1px;border-bottom:1px dashed var(--clay);color:inherit;font:inherit;background:none;cursor:help}
+.term:hover{color:var(--clay-deep)}
+.term-pop{position:fixed;z-index:210;width:min(320px,calc(100vw - 24px));background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow-card)}
+.term-pop-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.term-pop-head b{font-size:14px}
+.term-pop-head .icon-btn{width:24px;height:24px}
+.term-pop p{margin:0;font-size:13px;line-height:1.6;color:var(--ink-2);white-space:pre-wrap}
+
+/* ---------------- 看板 ---------------- */
+.board-view{display:flex;flex-direction:column;flex:1;min-height:0;height:100%;overflow:hidden;padding:22px 24px 26px;gap:16px}
+.board-head{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;flex-wrap:wrap}
+.board-head h2{margin:0;font:600 22px/1.2 var(--serif)}
+.board-head p{margin:4px 0 0;color:var(--muted);font-size:13px}
+.board-form{display:flex;gap:8px;flex:0 1 380px}
+.board-form input{flex:1;min-width:0;height:38px;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:var(--card)}
+.board-cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;flex:1;min-height:0}
+.board-col{background:var(--shell);border:1px solid var(--line);border-radius:14px;padding:12px;display:flex;flex-direction:column;min-height:0}
+.board-col h3{margin:2px 2px 10px;font-size:13px;color:var(--muted);font-weight:600;letter-spacing:.02em}
+.board-list{display:flex;flex-direction:column;gap:8px;overflow:auto;min-height:40px}
+.board-card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 11px;display:flex;flex-direction:column;gap:7px}
+.board-card.is-done .board-card-title{text-decoration:line-through;color:var(--muted)}
+.board-card-title{font-size:13.5px;line-height:1.45;word-break:break-word}
+.board-card-meta{display:flex;align-items:center;justify-content:space-between;gap:6px;color:var(--caption);font-size:11.5px}
+.board-card-actions{display:flex;gap:4px}
+.board-mini{width:26px;height:26px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;line-height:1}
+.board-mini:hover{background:var(--hover);color:var(--ink)}
+.board-mini.danger:hover{background:var(--clay-soft);color:var(--danger)}
+.board-empty{color:var(--faint);font-size:12.5px;padding:12px 4px;text-align:center}
+
+/* ---------------- 设置内列表 ---------------- */
+.feature-list{display:flex;flex-direction:column}
+.feature-row{display:flex;align-items:flex-start;gap:10px;padding:11px 4px;border-bottom:1px solid var(--line-soft)}
+.feature-row:last-child{border-bottom:0}
+.feature-main{flex:1;min-width:0}
+.feature-main b{display:block;font-size:13.5px;font-weight:600}
+.feature-main small{display:block;color:var(--muted);font-size:12px;margin-top:2px;white-space:pre-wrap;word-break:break-word}
+.feature-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.feature-form{display:flex;flex-direction:column;gap:8px;padding:12px 4px;border-bottom:1px solid var(--line-soft)}
+.feature-form input,.feature-form textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;background:var(--paper);outline:none;font-size:13px}
+.feature-form textarea{min-height:74px;resize:vertical}
+.feature-form input:focus,.feature-form textarea:focus{border-color:#c98a70}
+.feature-form-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.feature-tag{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:999px;background:var(--shell-2);color:var(--muted);font-size:11px}
+.feature-tag.ok{background:#eaf3ec;color:#3d6b47}
+.feature-tag.warn{background:var(--clay-soft);color:var(--clay-deep)}
+.feature-empty{color:var(--faint);font-size:13px;padding:16px 4px;text-align:center}
+.ext-plugins{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.ext-plugin{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+.ext-plugin-main{flex:1;min-width:0}
+.ext-plugin-main b{display:block;font-size:13px}
+.ext-plugin-main small{display:block;color:var(--muted);font-size:11.5px;margin-top:2px}
+.ext-plugin .btn{flex:none}
+.usage-panel-bars{display:flex;align-items:flex-end;gap:8px;height:90px;padding:10px 2px 0}
+.usage-panel-bars i{display:block;flex:1;min-width:6px;border-radius:4px 4px 2px 2px;background:var(--clay);opacity:.75}
+.usage-panel-bars i.is-today{opacity:1}
+.usage-panel-axis{display:flex;gap:8px;padding:4px 2px 0}
+.usage-panel-axis span{flex:1;text-align:center;color:var(--caption);font-size:10.5px}
+.gateway-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line-soft)}
+.gateway-row:last-child{border-bottom:0}
+.gateway-row b{font-size:13px}
+.gateway-row small{color:var(--muted);font-size:11.5px}
+
+@media (max-width:880px){
+  .board-view{padding:16px 14px 20px}
+  .board-cols{grid-template-columns:1fr;overflow:auto}
+  .board-col{min-height:120px}
+  .board-form{flex:1 1 100%}
+  .onboarding-card{padding:24px 20px 20px}
+}

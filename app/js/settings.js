@@ -11,6 +11,16 @@
     el.motionSwitch.setAttribute('aria-checked', String(app.state.reduceMotion));
     el.sideSwitch.setAttribute('aria-checked', String(app.state.sidebarCollapsed));
     el.thinkSwitch.setAttribute('aria-checked', String(app.state.thinkOpen));
+    if (el.voiceSwitch) el.voiceSwitch.setAttribute('aria-checked', String(!!app.state.voiceEnabled));
+    if (el.micBtn) {
+      el.micBtn.disabled = !app.state.voiceEnabled;
+      el.micBtn.title = app.state.voiceEnabled ? '语音输入' : '语音输入已关闭（设置 → 语音）';
+    }
+    if (el.voiceNote) {
+      el.voiceNote.textContent = app.state.voiceEnabled
+        ? '语音输入已开启；不支持 SpeechRecognition 的浏览器会提示不可用。'
+        : '语音输入已关闭；打开开关后输入框的麦克风才可用。';
+    }
     $$('button', el.fontSeg).forEach((b) => b.setAttribute('aria-pressed', String(b.getAttribute('data-font') === app.state.fontSize)));
     el.aboutModels.forEach((node) => { node.textContent = app.activeModel(); });
     if (el.aboutModelInline) el.aboutModelInline.textContent = app.activeModel();
@@ -118,6 +128,7 @@
     el.usageWeekTotal.textContent = days.reduce((a, b) => a + b, 0) + ' 条';
 
     app.updateContextChip();
+    if (app.settingsTab === 'usage') renderUsagePanel();
   }
 
   function openSettingsTab(name, focusTab) {
@@ -138,7 +149,18 @@
       const tab = el.settingsTabs.find((node) => node.getAttribute('data-settings-tab') === app.settingsTab);
       if (tab) tab.focus({ preventScroll: true });
     }
-    if (app.settingsTab === 'models') loadProviders();
+    if (app.settingsTab === 'models') {
+      loadProviders();
+      renderGatewayPanel();
+    }
+    if (app.settingsTab === 'personas') renderPersonasPanel();
+    if (app.settingsTab === 'memory') renderMemoryPanel();
+    if (app.settingsTab === 'knowledge') renderKnowledgePanel();
+    if (app.settingsTab === 'voice') syncSettingsUI();
+    if (app.settingsTab === 'packages') refreshPlugins();
+    if (app.settingsTab === 'tools') renderToolsPanel();
+    if (app.settingsTab === 'usage') renderUsagePanel();
+    if (app.settingsTab === 'accounts') renderAccountsPanel();
   }
 
   async function loadProviders() {
@@ -216,6 +238,7 @@
     app.syncInert();
     el.extensionsLayer.querySelector('#extensionsWindow').focus({ preventScroll: true });
     refreshGithub();
+    refreshPlugins();
   }
 
   async function refreshGithub() {
@@ -281,9 +304,19 @@
 
   function setView(next) {
     if (next === 'settings') { openSettings(); return; }
+    if (next === 'board') {
+      app.view = 'board';
+      if (el.mainRow) el.mainRow.hidden = true;
+      if (el.boardView) el.boardView.hidden = false;
+      if (el.topbarTitle) { el.topbarTitle.hidden = false; el.topbarTitle.textContent = '看板'; }
+      app.renderBoard();
+      app.closeDrawer();
+      return;
+    }
     app.view = 'chat';
     el.body.hidden = false;
     if (el.mainRow) el.mainRow.hidden = false;
+    if (el.boardView) el.boardView.hidden = true;
     app.renderThread();
     app.closeDrawer();
   }
@@ -387,9 +420,345 @@
     app.toast('已清空全部对话');
   }
 
+  /* ---------------- 人设 / 记忆 / 知识库 ---------------- */
+
+  function renderPersonasPanel() {
+    if (!el.personasPanel) return;
+    const editing = app.editingPersonaId ? app.state.personas.find((p) => p.id === app.editingPersonaId) : null;
+    const rows = app.state.personas.map((p) => {
+      const active = p.id === app.state.activePersonaId;
+      return '<div class="feature-row"><div class="feature-main"><b>' + esc(p.name) +
+        (active ? ' <span class="feature-tag ok">当前</span>' : '') +
+        (p.id === 'default' ? ' <span class="feature-tag">内置</span>' : '') +
+        '</b><small>' + esc(p.system || '（空 system，只使用工具系统提示）') + '</small></div>' +
+        '<div class="feature-actions">' +
+        '<button class="btn" type="button" data-persona-use="' + esc(p.id) + '">使用</button>' +
+        '<button class="btn" type="button" data-persona-edit="' + esc(p.id) + '">编辑</button>' +
+        (p.id === 'default' ? '' : '<button class="btn btn-danger" type="button" data-persona-del="' + esc(p.id) + '">删除</button>') +
+        '</div></div>';
+    }).join('');
+    el.personasPanel.innerHTML =
+      '<form class="feature-form" data-persona-form>' +
+      '<input name="name" type="text" maxlength="40" placeholder="人设名称" value="' + esc(editing ? editing.name : '') + '">' +
+      '<textarea name="system" maxlength="8000" placeholder="system prompt，例如：你是严谨的 Go 工程师，先给结论再给依据。">' + esc(editing ? editing.system : '') + '</textarea>' +
+      '<div class="feature-form-row"><button class="btn btn-primary" type="submit">' + (editing ? '保存修改' : '新增人设') + '</button>' +
+      (editing ? '<button class="btn" type="button" data-persona-cancel>取消编辑</button>' : '') + '</div>' +
+      '</form><div class="feature-list">' + rows + '</div>';
+  }
+
+  function renderMemoryPanel() {
+    if (!el.memoryPanel) return;
+    const rows = app.state.memories.length ? app.state.memories.map((m) =>
+      '<div class="feature-row"><div class="feature-main"><small>' + esc(m.text) + '</small></div>' +
+      '<div class="feature-actions"><label class="feature-tag"><input type="checkbox" data-memory-toggle="' + esc(m.id) + '"' + (m.enabled ? ' checked' : '') + '> 启用</label>' +
+      '<button class="btn btn-danger" type="button" data-memory-del="' + esc(m.id) + '">删除</button></div></div>'
+    ).join('') : '<p class="feature-empty">还没有记忆。记忆不会自动抽取，只发送你手动添加并启用的条目。</p>';
+    el.memoryPanel.innerHTML =
+      '<form class="feature-form" data-memory-form>' +
+      '<textarea name="text" maxlength="4000" placeholder="例如：我偏好 Go 标准库，不引入第三方依赖。"></textarea>' +
+      '<div class="feature-form-row"><button class="btn btn-primary" type="submit">添加记忆</button></div>' +
+      '</form><div class="feature-list">' + rows + '</div>';
+  }
+
+  function renderKnowledgePanel() {
+    if (!el.knowledgePanel) return;
+    const terms = app.state.glossary.length ? app.state.glossary.map((g) =>
+      '<div class="feature-row"><div class="feature-main"><b>' + esc(g.term) + '</b><small>' + esc(g.definition) + '</small></div>' +
+      '<div class="feature-actions"><button class="btn btn-danger" type="button" data-glossary-del="' + esc(g.term) + '">删除</button></div></div>'
+    ).join('') : '<p class="feature-empty">没有自定义术语；内置术语对所有人可用。</p>';
+    const docs = app.state.knowledge.length ? app.state.knowledge.map((k) =>
+      '<div class="feature-row"><div class="feature-main"><b>' + esc(k.title) + '</b><small>' + esc((k.content || '').slice(0, 240)) + '</small></div>' +
+      '<div class="feature-actions"><label class="feature-tag"><input type="checkbox" data-doc-toggle="' + esc(k.id) + '"' + (k.enabled ? ' checked' : '') + '> 启用</label>' +
+      '<button class="btn btn-danger" type="button" data-doc-del="' + esc(k.id) + '">删除</button></div></div>'
+    ).join('') : '<p class="feature-empty">没有知识条目。发送时按关键词匹配，最多注入 3 条。</p>';
+    el.knowledgePanel.innerHTML =
+      '<div class="panel-list-row"><span>自定义术语</span><b>' + app.state.glossary.length + ' 条</b></div>' +
+      '<form class="feature-form" data-glossary-form>' +
+      '<div class="feature-form-row"><input name="term" type="text" maxlength="40" placeholder="术语"><input name="definition" type="text" maxlength="400" placeholder="一句话定义"></div>' +
+      '<div class="feature-form-row"><button class="btn btn-primary" type="submit">添加术语</button></div></form>' +
+      '<div class="feature-list">' + terms + '</div>' +
+      '<div class="panel-list-row" style="margin-top:14px"><span>知识文档</span><b>' + app.state.knowledge.length + ' 条</b></div>' +
+      '<form class="feature-form" data-doc-form>' +
+      '<input name="title" type="text" maxlength="80" placeholder="标题">' +
+      '<textarea name="content" maxlength="20000" placeholder="内容（纯文本；发送时按关键词匹配）"></textarea>' +
+      '<div class="feature-form-row"><button class="btn btn-primary" type="submit">添加文档</button></div></form>' +
+      '<div class="feature-list">' + docs + '</div>';
+  }
+
+  /* ---------------- 插件 / 工具 ---------------- */
+
+  let pluginCache = [];
+
+  function pluginRowHTML(p) {
+    const state = p.state || 'discovered';
+    const tag = state === 'ready' ? 'ok' : state === 'failed' ? 'warn' : '';
+    const actions = state === 'ready'
+      ? '<button class="btn" type="button" data-plugin-unload="' + esc(p.id) + '">卸载</button>'
+      : '<button class="btn" type="button" data-plugin-load="' + esc(p.id) + '">加载</button>';
+    const actionNames = (p.actions || []).map((a) => a.name).join(' · ') || '无动作';
+    return '<div class="ext-plugin"><div class="ext-plugin-main"><b>' + esc(p.name || p.id) +
+      ' <span class="feature-tag ' + tag + '">' + esc(state) + '</span></b><small>' +
+      esc(p.protocol || '') + ' · v' + esc(p.version || '?') + ' · ' + esc(actionNames) +
+      (p.lastError ? ' · 错误：' + esc(p.lastError) : '') + '</small></div>' + actions + '</div>';
+  }
+
+  function renderPluginList(list) {
+    pluginCache = list;
+    const html = list.length ? list.map(pluginRowHTML).join('') : '<p class="feature-empty">没有发现插件。把插件放到 $GQY_HOME/plugins/&lt;id&gt;/manifest.json。</p>';
+    if (el.extensionsPlugins) el.extensionsPlugins.innerHTML = html;
+    if (el.packagesPanel) el.packagesPanel.innerHTML = '<div class="ext-plugins">' + html + '</div>';
+  }
+
+  async function refreshPlugins() {
+    if (!G.api || !G.api.plugins) { renderPluginList([]); return; }
+    try {
+      renderPluginList(await G.api.plugins());
+    } catch (err) {
+      renderPluginList([]);
+    }
+  }
+
+  async function renderToolsPanel() {
+    if (!el.toolsPanel) return;
+    el.toolsPanel.innerHTML = '<p class="feature-empty">读取中…</p>';
+    if (!G.api || !G.api.tools) {
+      el.toolsPanel.innerHTML = '<p class="feature-empty">未连接服务端；工具由后端管理。</p>';
+      return;
+    }
+    try {
+      const data = await G.api.tools();
+      const core = (data.tools || []).filter((t) => t.kind === 'core');
+      const ext = (data.tools || []).filter((t) => t.kind !== 'core');
+      const rows = (list) => list.map((t) =>
+        '<div class="feature-row"><div class="feature-main"><b>' + esc(t.name) + '</b><small>' + esc(t.description) + '</small></div></div>'
+      ).join('');
+      el.toolsPanel.innerHTML =
+        '<div class="panel-list-row"><span>核心工具</span><b>' + core.length + ' 个</b></div>' +
+        '<div class="feature-list">' + (rows(core) || '<p class="feature-empty">无</p>') + '</div>' +
+        '<div class="panel-list-row" style="margin-top:12px"><span>外部工具</span><b>' + ext.length + ' 个</b></div>' +
+        '<div class="setting-row"><div class="setting-copy"><b>注入外部工具</b><small>provider_usage、已加载插件动作</small></div>' +
+        '<button class="switch" type="button" role="switch" data-external-toggle aria-checked="' + String(!!data.external) + '"></button></div>' +
+        '<div class="feature-list">' + (rows(ext) || '<p class="feature-empty">无</p>') + '</div>';
+    } catch (err) {
+      el.toolsPanel.innerHTML = '<p class="feature-empty">工具列表不可用：' + esc(err.message) + '</p>';
+    }
+  }
+
+  /* ---------------- 用量 / 账户 / 网关 ---------------- */
+
+  function renderUsagePanel() {
+    if (!el.usagePanel) return;
+    const u = usageSnapshot();
+    const s = app.usageData || {};
+    const days = Array.isArray(s.days) ? s.days : u.days;
+    const maxDay = Math.max.apply(null, days.concat([1]));
+    const bars = days.map((n, i) => '<i class="' + (i === 6 ? 'is-today' : '') + '" style="height:' + (n ? Math.max(8, Math.round(n / maxDay * 100)) : 4) + '%" title="' + n + ' 条"></i>').join('');
+    const wk = ['日', '一', '二', '三', '四', '五', '六'];
+    const axis = days.map((n, i) => '<span>' + (i === 6 ? '今天' : '周' + wk[new Date(Date.now() - (6 - i) * 86400000).getDay()]) + '</span>').join('');
+    el.usagePanel.innerHTML =
+      '<div class="usage-tiles">' +
+      '<div class="usage-tile"><span>本地存储</span><b>' + esc(formatBytes(u.bytes)) + '</b></div>' +
+      '<div class="usage-tile"><span>会话</span><b>' + (s.sessions != null ? s.sessions : u.convs) + '</b></div>' +
+      '<div class="usage-tile"><span>消息</span><b>' + (s.messages != null ? s.messages : u.messages) + '</b></div>' +
+      '<div class="usage-tile"><span>产物 / 附件</span><b>' + (s.artifacts != null ? s.artifacts : u.assets) + '</b></div>' +
+      '</div>' +
+      '<div class="panel-list-row"><span>Token</span><b>' + (s.totalTokens != null ? s.totalTokens : 0) + '</b></div>' +
+      '<div class="panel-list-row"><span>输入 / 输出</span><b>' + (s.promptTokens || 0) + ' / ' + (s.completionTokens || 0) + '</b></div>' +
+      '<div class="usage-panel-bars">' + bars + '</div><div class="usage-panel-axis">' + axis + '</div>' +
+      '<p class="panel-note">近 7 天共 ' + days.reduce((a, b) => a + b, 0) + ' 条消息。服务端数据来自落盘会话聚合。</p>';
+  }
+
+  async function renderAccountsPanel() {
+    if (!el.accountsPanel) return;
+    const info = G.api && G.api.info ? G.api.info() : null;
+    const connected = info ? (info.provider === 'mock' ? '模拟流' : '已连接') : '未连接';
+    let github = '未连接';
+    if (G.api && G.api.githubMe) {
+      try {
+        const data = await G.api.githubMe();
+        if (data.connected) github = '@' + ((data.account && data.account.login) || '');
+      } catch (err) {}
+    }
+    el.accountsPanel.innerHTML =
+      '<div class="panel-list-row"><span>模式</span><b>本机单用户</b></div>' +
+      '<div class="panel-list-row"><span>服务端</span><b>' + esc(connected) + (info && info.model ? ' · ' + esc(info.model) : '') + '</b></div>' +
+      '<div class="panel-list-row"><span>数据目录</span><b>' + esc((info && info.home) || '—') + '</b></div>' +
+      '<div class="panel-list-row"><span>GitHub</span><b>' + esc(github) + '</b></div>' +
+      '<div class="panel-list-row"><span>版本</span><b>1.2.0</b></div>' +
+      '<p class="panel-note">没有账号体系与权限分组；公网部署前先加反向代理鉴权。</p>';
+  }
+
+  async function renderGatewayPanel() {
+    if (!el.gatewayPanel) return;
+    if (!G.api || !G.api.gatewayStatus) {
+      el.gatewayPanel.innerHTML = '<p class="feature-empty">未连接服务端。</p>';
+      return;
+    }
+    try {
+      const st = await G.api.gatewayStatus();
+      const providers = (st.providers || []).map((p) =>
+        '<div class="gateway-row"><div><b>' + esc(p.name || p.id) + '</b> <span class="feature-tag ' + (p.keySet ? 'ok' : 'warn') + '">' + (p.keySet ? '有密钥' : '无密钥') + '</span><br>' +
+        '<small>' + esc(p.id) + ' · ' + (p.inflight || 0) + ' 在途 · ' + (p.calls || 0) + ' 调用 · ' + (p.failures || 0) + ' 失败' +
+        (p.cooldownUntil ? ' · 冷却至 ' + esc(p.cooldownUntil) : '') + (p.lastError ? ' · ' + esc(p.lastError) : '') + '</small></div></div>'
+      ).join('') || '<p class="feature-empty">没有 provider。</p>';
+      const groups = (st.groups || []).map((g) =>
+        '<div class="gateway-row"><small><b>' + esc(g.id) + '</b> · ' + esc(g.strategy) + ' · ' + esc((g.members || []).join(', ')) + '</small></div>'
+      ).join('') || '<p class="feature-empty">没有路由组。</p>';
+      el.gatewayPanel.innerHTML = '<div class="panel-list-row"><span>默认</span><b>' +
+        esc((st.default && st.default.provider || '—') + '/' + (st.default && st.default.model || '—')) + '</b></div>' +
+        '<div class="panel-list-row"><span>Provider</span><b>' + (st.providers || []).length + ' 个</b></div>' +
+        providers + '<div class="panel-list-row" style="margin-top:10px"><span>路由组</span><b>' + (st.groups || []).length + ' 个</b></div>' + groups;
+    } catch (err) {
+      el.gatewayPanel.innerHTML = '<p class="feature-empty">网关状态不可用。</p>';
+    }
+  }
+
+  /* ---------------- 设置内事件 ---------------- */
+
+  if (el.voiceSwitch) el.voiceSwitch.addEventListener('click', () => {
+    app.state.voiceEnabled = !app.state.voiceEnabled;
+    app.save();
+    syncSettingsUI();
+    app.toast(app.state.voiceEnabled ? '语音输入已开启' : '语音输入已关闭');
+  });
+
+  if (el.settingsContent) {
+    el.settingsContent.addEventListener('submit', (e) => {
+      const form = e.target;
+      if (form.matches('[data-persona-form]')) {
+        e.preventDefault();
+        const name = form.querySelector('[name=name]').value.trim();
+        const system = form.querySelector('[name=system]').value.trim();
+        if (!name) { form.querySelector('[name=name]').focus(); return; }
+        if (app.editingPersonaId) {
+          const p = app.state.personas.find((x) => x.id === app.editingPersonaId);
+          if (p) { p.name = name; p.system = system; }
+          app.editingPersonaId = null;
+        } else {
+          const id = uid();
+          app.state.personas.push({ id: id, name: name, system: system, enabled: true });
+          app.state.activePersonaId = id;
+        }
+        app.save();
+        renderPersonasPanel();
+        app.toast('人设已保存');
+        return;
+      }
+      if (form.matches('[data-memory-form]')) {
+        e.preventDefault();
+        const text = form.querySelector('[name=text]').value.trim();
+        if (!text) return;
+        app.state.memories.unshift({ id: uid(), text: text, enabled: true, createdAt: now() });
+        app.save();
+        renderMemoryPanel();
+        app.toast('记忆已添加');
+        return;
+      }
+      if (form.matches('[data-glossary-form]')) {
+        e.preventDefault();
+        const term = form.querySelector('[name=term]').value.trim();
+        const definition = form.querySelector('[name=definition]').value.trim();
+        if (!term || !definition) return;
+        app.state.glossary = app.state.glossary.filter((g) => g.term.toLowerCase() !== term.toLowerCase());
+        app.state.glossary.push({ term: term, definition: definition });
+        app.save();
+        renderKnowledgePanel();
+        app.toast('术语已添加');
+        return;
+      }
+      if (form.matches('[data-doc-form]')) {
+        e.preventDefault();
+        const title = form.querySelector('[name=title]').value.trim();
+        const content = form.querySelector('[name=content]').value.trim();
+        if (!title || !content) return;
+        app.state.knowledge.unshift({ id: uid(), title: title, content: content, enabled: true, updatedAt: now() });
+        app.save();
+        renderKnowledgePanel();
+        app.toast('文档已添加');
+      }
+    });
+
+    el.settingsContent.addEventListener('click', (e) => {
+      const use = e.target.closest('[data-persona-use]');
+      if (use) {
+        app.state.activePersonaId = use.getAttribute('data-persona-use');
+        app.save(); renderPersonasPanel(); app.toast('已切换人设');
+        return;
+      }
+      const edit = e.target.closest('[data-persona-edit]');
+      if (edit) {
+        app.editingPersonaId = edit.getAttribute('data-persona-edit');
+        renderPersonasPanel();
+        return;
+      }
+      const cancel = e.target.closest('[data-persona-cancel]');
+      if (cancel) { app.editingPersonaId = null; renderPersonasPanel(); return; }
+      const delP = e.target.closest('[data-persona-del]');
+      if (delP) {
+        const id = delP.getAttribute('data-persona-del');
+        app.state.personas = app.state.personas.filter((p) => p.id !== id);
+        if (app.state.activePersonaId === id) app.state.activePersonaId = 'default';
+        app.save(); renderPersonasPanel(); return;
+      }
+      const delM = e.target.closest('[data-memory-del]');
+      if (delM) {
+        app.state.memories = app.state.memories.filter((m) => m.id !== delM.getAttribute('data-memory-del'));
+        app.save(); renderMemoryPanel(); return;
+      }
+      const delG = e.target.closest('[data-glossary-del]');
+      if (delG) {
+        const term = delG.getAttribute('data-glossary-del');
+        app.state.glossary = app.state.glossary.filter((g) => g.term !== term);
+        app.save(); renderKnowledgePanel(); return;
+      }
+      const delD = e.target.closest('[data-doc-del]');
+      if (delD) {
+        app.state.knowledge = app.state.knowledge.filter((k) => k.id !== delD.getAttribute('data-doc-del'));
+        app.save(); renderKnowledgePanel(); return;
+      }
+      const ext = e.target.closest('[data-external-toggle]');
+      if (ext) {
+        if (!G.api || !G.api.setExternal) return;
+        const next = ext.getAttribute('aria-checked') !== 'true';
+        G.api.setExternal(next).then(() => { renderToolsPanel(); app.toast(next ? '外部工具已注入' : '外部工具已关闭'); })
+          .catch((err) => app.toast(err.message));
+        return;
+      }
+      const load = e.target.closest('[data-plugin-load]');
+      if (load) {
+        const id = load.getAttribute('data-plugin-load');
+        G.api.pluginLoad(id).then(() => { refreshPlugins(); app.toast('插件已加载'); })
+          .catch((err) => app.toast(err.message));
+        return;
+      }
+      const unload = e.target.closest('[data-plugin-unload]');
+      if (unload) {
+        const id = unload.getAttribute('data-plugin-unload');
+        G.api.pluginUnload(id).then(() => { refreshPlugins(); app.toast('插件已卸载'); })
+          .catch((err) => app.toast(err.message));
+      }
+    });
+
+    el.settingsContent.addEventListener('change', (e) => {
+      const mem = e.target.closest('[data-memory-toggle]');
+      if (mem) {
+        const item = app.state.memories.find((m) => m.id === mem.getAttribute('data-memory-toggle'));
+        if (item) { item.enabled = mem.checked; app.save(); }
+        return;
+      }
+      const doc = e.target.closest('[data-doc-toggle]');
+      if (doc) {
+        const item = app.state.knowledge.find((k) => k.id === doc.getAttribute('data-doc-toggle'));
+        if (item) { item.enabled = doc.checked; app.save(); }
+      }
+    });
+  }
+
   Object.assign(app, {
     syncSettingsUI, applyFontSize, usageSnapshot, renderServerStatus, refreshUsage,
     openSettingsTab, openSettings, closeSettings, filterSettings, loadProviders, openUsage, closeUsage,
+    renderPersonasPanel, renderMemoryPanel, renderKnowledgePanel, renderToolsPanel,
+    renderUsagePanel, renderAccountsPanel, renderGatewayPanel, refreshPlugins,
     openExtensions, closeExtensions, refreshGithub, connectGithub, disconnectGithub,
     trapTab, setView,
     exportData, importData, setupDetectedApi, openWsDialog, applyReduceMotion, clearEverything

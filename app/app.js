@@ -25,6 +25,8 @@
   });
   el.scrim.addEventListener('click', app.closeDrawer);
   el.accountBtn.addEventListener('click', app.openSettings);
+  if (el.boardBtn) el.boardBtn.addEventListener('click', () => app.setView('board'));
+  if (el.reopenOnboarding) el.reopenOnboarding.addEventListener('click', () => { app.closeSettings(); app.onboarding.open(); });
   if (el.settingsSearch) el.settingsSearch.addEventListener('input', () => app.filterSettings(el.settingsSearch.value));
 
   function setSearchOpen(open, focus) {
@@ -174,6 +176,8 @@
   });
 
   el.thread.addEventListener('click', (e) => {
+    const term = e.target.closest('[data-term]');
+    if (term) { G.glossary.open(term.getAttribute('data-term'), term); return; }
     const img = e.target.closest('[data-att-msg]');
     if (img) {
       app.openMessageImage(img.getAttribute('data-att-msg'), Number(img.getAttribute('data-att-img')) || 0, img);
@@ -425,6 +429,7 @@
       if (app.menu) { app.closeMenu(true); return; }
       if (app.searchOpen) { setSearchOpen(false); el.searchBtn.focus({ preventScroll: true }); return; }
       if (el.app.classList.contains('drawer-open')) { app.closeDrawer(); return; }
+      if (app.view === 'board') { app.setView('chat'); return; }
       return;
     }
     if (e.key === 'Tab') {
