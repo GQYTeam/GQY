@@ -40,24 +40,39 @@
       '</span></a>';
   }
 
+  /* 只放行 http(s) / mailto 与相对路径；javascript:、data:、vbscript: 一律降级成纯文本。
+     注意：这里的 url 已经过 esc()，不能再转义一次，否则 & 会变成 &amp;。 */
+  function safeUrl(raw) {
+    const url = String(raw || '').trim();
+    if (!url) return '';
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url)) return /^(https?:|mailto:)/i.test(url) ? url : '';
+    if (/^[\u0000-\u001f]/.test(url)) return '';
+    return url;
+  }
+
   function inline(text) {
     const stash = [];
     const keep = (html) => '\u0002' + (stash.push(html) - 1) + '\u0002';
-    const href = (url) => esc(url);
     let s = esc(text);
 
     s = s.replace(/`([^`\n]+)`/g, (m, code) => keep('<code>' + code + '</code>'));
-    s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt, url) => keep(
-      '<img class="md-img" src="' + href(url) + '" alt="' + alt + '" loading="lazy">'
-    ));
-    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, url) => keep(
-      '<a href="' + href(url) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>'
-    ));
+    s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt, raw) => {
+      const url = safeUrl(raw);
+      return keep(url
+        ? '<img class="md-img" src="' + url + '" alt="' + alt + '" loading="lazy" referrerpolicy="no-referrer">'
+        : alt);
+    });
+    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, raw) => {
+      const url = safeUrl(raw);
+      return keep(url
+        ? '<a href="' + url + '" target="_blank" rel="noopener noreferrer nofollow">' + label + '</a>'
+        : label);
+    });
     s = s.replace(/&lt;(https?:\/\/[^\s&]+)&gt;/g, (m, url) => keep(
-      '<a href="' + href(url) + '" target="_blank" rel="noopener noreferrer">' + url + '</a>'
+      '<a href="' + url + '" target="_blank" rel="noopener noreferrer nofollow">' + url + '</a>'
     ));
     s = s.replace(/(^|[\s(（])(https?:\/\/[^\s<)）]+)/g, (m, pre, url) => pre + keep(
-      '<a href="' + href(url) + '" target="_blank" rel="noopener noreferrer">' + url + '</a>'
+      '<a href="' + url + '" target="_blank" rel="noopener noreferrer nofollow">' + url + '</a>'
     ));
 
     s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
@@ -240,5 +255,5 @@
     return out;
   }
 
-  Object.assign(G, { inline, renderMarkdown, highlightHTML, codeHTML, linkCardHTML });
+  Object.assign(G, { inline, safeUrl, renderMarkdown, highlightHTML, codeHTML, linkCardHTML });
 })();

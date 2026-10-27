@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light">
-<meta name="description" content="顾清影 · 一个纯前端演示的 AI 对话窗口。">
+<meta name="description" content="顾清影 · AI 对话工作台：流式回复、思考与工具调用、产物灯箱、会话落盘。">
 <meta name="theme-color" content="#fcfcfb">
 <title>顾清影 · AI 对话</title>
 <link rel="icon" type="image/png" href="assets/favicon.png">
@@ -136,6 +136,9 @@
       </div>
 
       <div class="composer-area" id="composerArea">
+        <button class="scroll-bottom" id="scrollBtn" type="button" hidden aria-label="回到最新消息" title="回到最新消息">
+          <svg class="ico" aria-hidden="true"><use href="#i-arrow-up"/></svg>
+        </button>
         <div class="composer-wrap">
           <div class="suggests" id="suggests" aria-label="示例问题">
             <button class="suggest" type="button" data-suggest="写一个 debounce 函数，并说明容易踩的坑">写个 debounce 函数</button>
@@ -329,6 +332,7 @@
 </div>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="sr-only" id="liveStatus" role="status" aria-live="polite"></div>
 
 <dialog class="modal" id="wsDialog" aria-labelledby="wsDialogTitle">
   <form class="modal-body" id="wsForm" novalidate>
@@ -426,14 +430,11 @@
 <div class="settings-layer" id="settingsLayer" hidden>
   <div class="settings-backdrop" data-settings-close></div>
   <section class="settings-window" id="settingsWindow" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" tabindex="-1">
-    <header class="settings-titlebar" id="settingsTitlebar">
-      <div class="traffic" aria-hidden="true">
-        <button class="tl tl-close" type="button" data-settings-close aria-label="关闭设置" title="关闭"></button>
-        <span class="tl tl-min"></span>
-        <span class="tl tl-max"></span>
-      </div>
+    <header class="settings-titlebar">
       <span class="settings-window-title" id="settingsTitle">设置</span>
-      <span class="settings-window-hint">拖动标题栏移动窗口</span>
+      <button class="settings-close" type="button" data-settings-close aria-label="关闭设置" title="关闭设置（Esc）">
+        <svg class="ico" aria-hidden="true"><use href="#i-x"/></svg>
+      </button>
     </header>
     <div class="settings-body">
       <aside class="settings-sidebar">
@@ -499,7 +500,7 @@
           </header>
           <div class="panel-card">
             <div class="setting-row">
-              <div class="setting-copy"><b>流式速度</b><small>演示回复的打字与工具调用节奏</small></div>
+              <div class="setting-copy"><b>流式速度</b><small>仅影响本地演示回复的打字节奏</small></div>
               <div class="seg" id="speedSeg" role="group" aria-label="流式速度">
                 <button type="button" data-speed="slow" aria-pressed="false">慢</button>
                 <button type="button" data-speed="normal" aria-pressed="true">正常</button>
@@ -520,12 +521,13 @@
         <section class="settings-panel" id="settings-panel-data" role="tabpanel" aria-labelledby="settings-tab-data" data-settings-panel="data" hidden>
           <header class="panel-head">
             <h2>数据</h2>
-            <p>对话只保存在本机浏览器，回复由本地脚本模拟，不会发送到任何服务器。</p>
+            <p>对话保存在本机浏览器；连上服务端时会同时镜像到 $GQY_HOME。</p>
           </header>
           <div class="panel-card panel-data">
             <p class="set-note">导出会包含所有工作区、会话与消息；恢复示例会覆盖当前对话。</p>
             <div class="set-actions">
               <button class="btn" id="exportData" type="button">导出对话 JSON</button>
+              <button class="btn" id="importData" type="button">导入对话 JSON</button>
               <button class="btn" id="seedReset" type="button">恢复示例对话</button>
               <button class="btn btn-danger" id="clearAll" type="button">清空全部</button>
             </div>
@@ -568,16 +570,23 @@
         <section class="settings-panel" id="settings-panel-about" role="tabpanel" aria-labelledby="settings-tab-about" data-settings-panel="about" hidden>
           <header class="panel-head">
             <h2>关于</h2>
-            <p>一个纯前端的对话与看板演示，没有后端。</p>
+            <p>前端零构建、零依赖；server.go 提供流式转发与会话落盘。</p>
           </header>
           <div class="panel-card">
             <div class="about-row"><span>名称</span><b>顾清影</b></div>
-            <div class="about-row"><span>版本</span><b>0.5.0 · 纯前端演示</b></div>
+            <div class="about-row"><span>版本</span><b>1.1.0</b></div>
             <div class="about-row"><span>模型</span><b class="about-model">DeepSeek-V4.1-Flash</b></div>
-            <div class="about-row"><span>能力</span><b>思考 · 工具调用 · 产物灯箱 · 附件 · Markdown</b></div>
-            <div class="about-row"><span>存储</span><b>localStorage · 不联网</b></div>
+            <div class="about-row"><span>能力</span><b>流式回复 · 思考 / 工具轨迹 · 产物灯箱 · 附件 · Markdown</b></div>
+            <div class="about-row"><span>存储</span><b>localStorage · 会话可镜像到服务端</b></div>
+            <div class="about-row"><span>服务端</span><b id="serverStatus">检测中…</b></div>
           </div>
-          <p class="panel-note">界面参考 Claude 桌面端；看板与用量均为本机模拟数据。</p>
+          <div class="panel-card panel-list">
+            <div class="panel-list-row"><span>搜索对话</span><b>⌘/Ctrl + K</b></div>
+            <div class="panel-list-row"><span>新会话</span><b>Alt + N</b></div>
+            <div class="panel-list-row"><span>发送</span><b>Enter / ⌘/Ctrl + Enter</b></div>
+            <div class="panel-list-row"><span>关闭浮层</span><b>Esc</b></div>
+          </div>
+          <p class="panel-note">看板与会话统计为本机模拟数据；模型回复在未连接服务端时同样为本地演示。</p>
         </section>
       </div>
     </div>
@@ -585,11 +594,13 @@
 </div>
 
 <input type="file" id="fileInput" multiple hidden>
+<input type="file" id="importInput" accept="application/json,.json" hidden>
 <script src="js/core.js" defer></script>
 <script src="js/markdown.js" defer></script>
 <script src="js/replies.js" defer></script>
 <script src="js/samples.js" defer></script>
 <script src="js/clawd.js" defer></script>
+<script src="js/api.js" defer></script>
 <script src="app.js" defer></script>
 </body>
 </html>

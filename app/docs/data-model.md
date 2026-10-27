@@ -5,7 +5,8 @@
 - 键：`claude-webchat:v6`（结构变更时递增版本号，旧的演示数据直接作废）。
 - 值：整个 `state` 的 JSON。
 - 另有 `gqy:files-width` 保存文件面板宽度。
-- 所有读写都包在 try/catch 里；配额失败静默忽略（演示可接受，真实产品应提示）。
+- 所有读写都包在 try/catch 里；配额失败会 toast 提示（“改动只留在内存里”），不再静默丢弃。
+- 保存成功会触发一次会话镜像（服务端可用时）：`PUT /api/sessions/:id`，写入 `$GQY_HOME`。
 
 ## state
 
@@ -20,11 +21,28 @@
   fontSize,                      // 'small' | 'normal' | 'large'
   streamSpeed,                   // 'slow' | 'normal' | 'fast'
   thinkOpen,                     // 回复结束后是否保持思考展开
-  sidebarCollapsed, reduceMotion
+  sidebarCollapsed, reduceMotion,
+  drafts: { [convId]: string }   // 每个会话的未发送草稿
 }
 ```
 
 `loadState()` 对每个字段做白名单校验，非法值回落到默认。
+`reduceMotion` 没有存过时取系统 `prefers-reduced-motion`；`drafts` 只保留字符串值。
+
+## 会话镜像（可选）
+
+服务端可用时，`save()` 会把**当前会话**镜像到：
+
+```
+$GQY_HOME/sessions/<convId>/
+  manifest.json                  session_id / workspace / artifacts 清单
+  io/context/context.md          可读摘要
+  io/context/messages.jsonl      逐条消息
+  io/output/artifacts/<title>    产物正文
+  logs/tools/YYYY-MM-DD.jsonl    工具调用（参数脱敏）
+```
+
+镜像不参与前端恢复：刷新后仍以 localStorage 为准。删除会话不会删服务端目录（按 `docs/AboutProjectFile.md` 的 TTL 清理）。
 
 ## Message
 
