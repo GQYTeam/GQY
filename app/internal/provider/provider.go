@@ -40,6 +40,8 @@ type Request struct {
 	Model    string    `json:"model"`
 	Effort   string    `json:"effort"`
 	Tools    []any     `json:"tools,omitempty"`
+	// Session 只用于网关亲和与日志，不会发给上游。
+	Session string `json:"session,omitempty"`
 }
 
 type Usage struct {

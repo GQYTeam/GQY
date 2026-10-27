@@ -31,8 +31,14 @@ type ToolResult struct {
 // OnTool 是可选的工具执行回调（每个工具调用执行后触发）。
 type OnTool func(ToolResult)
 
+// Completer 是 agent loop 依赖的最小上游契约。
+// *provider.Upstream 和 *gateway.Router 都实现它。
+type Completer interface {
+	Complete(ctx context.Context, req provider.Request) (provider.Message, *provider.Usage, error)
+}
+
 type Loop struct {
-	Upstream *provider.Upstream
+	Upstream Completer
 	Registry *tool.Registry
 	OnTool   OnTool
 	// IncludeExternal 为 true 时把外部工具也注入模型；默认只注入核心工具。

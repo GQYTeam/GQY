@@ -20,6 +20,7 @@ import (
 	"gqy/internal/agent"
 	"gqy/internal/catalog"
 	"gqy/internal/config"
+	"gqy/internal/gateway"
 	"gqy/internal/github"
 	"gqy/internal/provider"
 	"gqy/internal/session"
@@ -51,8 +52,10 @@ type Server struct {
 	Catalog  *catalog.Catalog
 	Session  *session.Store
 	Upstream *provider.Upstream
+	Gateway  *gateway.Router
 	Agent    *agent.Loop
 	GitHub   *github.Client
+	Tools    *tool.Registry
 }
 
 func New(root string, cfg config.Config, client *http.Client) *Server {
@@ -80,6 +83,8 @@ func New(root string, cfg config.Config, client *http.Client) *Server {
 		LowBalance: cfg.LowBalance,
 	})
 
+	router := gateway.New(cfg, client)
+
 	return &Server{
 		Root:     root,
 		Cfg:      cfg,
@@ -87,7 +92,9 @@ func New(root string, cfg config.Config, client *http.Client) *Server {
 		Catalog:  catalog.New(client),
 		Session:  session.New(cfg.Home),
 		Upstream: upstream,
-		Agent:    &agent.Loop{Upstream: upstream, Registry: registry, IncludeExternal: cfg.EnableExternal},
+		Gateway:  router,
+		Agent:    &agent.Loop{Upstream: router, Registry: registry, IncludeExternal: cfg.EnableExternal},
+		Tools:    registry,
 		GitHub: &github.Client{
 			ClientID:     cfg.GitHubClientID,
 			ClientSecret: cfg.GitHubClientSecret,
@@ -103,6 +110,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/models", s.handleModels)
 	mux.HandleFunc("GET /api/usage", s.handleUsage)
 	mux.HandleFunc("POST /api/chat", s.handleChat)
+	mux.HandleFunc("GET /api/gateway/status", s.handleGatewayStatus)
+	mux.HandleFunc("GET /v1/models", s.handleV1Models)
+	mux.HandleFunc("POST /v1/chat/completions", s.handleV1Chat)
 	mux.HandleFunc("GET /api/providers", s.handleProviders)
 	mux.HandleFunc("GET /api/github/auth", s.handleGitHubAuth)
 	mux.HandleFunc("GET /api/github/callback", s.handleGitHubCallback)
@@ -123,6 +133,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/models", allow("GET"))
 	mux.HandleFunc("/api/usage", allow("GET"))
 	mux.HandleFunc("/api/chat", allow("POST"))
+	mux.HandleFunc("/api/gateway/status", allow("GET"))
+	mux.HandleFunc("/v1/models", allow("GET"))
+	mux.HandleFunc("/v1/chat/completions", allow("POST"))
 	mux.HandleFunc("/api/providers", allow("GET"))
 	mux.HandleFunc("/api/github/auth", allow("GET"))
 	mux.HandleFunc("/api/github/callback", allow("GET"))
@@ -138,12 +151,21 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	kind := s.Cfg.Provider()
+	if kind == "none" && s.Gateway.Available() {
+		kind = "openai-compatible"
+	}
+	model := s.Cfg.Model
+	if s.Gateway.DefaultModel() != "" {
+		model = s.Gateway.DefaultModel()
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":       true,
-		"provider": s.Cfg.Provider(),
-		"model":    s.Cfg.Model,
-		"home":     s.Cfg.Home,
-		"version":  apiVersion,
+		"ok":        true,
+		"provider":  kind,
+		"model":     model,
+		"home":      s.Cfg.Home,
+		"version":   apiVersion,
+		"providers": len(s.Gateway.Status().Providers),
 	})
 }
 
@@ -189,8 +211,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "messages_required", "messages 不能为空")
 		return
 	}
-	if s.Cfg.Provider() == "none" {
-		writeErr(w, http.StatusServiceUnavailable, "no_provider", "服务端未配置 GQY_API_KEY")
+	if !s.Gateway.Available() {
+		writeErr(w, http.StatusServiceUnavailable, "no_provider", "服务端未配置可用的 provider 密钥")
 		return
 	}
 
@@ -206,7 +228,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	ctx, cancel := context.WithCancel(r.Context())
+	ctx, cancel := context.WithCancel(gateway.WithSession(r.Context(), req.Session))
 	defer cancel()
 	out := provider.NewWriter(w, flusher)
 
@@ -310,6 +332,148 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"providers": data.Providers})
+}
+
+/* ---------------- 本地网关 ---------------- */
+
+func (s *Server) handleGatewayStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.Gateway.Status())
+}
+
+func (s *Server) handleV1Models(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"object": "list",
+		"data":   s.Gateway.Models(),
+	})
+}
+
+type v1ChatRequest struct {
+	Model    string             `json:"model"`
+	Messages []provider.Message `json:"messages"`
+	Tools    []any              `json:"tools,omitempty"`
+	Stream   bool               `json:"stream"`
+	Effort   string             `json:"reasoning_effort,omitempty"`
+}
+
+func (s *Server) handleV1Chat(w http.ResponseWriter, r *http.Request) {
+	var req v1ChatRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20))
+	if err := dec.Decode(&req); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid_json", "请求体不是合法 JSON")
+		return
+	}
+	if len(req.Messages) == 0 {
+		writeOpenAIError(w, http.StatusBadRequest, "messages_required", "messages 不能为空")
+		return
+	}
+	if !s.Gateway.Available() {
+		writeOpenAIError(w, http.StatusServiceUnavailable, "no_provider", "没有可用的 provider")
+		return
+	}
+
+	session := r.Header.Get("X-GQY-Session")
+	ctx := gateway.WithSession(r.Context(), session)
+	msg, usage, err := s.Gateway.Complete(ctx, provider.Request{
+		Messages: req.Messages,
+		Model:    req.Model,
+		Effort:   req.Effort,
+		Tools:    req.Tools,
+	})
+	if err != nil {
+		status := http.StatusBadGateway
+		code := "gateway_error"
+		var ue *provider.UpstreamError
+		if errors.As(err, &ue) {
+			status = ue.Status
+			if status < 400 || status > 599 {
+				status = http.StatusBadGateway
+			}
+			code = ue.Code
+		}
+		writeOpenAIError(w, status, code, err.Error())
+		return
+	}
+
+	model := req.Model
+	if model == "" {
+		model = s.Gateway.DefaultModel()
+	}
+	id := "chatcmpl-" + newRequestID()
+	created := time.Now().Unix()
+
+	if !req.Stream {
+		msg.Role = "assistant"
+		writeJSON(w, http.StatusOK, map[string]any{
+			"id":      id,
+			"object":  "chat.completion",
+			"created": created,
+			"model":   model,
+			"choices": []any{map[string]any{
+				"index":         0,
+				"message":       msg,
+				"finish_reason": finishReason(msg),
+			}},
+			"usage": usage,
+		})
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeOpenAIError(w, http.StatusInternalServerError, "no_flusher", "当前连接不支持流式")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	send := func(v any) {
+		b, _ := json.Marshal(v)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
+		flusher.Flush()
+	}
+	chunk := func(delta map[string]any, finish any) map[string]any {
+		return map[string]any{
+			"id": id, "object": "chat.completion.chunk", "created": created, "model": model,
+			"choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finish}},
+		}
+	}
+
+	runes := []rune(msg.Content)
+	for i := 0; i < len(runes); i += 24 {
+		end := i + 24
+		if end > len(runes) {
+			end = len(runes)
+		}
+		send(chunk(map[string]any{"content": string(runes[i:end])}, nil))
+	}
+	if len(msg.ToolCalls) > 0 {
+		send(chunk(map[string]any{"tool_calls": msg.ToolCalls}, nil))
+	}
+	send(chunk(map[string]any{}, finishReason(msg)))
+	if usage != nil {
+		send(map[string]any{
+			"id": id, "object": "chat.completion.chunk", "created": created, "model": model,
+			"choices": []any{}, "usage": usage,
+		})
+	}
+	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	flusher.Flush()
+}
+
+func finishReason(msg provider.Message) string {
+	if len(msg.ToolCalls) > 0 {
+		return "tool_calls"
+	}
+	return "stop"
+}
+
+func writeOpenAIError(w http.ResponseWriter, status int, code, message string) {
+	writeJSON(w, status, map[string]any{
+		"error": map[string]any{"message": message, "type": "gqy_error", "code": code},
+	})
 }
 
 /* ---------------- GitHub 只读账户 ---------------- */
