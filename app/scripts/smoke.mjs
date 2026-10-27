@@ -634,6 +634,21 @@ try {
   })()`);
   check('自定义术语可新增', glossaryAdded === 1, String(glossaryAdded));
 
+  const docAdded = await evaluate(`(() => {
+    const form = document.querySelector('[data-doc-form]');
+    form.querySelector('[name=title]').value = '测试文档';
+    form.querySelector('[name=content]').value = '知识测试内容';
+    form.requestSubmit();
+    const saved = JSON.parse(localStorage.getItem('claude-webchat:v7') || '{}');
+    return saved.knowledge ? saved.knowledge.length : 0;
+  })()`);
+  check('知识文档可新增', docAdded === 1, String(docAdded));
+
+  const systemCtx = await evaluate(`GQY.app.systemContext('测试文档')`);
+  check('system 上下文包含人设/记忆/知识库',
+    /【人设】/.test(systemCtx) && /【记忆】/.test(systemCtx) && /【知识库】/.test(systemCtx),
+    systemCtx.slice(0, 100));
+
   await evaluate('document.querySelector(\'[data-settings-tab="tools"]\').click()');
   await sleep(500);
   const toolsPanel = await evaluate(`(() => {
