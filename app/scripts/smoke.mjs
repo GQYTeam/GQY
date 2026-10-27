@@ -254,7 +254,7 @@ try {
   const md = await evaluate(`GQY.renderMarkdown('[点我](javascript:alert(1))\\n\\n![图](javascript:alert(2))')`);
   check('Markdown 拦截 javascript: 链接', !/javascript:/i.test(md) && /点我/.test(md), md);
 
-  /* 设置：五个 tab 都要能打开 */
+  /* 设置：四个 tab 都要能打开 */
   await evaluate('document.querySelector("#accountBtn").click()');
   await sleep(300);
   const tabs = await evaluate(`(() => {
@@ -267,11 +267,24 @@ try {
     }
     return out;
   })()`);
-  check('设置五个 tab 全部可切换', tabs.length === 5 && tabs.every((t) => t.endsWith(':true')), tabs.join(' '));
+  check('设置四个 tab 全部可切换', tabs.length === 4 && tabs.every((t) => t.endsWith(':true')), tabs.join(' '));
   const dataTab = await evaluate('!!document.querySelector("#importData") && !!document.querySelector("#exportData") && !!document.querySelector("#clearAll")');
   check('数据页有导入 / 导出 / 清空', dataTab === true);
   await evaluate('document.querySelector("#settingsLayer [data-settings-close]").click()');
   await sleep(200);
+
+  /* 用量独立浮层 + 扩展占位 */
+  const usageLayer = await evaluate(`(() => {
+    document.querySelector('#usageTopBtn').click();
+    const opened = !document.querySelector('#usageLayer').hidden;
+    document.querySelector('[data-usage-close]').click();
+    const closed = document.querySelector('#usageLayer').hidden;
+    document.querySelector('#extensionsBtn').click();
+    const extOpened = !document.querySelector('#extensionsLayer').hidden;
+    document.querySelector('[data-ext-close]').click();
+    return { opened, closed, extOpened };
+  })()`);
+  check('用量浮层可开可关、扩展入口占位可开', usageLayer.opened && usageLayer.closed && usageLayer.extOpened, JSON.stringify(usageLayer));
 
   /* 快捷键 */
   const shortcuts = await evaluate(`(() => {

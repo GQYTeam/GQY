@@ -92,6 +92,10 @@
       <div class="ws-scroll" id="wsList"></div>
 
       <div class="side-bottom">
+        <button class="side-action side-action-ext" id="extensionsBtn" type="button">
+          <span class="side-ico" aria-hidden="true"><svg class="ico"><use href="#i-panel"/></svg></span>
+          <span>扩展</span>
+        </button>
         <button class="account" id="accountBtn" type="button" aria-haspopup="dialog" title="设置">
           <span class="avatar" aria-hidden="true"><svg class="ico"><use href="#i-person"/></svg><i class="status-dot"></i></span>
           <span class="account-text"><b>gqy</b><small>个人空间</small></span>
@@ -112,6 +116,9 @@
         <h1 class="topbar-title" id="topbarTitle" hidden></h1>
       </div>
       <div class="topbar-right">
+        <button class="icon-btn" id="usageTopBtn" type="button" aria-haspopup="dialog" aria-label="查看用量" title="查看用量">
+          <svg class="ico" aria-hidden="true"><use href="#i-bolt"/></svg>
+        </button>
         <button class="icon-btn" id="fullBtn" type="button" aria-label="进入全屏" title="进入全屏">
           <svg class="ico" aria-hidden="true"><use href="#i-expand"/></svg>
         </button>
@@ -332,10 +339,6 @@
           <button class="settings-tab" id="settings-tab-data" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-data" data-settings-tab="data" tabindex="-1">
             <svg class="ico" aria-hidden="true"><use href="#i-folder"/></svg><span>数据</span>
           </button>
-          <button class="settings-tab" id="settings-tab-usage" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-usage" data-settings-tab="usage" tabindex="-1">
-            <svg class="ico" aria-hidden="true"><use href="#i-bolt"/></svg><span>用量</span>
-            <span class="settings-tab-badge" id="usageBadge">0 KB</span>
-          </button>
           <button class="settings-tab" id="settings-tab-about" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-about" data-settings-tab="about" tabindex="-1">
             <svg class="ico" aria-hidden="true"><use href="#i-help"/></svg><span>关于</span>
           </button>
@@ -350,17 +353,10 @@
         <section class="settings-panel is-active" id="settings-panel-appearance" role="tabpanel" aria-labelledby="settings-tab-appearance" data-settings-panel="appearance">
           <header class="panel-head">
             <h2>外观</h2>
-            <p>控制阅读密度、动效，以及下次打开时的默认状态。</p>
+            <p>控制显示、动效与布局的默认状态。</p>
           </header>
           <div class="panel-card">
-            <div class="setting-row">
-              <div class="setting-copy"><b>减少动效</b><small>关闭淡入、打字光标与过渡动画</small></div>
-              <button class="switch" id="motionSwitch" type="button" role="switch" aria-checked="false" aria-label="减少动效"></button>
-            </div>
-            <div class="setting-row">
-              <div class="setting-copy"><b>收起侧边栏</b><small>下次打开时保持收起，专注当前对话</small></div>
-              <button class="switch" id="sideSwitch" type="button" role="switch" aria-checked="false" aria-label="收起侧边栏"></button>
-            </div>
+            <div class="panel-list-row"><span>显示</span><b></b></div>
             <div class="setting-row">
               <div class="setting-copy"><b>正文字号</b><small>回复正文与代码一起缩放</small></div>
               <div class="seg" id="fontSeg" role="group" aria-label="正文字号">
@@ -368,6 +364,15 @@
                 <button type="button" data-font="normal" aria-pressed="true">中</button>
                 <button type="button" data-font="large" aria-pressed="false">大</button>
               </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy"><b>减少动效</b><small>关闭淡入、打字光标与过渡动画</small></div>
+              <button class="switch" id="motionSwitch" type="button" role="switch" aria-checked="false" aria-label="减少动效"></button>
+            </div>
+            <div class="panel-list-row"><span>布局</span><b></b></div>
+            <div class="setting-row">
+              <div class="setting-copy"><b>收起侧边栏</b><small>下次打开时保持收起，专注当前对话</small></div>
+              <button class="switch" id="sideSwitch" type="button" role="switch" aria-checked="false" aria-label="收起侧边栏"></button>
             </div>
           </div>
           <p class="panel-note">首屏动效只在打开空对话时出现；关闭后更安静。</p>
@@ -388,6 +393,7 @@
             <div class="panel-list-row"><span>当前模型</span><b id="aboutModelInline">默认模型</b></div>
             <div class="panel-list-row"><span>推理强度</span><b id="aboutEffortInline">High</b></div>
           </div>
+          <p class="panel-note">模型与推理强度在输入框左侧的「模型」按钮里切换，这里只读展示。</p>
         </section>
 
         <section class="settings-panel" id="settings-panel-data" role="tabpanel" aria-labelledby="settings-tab-data" data-settings-panel="data" hidden>
@@ -400,42 +406,15 @@
             <div class="set-actions">
               <button class="btn" id="exportData" type="button">导出对话 JSON</button>
               <button class="btn" id="importData" type="button">导入对话 JSON</button>
-              <button class="btn btn-danger" id="clearAll" type="button">清空全部</button>
+            </div>
+          </div>
+          <div class="panel-card panel-data is-danger">
+            <div class="panel-list-row"><span>危险区</span><b style="color:#b3452f">清空后不可恢复</b></div>
+            <div class="set-actions">
+              <button class="btn btn-danger" id="clearAll" type="button">清空全部对话</button>
             </div>
           </div>
           <p class="panel-note">清理浏览器站点数据也会删除这里的全部内容。</p>
-        </section>
-
-        <section class="settings-panel" id="settings-panel-usage" role="tabpanel" aria-labelledby="settings-tab-usage" data-settings-panel="usage" hidden>
-          <header class="panel-head">
-            <h2>用量</h2>
-            <p>本机 localStorage 占用，以及服务端聚合的会话、消息与真实 Token 用量。</p>
-          </header>
-          <div class="usage-top">
-            <div class="usage-ring-card">
-              <div class="usage-ring-wrap">
-                <svg viewBox="0 0 120 120" class="usage-ring" aria-hidden="true">
-                  <circle cx="60" cy="60" r="48" class="usage-ring-track"></circle>
-                  <circle cx="60" cy="60" r="48" class="usage-ring-val" id="usageRing"></circle>
-                </svg>
-                <div class="usage-ring-copy"><b id="usageStorageText">0 KB</b><small id="usageStoragePercent">0%</small></div>
-              </div>
-              <p class="usage-ring-label">localStorage 占用</p>
-              <span class="usage-ring-note">上限约 5 MB · 仅存本机</span>
-            </div>
-            <div class="usage-tiles">
-              <div class="usage-tile"><span>工作区</span><b id="usageWorkspaces">0</b></div>
-              <div class="usage-tile"><span>会话</span><b id="usageConvs">0</b></div>
-              <div class="usage-tile"><span>消息</span><b id="usageMessages">0</b></div>
-              <div class="usage-tile"><span>产物 / 附件</span><b id="usageAssets">0</b></div>
-            </div>
-          </div>
-          <div class="usage-card">
-            <div class="usage-card-head"><b>最近 7 天消息量</b><span id="usageWeekTotal">0 条</span></div>
-            <div class="usage-bars" id="usageBars" role="img" aria-label="最近 7 天消息量柱状图"></div>
-            <div class="usage-axis" id="usageAxis"></div>
-          </div>
-          <p class="usage-note">会话、消息、产物与 Token 用量来自服务端聚合；localStorage 占用为本机实时值。</p>
         </section>
 
         <section class="settings-panel" id="settings-panel-about" role="tabpanel" aria-labelledby="settings-tab-about" data-settings-panel="about" hidden>
@@ -459,6 +438,62 @@
           </div>
           <p class="panel-note">会话统计为本机数据；模型目录由服务端从 models.dev 拉取。</p>
         </section>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="usage-layer" id="usageLayer" hidden>
+  <div class="usage-backdrop" data-usage-close></div>
+  <section class="usage-window" role="dialog" aria-modal="true" aria-labelledby="usageTitle" tabindex="-1">
+    <header class="settings-titlebar">
+      <span class="settings-window-title" id="usageTitle">用量</span>
+      <button class="settings-close" type="button" data-usage-close aria-label="关闭用量" title="关闭（Esc）">
+        <svg class="ico" aria-hidden="true"><use href="#i-x"/></svg>
+      </button>
+    </header>
+    <div class="usage-body">
+      <div class="usage-top">
+        <div class="usage-ring-card">
+          <div class="usage-ring-wrap">
+            <svg viewBox="0 0 120 120" class="usage-ring" aria-hidden="true">
+              <circle cx="60" cy="60" r="48" class="usage-ring-track"></circle>
+              <circle cx="60" cy="60" r="48" class="usage-ring-val" id="usageRing"></circle>
+            </svg>
+            <div class="usage-ring-copy"><b id="usageStorageText">0 KB</b><small id="usageStoragePercent">0%</small></div>
+          </div>
+          <p class="usage-ring-label">localStorage 占用</p>
+          <span class="usage-ring-note">上限约 5 MB · 仅存本机</span>
+        </div>
+        <div class="usage-tiles">
+          <div class="usage-tile"><span>工作区</span><b id="usageWorkspaces">0</b></div>
+          <div class="usage-tile"><span>会话</span><b id="usageConvs">0</b></div>
+          <div class="usage-tile"><span>消息</span><b id="usageMessages">0</b></div>
+          <div class="usage-tile"><span>产物 / 附件</span><b id="usageAssets">0</b></div>
+        </div>
+      </div>
+      <div class="usage-card">
+        <div class="usage-card-head"><b>最近 7 天消息量</b><span id="usageWeekTotal">0 条</span></div>
+        <div class="usage-bars" id="usageBars" role="img" aria-label="最近 7 天消息量柱状图"></div>
+        <div class="usage-axis" id="usageAxis"></div>
+      </div>
+      <p class="usage-note">会话、消息、产物与 Token 用量来自服务端聚合；localStorage 占用为本机实时值。</p>
+    </div>
+  </section>
+</div>
+
+<div class="extensions-layer" id="extensionsLayer" hidden>
+  <div class="settings-backdrop" data-ext-close></div>
+  <section class="settings-window" id="extensionsWindow" role="dialog" aria-modal="true" aria-labelledby="extensionsTitle" tabindex="-1">
+    <header class="settings-titlebar">
+      <span class="settings-window-title" id="extensionsTitle">扩展</span>
+      <button class="settings-close" type="button" data-ext-close aria-label="关闭扩展" title="关闭（Esc）">
+        <svg class="ico" aria-hidden="true"><use href="#i-x"/></svg>
+      </button>
+    </header>
+    <div class="settings-body">
+      <div class="ext-body">
+        <p class="ext-empty">插件与模型管理即将接入。这里会像 Claude Customize / Cursor Customize 一样，统一管理插件、技能与模型市场。</p>
       </div>
     </div>
   </section>

@@ -85,3 +85,24 @@
 .usage-axis span{flex:1;text-align:center;font-size:10px;color:var(--faint)}
 .usage-note{margin:0 2px;font-size:11.5px;line-height:1.6;color:var(--faint)}
 .usage-note b{color:var(--muted)}
+
+/* ---------- usage / extensions 独立浮层 ---------- */
+.usage-layer{position:fixed;inset:0;z-index:150;display:flex;align-items:center;justify-content:center;padding:32px}
+.usage-layer[hidden]{display:none!important}
+.usage-backdrop{position:absolute;inset:0;background:rgba(31,28,23,.34);backdrop-filter:blur(6px) saturate(.92);animation:settingsFade .18s ease}
+.usage-window{position:relative;display:flex;flex-direction:column;width:min(680px,calc(100vw - 48px));max-height:min(560px,calc(100dvh - 64px));border-radius:14px;overflow:hidden;background:#ffffff;box-shadow:0 48px 120px -32px rgba(25,22,16,.55),0 0 0 1px rgba(40,36,28,.1);animation:settingsFade .2s ease}
+.usage-window:focus{outline:none}
+.usage-body{flex:1;min-height:0;overflow-y:auto;padding:22px 26px 24px;scrollbar-width:thin}
+.usage-body .usage-top{margin-bottom:12px}
+
+.extensions-layer{position:fixed;inset:0;z-index:150;display:flex;align-items:center;justify-content:center;padding:32px}
+.extensions-layer[hidden]{display:none!important}
+.ext-body{flex:1;min-height:0;overflow-y:auto;padding:22px 26px 24px;scrollbar-width:thin}
+.ext-empty{margin:0;font-size:13px;line-height:1.7;color:var(--muted)}
+
+/* 侧栏「扩展」入口 */
+.side-action-ext{margin-bottom:6px}
+
+/* ---------- 数据危险区 ---------- */
+.panel-data.is-danger{border-color:#e3c3b8;background:#fdf6f3}
+.panel-data.is-danger .set-actions{margin-top:10px}

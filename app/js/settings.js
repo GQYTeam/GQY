@@ -74,14 +74,13 @@
   }
 
   async function refreshUsage() {
-    if (!el.usageBadge || !el.usageStorageText) return;
+    if (!el.usageStorageText) return;
     const u = usageSnapshot();
     const pct = Math.min(100, u.bytes / u.budget * 100);
     const pctText = (pct >= 10 ? Math.round(pct) : pct.toFixed(1)) + '%';
     el.usageStorageText.textContent = formatBytes(u.bytes);
     el.usageStoragePercent.textContent = pctText + ' · 5 MB';
     el.usageWorkspaces.textContent = String(app.state.workspaces.length);
-    el.usageBadge.textContent = formatBytes(u.bytes);
     if (el.miniUsageText) el.miniUsageText.textContent = formatBytes(u.bytes);
     if (el.miniUsageBar) el.miniUsageBar.style.width = Math.max(2, pct) + '%';
     if (el.usageRing) {
@@ -120,7 +119,7 @@
   }
 
   function openSettingsTab(name, focusTab) {
-    const valid = ['appearance', 'chat', 'data', 'usage', 'about'];
+    const valid = ['appearance', 'chat', 'data', 'about'];
     app.settingsTab = valid.indexOf(name) >= 0 ? name : 'appearance';
     el.settingsTabs.forEach((tab) => {
       const on = tab.getAttribute('data-settings-tab') === app.settingsTab;
@@ -133,7 +132,6 @@
       panel.classList.toggle('is-active', on);
       panel.hidden = !on;
     });
-    if (app.settingsTab === 'usage') refreshUsage();
     if (focusTab) {
       const tab = el.settingsTabs.find((node) => node.getAttribute('data-settings-tab') === app.settingsTab);
       if (tab) tab.focus({ preventScroll: true });
@@ -159,6 +157,35 @@
     const trigger = app.settingsTrigger;
     app.settingsTrigger = null;
     if (trigger && trigger.isConnected && typeof trigger.focus === 'function') trigger.focus({ preventScroll: true });
+  }
+
+  function openUsage() {
+    if (!el.usageLayer) return;
+    refreshUsage();
+    el.usageLayer.hidden = false;
+    app.syncInert();
+    el.usageLayer.querySelector('.usage-window').focus({ preventScroll: true });
+  }
+
+  function closeUsage() {
+    if (!el.usageLayer || el.usageLayer.hidden) return;
+    el.usageLayer.hidden = true;
+    app.syncInert();
+    if (el.usageTopBtn) el.usageTopBtn.focus({ preventScroll: true });
+  }
+
+  function openExtensions() {
+    if (!el.extensionsLayer) return;
+    el.extensionsLayer.hidden = false;
+    app.syncInert();
+    el.extensionsLayer.querySelector('#extensionsWindow').focus({ preventScroll: true });
+  }
+
+  function closeExtensions() {
+    if (!el.extensionsLayer || el.extensionsLayer.hidden) return;
+    el.extensionsLayer.hidden = true;
+    app.syncInert();
+    if (el.extensionsBtn) el.extensionsBtn.focus({ preventScroll: true });
   }
 
   function trapTab(container, event) {
@@ -266,6 +293,7 @@
   }
 
   function clearEverything() {
+    if (!window.confirm('清空全部对话后不可恢复，确定继续？')) return;
     if (app.stream) app.stopStreaming();
     const settings = {
       model: app.state.model, effort: app.state.effort,
@@ -291,7 +319,8 @@
 
   Object.assign(app, {
     syncSettingsUI, applyFontSize, usageSnapshot, renderServerStatus, refreshUsage,
-    openSettingsTab, openSettings, closeSettings, trapTab, setView,
+    openSettingsTab, openSettings, closeSettings, openUsage, closeUsage,
+    openExtensions, closeExtensions, trapTab, setView,
     exportData, importData, setupDetectedApi, openWsDialog, applyReduceMotion, clearEverything
   });
 })();

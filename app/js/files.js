@@ -29,7 +29,8 @@
   }
 
   function syncInert() {
-    el.app.inert = !el.settingsLayer.hidden || !el.lightbox.hidden || !el.imgbox.hidden;
+    el.app.inert = !el.settingsLayer.hidden || !el.lightbox.hidden || !el.imgbox.hidden ||
+      (el.usageLayer && !el.usageLayer.hidden) || (el.extensionsLayer && !el.extensionsLayer.hidden);
   }
 
   /* ---------------- 图片灯箱 ---------------- */

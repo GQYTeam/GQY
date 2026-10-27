@@ -42,7 +42,7 @@
     mainRow: $('#mainRow'),
     settingsLayer: $('#settingsLayer'), settingsWindow: $('#settingsWindow'),
     settingsContent: $('#settingsContent'), settingsTabs: $$('.settings-tab'), settingsPanels: $$('.settings-panel'),
-    usageBadge: $('#usageBadge'), miniUsageText: $('#miniUsageText'), miniUsageBar: $('#miniUsageBar'),
+    miniUsageText: $('#miniUsageText'), miniUsageBar: $('#miniUsageBar'),
     usageRing: $('#usageRing'), usageStorageText: $('#usageStorageText'), usageStoragePercent: $('#usageStoragePercent'),
     usageWorkspaces: $('#usageWorkspaces'), usageConvs: $('#usageConvs'), usageMessages: $('#usageMessages'),
     usageAssets: $('#usageAssets'), usageBars: $('#usageBars'), usageAxis: $('#usageAxis'),
@@ -65,7 +65,9 @@
     dropzone: $('#dropzone'),
     clearAll: $('#clearAll'),
     fileInput: $('#fileInput'), importInput: $('#importInput'), importData: $('#importData'),
-    scrollBtn: $('#scrollBtn'), liveStatus: $('#liveStatus'), serverStatus: $('#serverStatus')
+    scrollBtn: $('#scrollBtn'), liveStatus: $('#liveStatus'), serverStatus: $('#serverStatus'),
+    usageTopBtn: $('#usageTopBtn'), usageLayer: $('#usageLayer'),
+    extensionsBtn: $('#extensionsBtn'), extensionsLayer: $('#extensionsLayer')
   };
 
   app.prefersReducedMotion = () => {

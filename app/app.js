@@ -99,6 +99,8 @@
   el.modelBtn.addEventListener('click', app.openModelMenu);
   el.micBtn.addEventListener('click', app.toggleMic);
   el.usageBtn.addEventListener('click', app.openContextPanel);
+  if (el.usageTopBtn) el.usageTopBtn.addEventListener('click', app.openUsage);
+  if (el.extensionsBtn) el.extensionsBtn.addEventListener('click', app.openExtensions);
   el.filesTree.addEventListener('click', (e) => {
     const row = e.target.closest('[role="treeitem"]');
     if (!row) return;
@@ -313,6 +315,8 @@
   el.exportData.addEventListener('click', app.exportData);
 
   $$('[data-settings-close]').forEach((node) => node.addEventListener('click', app.closeSettings));
+  $$('[data-usage-close]').forEach((node) => node.addEventListener('click', app.closeUsage));
+  $$('[data-ext-close]').forEach((node) => node.addEventListener('click', app.closeExtensions));
   el.settingsTabs.forEach((tab) => {
     tab.addEventListener('click', () => app.openSettingsTab(tab.getAttribute('data-settings-tab'), false));
     tab.addEventListener('keydown', (e) => {
@@ -355,7 +359,8 @@
     el.dropzone.hidden = true;
   }
   function overlayOpen() {
-    return !el.settingsLayer.hidden || !el.lightbox.hidden || !el.imgbox.hidden;
+    return !el.settingsLayer.hidden || !el.lightbox.hidden || !el.imgbox.hidden ||
+      (el.usageLayer && !el.usageLayer.hidden) || (el.extensionsLayer && !el.extensionsLayer.hidden);
   }
   window.addEventListener('dragenter', (e) => {
     if (!hasFileDrag(e) || overlayOpen()) return;
@@ -386,7 +391,8 @@
   document.addEventListener('keydown', (e) => {
     const mod = e.metaKey || e.ctrlKey;
     const typing = e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName);
-    const overlay = !el.settingsLayer.hidden || !el.lightbox.hidden || !el.imgbox.hidden;
+    const overlay = !el.settingsLayer.hidden || !el.lightbox.hidden || !el.imgbox.hidden ||
+      (el.usageLayer && !el.usageLayer.hidden) || (el.extensionsLayer && !el.extensionsLayer.hidden);
 
     if (mod && !e.shiftKey && !e.altKey && String(e.key).toLowerCase() === 'k') {
       e.preventDefault();
@@ -408,6 +414,8 @@
     if (e.key === 'Escape') {
       if (!el.imgbox.hidden) { app.closeImgbox(); return; }
       if (!el.lightbox.hidden) { app.closeLightbox(); return; }
+      if (el.extensionsLayer && !el.extensionsLayer.hidden) { app.closeExtensions(); return; }
+      if (el.usageLayer && !el.usageLayer.hidden) { app.closeUsage(); return; }
       if (!el.settingsLayer.hidden) { app.closeSettings(); return; }
       if (app.contextNode) { app.closeContextPanel(); return; }
       if (el.filesPanel.classList.contains('is-open')) { app.closeFilesPanel(); return; }
@@ -418,6 +426,8 @@
     }
     if (e.key === 'Tab') {
       if (!el.settingsLayer.hidden) { app.trapTab(el.settingsWindow, e); return; }
+      if (el.usageLayer && !el.usageLayer.hidden) { app.trapTab(el.usageLayer.querySelector('.usage-window'), e); return; }
+      if (el.extensionsLayer && !el.extensionsLayer.hidden) { app.trapTab(el.extensionsLayer.querySelector('#extensionsWindow'), e); return; }
       if (!el.lightbox.hidden) { app.trapTab(el.lightbox.querySelector('.lb-panel'), e); return; }
       if (!el.imgbox.hidden) { app.trapTab(el.imgbox.querySelector('.imgbox-panel'), e); return; }
     }
