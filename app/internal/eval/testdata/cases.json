@@ -1,0 +1,43 @@
+{
+  "version": "1",
+  "cases": [
+    {
+      "id": "echo-basic",
+      "input": "把我说的这句话原样回显：hello",
+      "expect": {
+        "should_call": true,
+        "tool": "plugin__echo__echo",
+        "arg_contains": {
+          "text": "hello"
+        },
+        "final_contains": ["hello"]
+      }
+    },
+    {
+      "id": "chat-no-tool",
+      "input": "你好，用一句话介绍一下你自己。",
+      "expect": {
+        "should_call": false,
+        "must_not_call": true,
+        "final_contains": ["你好"]
+      }
+    },
+    {
+      "id": "echo-injected-error",
+      "input": "回显：fault-injection",
+      "expect": {
+        "should_call": true,
+        "tool": "plugin__echo__echo",
+        "arg_contains": {
+          "text": "fault-injection"
+        }
+      },
+      "inject": {
+        "mode": "error",
+        "tool": "plugin__echo__echo",
+        "times": 1,
+        "message": "注入故障：示例错误"
+      }
+    }
+  ]
+}
