@@ -73,7 +73,7 @@ type Tool interface {
 
 ```
 messages（客户端历史）
-  → 无 system 时插入系统提示（工具清单 + 使用规则）
+  → 工具系统提示与客户端 system 合并成一条
   → Complete(带 tools schema)
   → 无 tool_calls：返回最终答案
   → 有 tool_calls：逐个 Execute，OnTool 回调发 SSE tool 事件，

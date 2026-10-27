@@ -189,6 +189,35 @@ func TestAskUserStillInterruptsWithTimeout(t *testing.T) {
 	}
 }
 
+func TestSystemContextMerge(t *testing.T) {
+	reg := tool.NewRegistry()
+	fake := &fakeCompleter{responses: []provider.Message{{Role: "assistant", Content: "ok"}}}
+	loop := &Loop{Upstream: fake, Registry: reg}
+	_, _, _, err := loop.Run(context.Background(), []provider.Message{
+		{Role: "system", Content: "人设：严谨"},
+		{Role: "user", Content: "hi"},
+	}, "m", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.requests) != 1 {
+		t.Fatalf("requests=%d", len(fake.requests))
+	}
+	msgs := fake.requests[0].Messages
+	systems := 0
+	for _, m := range msgs {
+		if m.Role == "system" {
+			systems++
+			if !strings.Contains(m.Content, "人设：严谨") || !strings.Contains(m.Content, "使用规则") {
+				t.Fatalf("system 未合并: %q", m.Content)
+			}
+		}
+	}
+	if systems != 1 {
+		t.Fatalf("system 消息数=%d, want 1: %+v", systems, msgs)
+	}
+}
+
 func TestParentContextCancellation(t *testing.T) {
 	slow := &testTool{name: "slow", delay: time.Second, respectCtx: true}
 	reg := tool.NewRegistry()

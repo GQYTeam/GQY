@@ -113,9 +113,19 @@ func (l *Loop) systemPrompt() string {
 func (l *Loop) Run(ctx context.Context, messages []provider.Message, model, effort string) (provider.Message, *provider.Usage, *tool.Ask, error) {
 	totalUsage := &provider.Usage{}
 	msgs := make([]provider.Message, 0, len(messages)+1)
-	// 工具系统提示始终插最前；客户端自带的 system（人设/记忆/知识）跟在后面。
-	msgs = append(msgs, provider.Message{Role: "system", Content: l.systemPrompt()})
-	msgs = append(msgs, messages...)
+	// 工具系统提示与客户端自带的 system（人设/记忆/知识）合并成一条，
+	// 避免部分上游只读取第一条 system 而丢掉人设/记忆。
+	system := l.systemPrompt()
+	for _, m := range messages {
+		if m.Role == "system" {
+			if m.Content != "" {
+				system += "\n\n" + m.Content
+			}
+			continue
+		}
+		msgs = append(msgs, m)
+	}
+	msgs = append([]provider.Message{{Role: "system", Content: system}}, msgs...)
 
 	for round := 0; round < maxRounds; round++ {
 		if ctx.Err() != nil {
