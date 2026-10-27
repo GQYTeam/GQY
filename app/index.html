@@ -514,7 +514,7 @@
           </div>
           <div class="panel-card" id="providerEditor"></div>
           <div class="panel-card" id="gatewayPanel"></div>
-          <p class="panel-note">供应商池从 $GQY_HOME/providers.json 读取；编辑待接入。</p>
+          <p class="panel-note">供应商与路由组写回 $GQY_HOME/providers.json、routing.json；密钥只写不读。</p>
         </section>
 
         <section class="settings-panel" id="settings-panel-personas" role="tabpanel" aria-labelledby="settings-tab-personas" data-settings-panel="personas" hidden>
@@ -540,7 +540,7 @@
               <button class="switch" id="voiceSwitch" type="button" role="switch" aria-checked="false" aria-label="语音输入"></button>
             </div>
           </div>
-          <p class="panel-note" id="voiceNote">声音与唤醒词待接入；语音输入依赖浏览器 SpeechRecognition。</p>
+          <p class="panel-note" id="voiceNote">语音输入依赖浏览器 SpeechRecognition；自定义声音与唤醒词未接入。</p>
         </section>
 
         <section class="settings-panel" id="settings-panel-packages" role="tabpanel" aria-labelledby="settings-tab-packages" data-settings-panel="packages" hidden>
