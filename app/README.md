@@ -93,6 +93,7 @@ agent loop 在 `internal/agent`：发请求 → 若模型返回工具调用则�
 - 响应开始前失败转移（最多 3 次）；429 / 5xx / 连接错误进入冷却；每 provider 有并发上限与排队超时。
 - 会话亲和：同一会话 id 固定 provider；状态在内存里，重启清空。
 - 请求日志：`$GQY_HOME/gateway/requests.jsonl`，不记录 prompt / 回复正文。
+- 设置 → 模型 & 供应商可以新增/编辑/删除 provider、设置默认模型、维护路由组；密钥写入 `providers.json`（0600），接口只返回 `keySet`。
 
 ```json
 // $GQY_HOME/providers.json
@@ -217,7 +218,12 @@ npm start                 # cmd/gqy-server 自动读取 .env，真实环境变�
 | `GET` | `/api/health` | `{ ok, provider: 'openai-compatible' \| 'mock' \| 'none', model, home, version }` |
 | `GET` | `/api/models` | models.dev 精简聊天模型列表（服务端缓存 6 小时），含 context / 模态 / 成本 / `toolCall` |
 | `GET` | `/api/usage` | 服务端聚合的真实用量：会话数、消息数、产物数、token、近 7 天消息量 |
-| `GET` | `/api/providers` | 读 `$GQY_HOME/providers.json`，返回 `{ providers: [...] }`（密钥只返回 `keySet` 状态） |
+| `GET` | `/api/providers` | provider 列表（密钥只返回 `keySet` 状态） |
+| `POST` | `/api/providers` | 新增/更新 provider；`api_key` 留空保留原密钥，写回 `providers.json` |
+| `DELETE` | `/api/providers/{id}` | 删除 provider；`env` 不可删 |
+| `POST` | `/api/routing/groups` | 新增/更新路由组 `{id, strategy, members}` |
+| `DELETE` | `/api/routing/groups/{id}` | 删除路由组 |
+| `PUT` | `/api/routing/default` | `{provider, model}` 设置默认模型 |
 | `GET` | `/api/gateway/status` | provider 健康、调用数、冷却、路由组、会话亲和 |
 | `POST` | `/api/chat` | 请求 `{ messages, model, effort, session }`，返回 SSE：`thinking` / `tool` / `text` / `question` / `done` / `error` / `end` |
 | `GET` | `/api/plugins` | 已发现插件、状态、actions、调用统计 |

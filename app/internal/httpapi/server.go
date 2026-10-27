@@ -147,6 +147,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/models", s.handleV1Models)
 	mux.HandleFunc("POST /v1/chat/completions", s.handleV1Chat)
 	mux.HandleFunc("GET /api/providers", s.handleProviders)
+	mux.HandleFunc("POST /api/providers", s.handleProviderUpsert)
+	mux.HandleFunc("DELETE /api/providers/{id}", s.handleProviderDelete)
+	mux.HandleFunc("POST /api/routing/groups", s.handleGroupUpsert)
+	mux.HandleFunc("DELETE /api/routing/groups/{id}", s.handleGroupDelete)
+	mux.HandleFunc("PUT /api/routing/default", s.handleDefaultSet)
 	mux.HandleFunc("GET /api/github/auth", s.handleGitHubAuth)
 	mux.HandleFunc("GET /api/github/callback", s.handleGitHubCallback)
 	mux.HandleFunc("GET /api/github/me", s.handleGitHubMe)
@@ -176,7 +181,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/tools/external", allow("POST"))
 	mux.HandleFunc("/v1/models", allow("GET"))
 	mux.HandleFunc("/v1/chat/completions", allow("POST"))
-	mux.HandleFunc("/api/providers", allow("GET"))
+	mux.HandleFunc("/api/providers", allow("GET, POST"))
+	mux.HandleFunc("/api/providers/{id}", allow("DELETE"))
+	mux.HandleFunc("/api/routing/groups", allow("POST"))
+	mux.HandleFunc("/api/routing/groups/{id}", allow("DELETE"))
+	mux.HandleFunc("/api/routing/default", allow("PUT"))
 	mux.HandleFunc("/api/github/auth", allow("GET"))
 	mux.HandleFunc("/api/github/callback", allow("GET"))
 	mux.HandleFunc("/api/github/me", allow("GET"))
@@ -359,19 +368,68 @@ func normalizeMessages(in []provider.Message) []provider.Message {
 /* ---------------- 供应商列表（providers.json） ---------------- */
 
 func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
-	raw, err := os.ReadFile(filepath.Join(s.Cfg.Home, "providers.json"))
-	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"providers": []any{}})
+	writeJSON(w, http.StatusOK, map[string]any{"providers": s.Gateway.ProviderViews()})
+}
+
+func (s *Server) handleProviderUpsert(w http.ResponseWriter, r *http.Request) {
+	var p gateway.Provider
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	if err := dec.Decode(&p); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_json", "请求体不是合法 JSON")
 		return
 	}
-	var data struct {
-		Providers []map[string]any `json:"providers"`
-	}
-	if err := json.Unmarshal(raw, &data); err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"providers": []any{}})
+	if err := s.Gateway.UpsertProvider(p); err != nil {
+		writeErr(w, http.StatusBadRequest, "provider_invalid", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"providers": data.Providers})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "providers": s.Gateway.ProviderViews()})
+}
+
+func (s *Server) handleProviderDelete(w http.ResponseWriter, r *http.Request) {
+	if err := s.Gateway.DeleteProvider(r.PathValue("id")); err != nil {
+		writeErr(w, http.StatusBadRequest, "provider_delete_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "providers": s.Gateway.ProviderViews()})
+}
+
+func (s *Server) handleGroupUpsert(w http.ResponseWriter, r *http.Request) {
+	var g gateway.Group
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	if err := dec.Decode(&g); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_json", "请求体不是合法 JSON")
+		return
+	}
+	if err := s.Gateway.UpsertGroup(g); err != nil {
+		writeErr(w, http.StatusBadRequest, "group_invalid", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": s.Gateway.Status()})
+}
+
+func (s *Server) handleGroupDelete(w http.ResponseWriter, r *http.Request) {
+	if err := s.Gateway.DeleteGroup(r.PathValue("id")); err != nil {
+		writeErr(w, http.StatusBadRequest, "group_delete_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": s.Gateway.Status()})
+}
+
+func (s *Server) handleDefaultSet(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+	if err := dec.Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_json", "请求体不是合法 JSON")
+		return
+	}
+	if err := s.Gateway.SetDefault(req.Provider, req.Model); err != nil {
+		writeErr(w, http.StatusBadRequest, "default_invalid", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": s.Gateway.Status()})
 }
 
 /* ---------------- 插件与工具 ---------------- */

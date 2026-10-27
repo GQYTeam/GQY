@@ -107,6 +107,7 @@ Go module（`gqy`，标准库，零第三方依赖），按 `cmd` / `internal` �
 - 路由组 `routing.json`：order / rotate / usage；响应开始前失败转移，429 / 5xx / 连接错误冷却。
 - 每 provider 信号量 + 排队超时；会话 id 做亲和；请求日志 `$GQY_HOME/gateway/requests.jsonl`。
 - `GET /v1/models`、`GET /api/gateway/status` 暴露目录与健康。
+- 设置页通过 `POST /api/providers`、`DELETE /api/providers/{id}`、`POST /api/routing/groups`、`PUT /api/routing/default` 管理 provider 与路由组；写回文件后立即生效。
 
 ### 插件
 

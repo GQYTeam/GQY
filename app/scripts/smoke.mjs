@@ -678,6 +678,36 @@ try {
   const accounts = await evaluate(`document.querySelector('#accountsPanel').textContent`);
   check('账户页渲染本机状态', /本机单用户/.test(accounts) && /GitHub/.test(accounts), accounts.slice(0, 80));
 
+  await evaluate('document.querySelector(\'[data-settings-tab="models"]\').click()');
+  await sleep(500);
+  const providerAdmin = await evaluate(`(async () => {
+    const form = document.querySelector('[data-provider-form]');
+    form.querySelector('[name=id]').value = 'smoke';
+    form.querySelector('[name=name]').value = 'Smoke';
+    form.querySelector('[name=base_url]').value = 'https://example.invalid/v1';
+    form.querySelector('[name=default_model]').value = 'smoke-model';
+    form.querySelector('[name=api_key]').value = 'test-key';
+    form.requestSubmit();
+    await new Promise((r) => setTimeout(r, 700));
+    const added = /smoke/.test(document.querySelector('#providerList').textContent);
+    const groupForm = document.querySelector('[data-group-form]');
+    groupForm.querySelector('[name=id]').value = 'smoke-group';
+    groupForm.querySelector('[name=strategy]').value = 'order';
+    groupForm.querySelector('[name=members]').value = 'smoke/smoke-model';
+    groupForm.requestSubmit();
+    await new Promise((r) => setTimeout(r, 600));
+    const grouped = /smoke-group/.test(document.querySelector('#providerEditor').textContent);
+    const delGroup = document.querySelector('[data-group-del="smoke-group"]');
+    if (delGroup) delGroup.click();
+    await new Promise((r) => setTimeout(r, 300));
+    const delProvider = document.querySelector('[data-provider-del="smoke"]');
+    if (delProvider) delProvider.click();
+    await new Promise((r) => setTimeout(r, 500));
+    const removed = !/smoke/.test(document.querySelector('#providerList').textContent);
+    return { added, grouped, removed };
+  })()`);
+  check('provider / 路由组可增删', providerAdmin.added && providerAdmin.grouped && providerAdmin.removed, JSON.stringify(providerAdmin));
+
   await evaluate('document.querySelector("#settingsLayer [data-settings-close]").click()');
   await sleep(200);
 

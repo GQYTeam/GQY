@@ -166,16 +166,73 @@
   async function loadProviders() {
     if (!el.providerList || !G.api || !G.api.providers) return;
     try {
-      const list = await G.api.providers();
+      const [list, status] = await Promise.all([
+        G.api.providers(),
+        G.api.gatewayStatus ? G.api.gatewayStatus().catch(() => null) : Promise.resolve(null)
+      ]);
+      app.providerCache = list;
+      if (status) app.gatewayCache = status;
       if (el.providerCount) el.providerCount.textContent = String(list.length);
-      el.providerList.innerHTML = list.map((p) =>
+      el.providerList.innerHTML = list.length ? list.map((p) =>
         '<div class="provider-row"><span class="provider-id">' + esc(p.id || '') + '</span>' +
-        '<span class="provider-name">' + esc(p.display_name || p.id || '') + '</span>' +
-        '<span class="provider-base">' + esc(p.base_url || '') + '</span></div>'
-      ).join('');
+        '<span class="provider-name">' + esc(p.name || p.id || '') + '</span>' +
+        '<span class="provider-base">' + esc(p.baseUrl || '') + '</span>' +
+        '<span class="feature-tag ' + (p.keySet ? 'ok' : 'warn') + '">' + (p.keySet ? '有密钥' : '无密钥') + '</span></div>'
+      ).join('') : '<p class="feature-empty">还没有 provider。填写下面的表单，或设置 GQY_API_KEY。</p>';
+      renderProviderEditor(list, status);
     } catch (err) {
       if (el.providerCount) el.providerCount.textContent = '0';
+      if (el.providerList) el.providerList.innerHTML = '<p class="feature-empty">provider 列表不可用。</p>';
     }
+  }
+
+  function renderProviderEditor(list, status) {
+    if (!el.providerEditor) return;
+    const editing = app.editingProvider ? (list || []).find((p) => p.id === app.editingProvider) : null;
+    const groups = (status && status.groups) || [];
+    const def = (status && status.default) || {};
+    const providerRows = (list || []).map((p) =>
+      '<div class="feature-row"><div class="feature-main"><b>' + esc(p.name || p.id) +
+      ' <span class="feature-tag">' + esc(p.id) + '</span></b><small>' +
+      esc(p.baseUrl || '') + ' · ' + esc(p.defaultModel || '') + ' · ' + (p.models || []).length + ' 个模型 · ' +
+      (p.calls || 0) + ' 调用 / ' + (p.failures || 0) + ' 失败' +
+      (p.cooldownUntil ? ' · 冷却至 ' + esc(p.cooldownUntil) : '') + '</small></div>' +
+      '<div class="feature-actions">' +
+      (p.id === 'env'
+        ? '<span class="feature-tag">由环境变量配置</span>'
+        : '<button class="btn" type="button" data-provider-edit="' + esc(p.id) + '">编辑</button>' +
+          '<button class="btn btn-danger" type="button" data-provider-del="' + esc(p.id) + '">删除</button>') +
+      '</div></div>'
+    ).join('');
+    const groupRows = groups.length ? groups.map((g) =>
+      '<div class="feature-row"><div class="feature-main"><b>' + esc(g.id) + ' <span class="feature-tag">' + esc(g.strategy) + '</span></b><small>' +
+      esc((g.members || []).join(', ')) + '</small></div>' +
+      '<div class="feature-actions"><button class="btn btn-danger" type="button" data-group-del="' + esc(g.id) + '">删除</button></div></div>'
+    ).join('') : '<p class="feature-empty">没有路由组。</p>';
+    el.providerEditor.innerHTML =
+      '<div class="panel-list-row"><span>' + (editing ? '编辑 provider' : '新增 provider') + '</span><b>' + esc(editing ? editing.id : '') + '</b></div>' +
+      '<form class="feature-form" data-provider-form>' +
+      '<div class="feature-form-row"><input name="id" type="text" maxlength="32" placeholder="id（小写，如 deepseek）" value="' + esc(editing ? editing.id : '') + '"' + (editing ? ' readonly' : '') + '>' +
+      '<input name="name" type="text" maxlength="60" placeholder="显示名称" value="' + esc(editing ? editing.name : '') + '"></div>' +
+      '<input name="base_url" type="text" maxlength="300" placeholder="https://api.example.com/v1" value="' + esc(editing ? editing.baseUrl : '') + '">' +
+      '<div class="feature-form-row"><input name="default_model" type="text" maxlength="120" placeholder="默认模型" value="' + esc(editing ? editing.defaultModel : '') + '">' +
+      '<input name="max_concurrency" type="number" min="1" max="64" placeholder="并发" value="' + (editing ? (editing.maxConcurrency || 2) : 2) + '"></div>' +
+      '<input name="api_key" type="password" maxlength="300" placeholder="' + (editing && editing.keySet ? '留空保留原密钥' : 'API key') + '" autocomplete="off">' +
+      '<div class="feature-form-row"><button class="btn btn-primary" type="submit">' + (editing ? '保存修改' : '新增 provider') + '</button>' +
+      (editing ? '<button class="btn" type="button" data-provider-cancel>取消编辑</button>' : '') + '</div></form>' +
+      '<div class="feature-list">' + (providerRows || '<p class="feature-empty">没有 provider。</p>') + '</div>' +
+      '<div class="panel-list-row" style="margin-top:14px"><span>默认模型</span><b>' + esc((def.provider || '—') + '/' + (def.model || '—')) + '</b></div>' +
+      '<form class="feature-form" data-default-form><div class="feature-form-row">' +
+      '<input name="provider" type="text" maxlength="32" placeholder="provider id" value="' + esc(def.provider || '') + '">' +
+      '<input name="model" type="text" maxlength="120" placeholder="model" value="' + esc(def.model || '') + '">' +
+      '<button class="btn" type="submit">设为默认</button></div></form>' +
+      '<div class="panel-list-row" style="margin-top:14px"><span>路由组</span><b>' + groups.length + ' 个</b></div>' +
+      '<form class="feature-form" data-group-form><div class="feature-form-row">' +
+      '<input name="id" type="text" maxlength="32" placeholder="组 id">' +
+      '<select name="strategy"><option value="order">order</option><option value="rotate">rotate</option><option value="usage">usage</option></select></div>' +
+      '<input name="members" type="text" maxlength="600" placeholder="成员，逗号分隔：deepseek/deepseek-chat,moonshot/kimi">' +
+      '<div class="feature-form-row"><button class="btn" type="submit">保存路由组</button></div></form>' +
+      '<div class="feature-list">' + groupRows + '</div>';
   }
 
   function openSettings() {
@@ -675,6 +732,49 @@
         app.save();
         renderKnowledgePanel();
         app.toast('文档已添加');
+        return;
+      }
+      if (form.matches('[data-provider-form]')) {
+        e.preventDefault();
+        const p = {
+          id: form.querySelector('[name=id]').value.trim(),
+          display_name: form.querySelector('[name=name]').value.trim(),
+          base_url: form.querySelector('[name=base_url]').value.trim(),
+          default_model: form.querySelector('[name=default_model]').value.trim(),
+          max_concurrency: Number(form.querySelector('[name=max_concurrency]').value) || 2,
+          api_key: form.querySelector('[name=api_key]').value,
+          protocol: 'openai-chat'
+        };
+        if (!p.id || !p.base_url || !p.default_model) { app.toast('id / base_url / 默认模型都要填'); return; }
+        const existing = (app.providerCache || []).find((x) => x.id === p.id);
+        p.models = existing && existing.models && existing.models.length ? existing.models : [p.default_model];
+        if (p.models.indexOf(p.default_model) < 0) p.models.push(p.default_model);
+        const old = app.editingProvider;
+        G.api.saveProvider(p).then(async () => {
+          if (old && old !== p.id) await G.api.deleteProvider(old).catch(() => {});
+          app.editingProvider = null;
+          await loadProviders();
+          renderGatewayPanel();
+          app.toast('provider 已保存');
+        }).catch((err) => app.toast(err.message));
+        return;
+      }
+      if (form.matches('[data-default-form]')) {
+        e.preventDefault();
+        const provider = form.querySelector('[name=provider]').value.trim();
+        const model = form.querySelector('[name=model]').value.trim();
+        G.api.setDefault(provider, model).then(() => { loadProviders(); renderGatewayPanel(); app.toast('默认模型已更新'); })
+          .catch((err) => app.toast(err.message));
+        return;
+      }
+      if (form.matches('[data-group-form]')) {
+        e.preventDefault();
+        const id = form.querySelector('[name=id]').value.trim();
+        const strategy = form.querySelector('[name=strategy]').value;
+        const members = form.querySelector('[name=members]').value.split(/[,，\s]+/).filter(Boolean);
+        if (!id || !members.length) { app.toast('组 id 和成员都要填'); return; }
+        G.api.saveGroup({ id: id, strategy: strategy, members: members }).then(() => { loadProviders(); renderGatewayPanel(); app.toast('路由组已保存'); })
+          .catch((err) => app.toast(err.message));
       }
     });
 
@@ -735,6 +835,33 @@
       if (unload) {
         const id = unload.getAttribute('data-plugin-unload');
         G.api.pluginUnload(id).then(() => { refreshPlugins(); app.toast('插件已卸载'); })
+          .catch((err) => app.toast(err.message));
+        return;
+      }
+      const editP = e.target.closest('[data-provider-edit]');
+      if (editP) {
+        app.editingProvider = editP.getAttribute('data-provider-edit');
+        renderProviderEditor(app.providerCache || [], app.gatewayCache || null);
+        return;
+      }
+      const cancelP = e.target.closest('[data-provider-cancel]');
+      if (cancelP) {
+        app.editingProvider = null;
+        renderProviderEditor(app.providerCache || [], app.gatewayCache || null);
+        return;
+      }
+      const delProv = e.target.closest('[data-provider-del]');
+      if (delProv) {
+        const id = delProv.getAttribute('data-provider-del');
+        if (!window.confirm('删除 provider「' + id + '」？')) return;
+        G.api.deleteProvider(id).then(() => { loadProviders(); renderGatewayPanel(); app.toast('provider 已删除'); })
+          .catch((err) => app.toast(err.message));
+        return;
+      }
+      const delGroup = e.target.closest('[data-group-del]');
+      if (delGroup) {
+        const id = delGroup.getAttribute('data-group-del');
+        G.api.deleteGroup(id).then(() => { loadProviders(); renderGatewayPanel(); app.toast('路由组已删除'); })
           .catch((err) => app.toast(err.message));
       }
     });
