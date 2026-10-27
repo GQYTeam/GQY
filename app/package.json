@@ -1,15 +1,14 @@
 {
   "name": "guqingying-chat",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "顾清影 · AI 对话工作台（前端零构建，Go 标准库后端）",
   "scripts": {
     "start": "go run server.go",
     "dev": "go run server.go",
     "build": "go build -trimpath -ldflags \"-s -w\" -o bin/gqy-server server.go",
-    "check": "node --check js/core.js && node --check js/api.js && node --check js/markdown.js && node --check js/replies.js && node --check js/samples.js && node --check js/clawd.js && node --check app.js && go vet server.go",
+    "check": "node --check js/core.js && node --check js/api.js && node --check js/markdown.js && node --check js/clawd.js && node --check app.js && go vet server.go",
     "smoke": "node scripts/smoke.mjs",
-    "demo": "python3 -m http.server 5173",
     "files": "find . -maxdepth 2 -type f -not -path './.git/*' -not -name '.DS_Store' | sort"
   },
   "engines": {

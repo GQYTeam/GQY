@@ -2,7 +2,7 @@
 /* 顾清影 · 冒烟测试（零依赖）
  *
  * 起一个 mock 服务端 + 无头 Chrome，跑一遍真实链路：
- *   启动 → 发送 → SSE 流式 → 会话落盘 → 文件面板 → 设置 → 看板 → 快捷键 → XSS 拦截
+ *   启动 → 发送 → SSE 流式 → 会话落盘 → 设置 → 快捷键 → XSS 拦截
  *
  * 用法：npm run smoke        需要本机装有 Chrome / Chromium（或设置 CHROME 环境变量）
  */
@@ -126,6 +126,14 @@ try {
   const wrongMethod = await fetch(BASE + '/api/chat').then((r) => r.status);
   check('错误方法返回 405', wrongMethod === 405, String(wrongMethod));
 
+  /* 模型目录：/api/models 返回 models.dev 精简结果（聊天模型） */
+  const modelsRes = await fetch(BASE + '/api/models').then((r) => r.json());
+  check('模型目录返回非空且过滤非聊天模型',
+    Array.isArray(modelsRes.models) && modelsRes.models.length > 0 &&
+    modelsRes.models.every((m) => m && typeof m.id === 'string' && typeof m.name === 'string') &&
+    modelsRes.models.some((m) => /deepseek/i.test(m.id + m.provider)),
+    JSON.stringify({ count: modelsRes.count, sample: modelsRes.models[0] }));
+
   chrome = spawn(chromePath, [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
     '--user-data-dir=' + PROFILE, '--remote-debugging-port=' + DBG,
@@ -184,7 +192,7 @@ try {
   await send('Page.navigate', { url: BASE + '/index.html' });
   await waitFor(() => evaluate('document.readyState === "complete" && !!document.querySelector("#composerInput")'), 10000, '页面加载');
 
-  check('首屏渲染种子会话', await waitFor(async () => (await evaluate('document.querySelectorAll(".msg").length')) >= 2, 5000, 'seed messages'));
+  check('首屏渲染空会话', await waitFor(async () => (await evaluate('document.querySelectorAll(".msg").length')) === 0, 5000, 'empty thread'));
   check('服务端状态已探测', await waitFor(async () => (await evaluate('document.querySelector("#serverStatus").textContent')).includes('已连接'), 5000, 'server status'));
 
   /* 新会话 → 真实 SSE 链路 */
@@ -232,33 +240,12 @@ try {
     return null;
   }, 8000, '会话镜像落盘').catch(() => null);
   check('会话镜像落盘（messages.jsonl / logs / manifest）',
-    !!sessionFile && sessionFile.manifest && sessionFile.tools > 0,
+    !!sessionFile && sessionFile.manifest,
     JSON.stringify(sessionFile));
 
   /* XSS：javascript: 链接必须降级成纯文本 */
   const md = await evaluate(`GQY.renderMarkdown('[点我](javascript:alert(1))\\n\\n![图](javascript:alert(2))')`);
   check('Markdown 拦截 javascript: 链接', !/javascript:/i.test(md) && /点我/.test(md), md);
-
-  /* 文件面板：回到种子会话点产物 */
-  await evaluate(`(() => {
-    const row = [...document.querySelectorAll('.conv-row')].find((r) => /PyTorch/.test(r.textContent));
-    if (row) row.click();
-    return !!row;
-  })()`);
-  await sleep(400);
-  const hasArtifact = await evaluate('!!document.querySelector(".artifact")');
-  check('种子会话有产物卡片', hasArtifact === true);
-  if (hasArtifact) {
-    await evaluate('document.querySelector(".artifact").click()');
-    await sleep(300);
-    const panel = await evaluate(`(() => ({
-      open: document.querySelector('#filesPanel').classList.contains('is-open'),
-      rows: document.querySelectorAll('.fp-row').length,
-      code: (document.querySelector('#filesCode').textContent || '').length
-    }))()`);
-    check('文件面板打开并渲染代码', panel.open && panel.rows > 3 && panel.code > 40, JSON.stringify(panel));
-    await evaluate('document.querySelector("#filesClose").click()');
-  }
 
   /* 设置：五个 tab 都要能打开 */
   await evaluate('document.querySelector("#accountBtn").click()');
@@ -274,21 +261,9 @@ try {
     return out;
   })()`);
   check('设置五个 tab 全部可切换', tabs.length === 5 && tabs.every((t) => t.endsWith(':true')), tabs.join(' '));
-  const dataTab = await evaluate('!!document.querySelector("#importData") && !!document.querySelector("#exportData")');
-  check('数据页有导入 / 导出', dataTab === true);
+  const dataTab = await evaluate('!!document.querySelector("#importData") && !!document.querySelector("#exportData") && !!document.querySelector("#clearAll")');
+  check('数据页有导入 / 导出 / 清空', dataTab === true);
   await evaluate('document.querySelector("#settingsLayer [data-settings-close]").click()');
-  await sleep(200);
-
-  /* 看板 */
-  await evaluate('document.querySelector("#boardNavBtn").click()');
-  await sleep(300);
-  const board = await evaluate(`(() => ({
-    visible: !document.querySelector('#boardView').hidden,
-    tasks: document.querySelectorAll('.task-item').length,
-    done: document.querySelector('#boardRingDone').textContent
-  }))()`);
-  check('看板渲染任务与环形进度', board.visible && board.tasks === 9 && board.done !== '', JSON.stringify(board));
-  await evaluate('document.querySelector("#boardBack").click()');
   await sleep(200);
 
   /* 快捷键 */
@@ -322,7 +297,7 @@ try {
 
   /* 导入：导出结构能原样回灌 */
   const imported = await evaluate(`(async () => {
-    const data = JSON.parse(localStorage.getItem('claude-webchat:v6'));
+    const data = JSON.parse(localStorage.getItem('claude-webchat:v7'));
     data.workspaces[0].name = 'imported-ws';
     window.confirm = () => true;
     const dt = new DataTransfer();

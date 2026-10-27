@@ -89,6 +89,7 @@ type app struct {
 	root   string
 	cfg    config
 	client *http.Client
+	models *modelCatalog
 }
 
 // requestID 给每个请求一个短随机 id，串进日志，便于生产环境对账。
@@ -130,6 +131,13 @@ func main() {
 	a := &app{
 		root: root,
 		cfg:  cfg,
+		models: newModelCatalog(&http.Client{
+			Transport: &http.Transport{
+				Proxy:                 http.ProxyFromEnvironment,
+				ResponseHeaderTimeout: 30 * time.Second,
+				MaxIdleConnsPerHost:   4,
+			},
+		}),
 		client: &http.Client{
 			// 不设整体超时：SSE 是长连接。只在等响应头时兜底。
 			Transport: &http.Transport{
@@ -247,6 +255,7 @@ func loadDotEnv(name string) {
 func (a *app) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", a.handleHealth)
+	mux.HandleFunc("GET /api/models", a.handleModels)
 	mux.HandleFunc("POST /api/chat", a.handleChat)
 	mux.HandleFunc("GET /api/sessions", a.handleSessionList)
 	mux.HandleFunc("GET /api/sessions/{id}", a.handleSessionGet)
@@ -260,6 +269,7 @@ func (a *app) routes() http.Handler {
 		}
 	}
 	mux.HandleFunc("/api/health", allow("GET"))
+	mux.HandleFunc("/api/models", allow("GET"))
 	mux.HandleFunc("/api/chat", allow("POST"))
 	mux.HandleFunc("/api/sessions", allow("GET"))
 	mux.HandleFunc("/api/sessions/{id}", allow("GET, PUT, DELETE"))
@@ -332,6 +342,181 @@ func (a *app) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"model":    a.cfg.model,
 		"home":     a.cfg.home,
 		"version":  apiVersion,
+	})
+}
+
+/* ---------------- 模型目录（models.dev） ---------------- */
+
+// models.dev 的 api.json 结构：顶层按 provider id 键控，每个 provider 下有
+// models（按模型 id 键控）。这里只解析需要用到的字段，其余原样忽略。
+type mdProvider struct {
+	ID     string             `json:"id"`
+	Name   string             `json:"name"`
+	API    string             `json:"api"`
+	Models map[string]mdModel `json:"models"`
+}
+
+type mdModel struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Family      string `json:"family"`
+	Type        string `json:"type"`
+	Reasoning   bool   `json:"reasoning"`
+	ToolCall    bool   `json:"tool_call"`
+	Status      string `json:"status"`
+	Limit       struct {
+		Context int `json:"context"`
+		Output  int `json:"output"`
+	} `json:"limit"`
+}
+
+// 非对话模型类型：chat 模型不带 type 字段（或 type 为空）。这里显式排除
+// 专用类型，避免把 embedding / 语音 / 图像 / 视频生成模型混进选择器。
+var nonChatTypes = map[string]bool{
+	"embedding":     true,
+	"speech":        true,
+	"tts":           true,
+	"stt":           true,
+	"transcription": true,
+	"image":         true,
+	"video":         true,
+	"audio":         true,
+	"reranking":     true,
+	"rerank":        true,
+	"moderation":    true,
+	"decision":      true,
+}
+
+type modelEntry struct {
+	Key          string `json:"key"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Provider     string `json:"provider"`
+	ProviderName string `json:"providerName"`
+	API          string `json:"api"`
+	Description  string `json:"description,omitempty"`
+	Family       string `json:"family,omitempty"`
+	Reasoning    bool   `json:"reasoning"`
+	ToolCall     bool   `json:"toolCall"`
+	Context      int    `json:"context"`
+	Output       int    `json:"output"`
+	Status       string `json:"status,omitempty"`
+}
+
+type modelCatalog struct {
+	client  *http.Client
+	mu      sync.Mutex
+	data    []modelEntry
+	fetched time.Time
+}
+
+const (
+	modelsURL    = "https://models.dev/api.json"
+	modelsTTL    = 6 * time.Hour
+	maxModelsRes = 8 << 20
+)
+
+func newModelCatalog(client *http.Client) *modelCatalog {
+	return &modelCatalog{client: client}
+}
+
+func (mc *modelCatalog) snapshot() ([]modelEntry, error) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	if mc.data != nil && time.Since(mc.fetched) < modelsTTL {
+		return mc.data, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+	if err != nil {
+		return mc.staleOrErr(err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "gqy/"+strconv.Itoa(apiVersion))
+
+	resp, err := mc.client.Do(req)
+	if err != nil {
+		return mc.staleOrErr(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return mc.staleOrErr(fmt.Errorf("models.dev 返回 %d", resp.StatusCode))
+	}
+
+	limited := io.LimitReader(resp.Body, maxModelsRes)
+	var raw map[string]mdProvider
+	if err := json.NewDecoder(limited).Decode(&raw); err != nil {
+		return mc.staleOrErr(err)
+	}
+
+	entries := make([]modelEntry, 0, 2048)
+	for _, p := range raw {
+		for _, m := range p.Models {
+			if !isChatModel(m) {
+				continue
+			}
+			// id 是上游 /chat/completions 真正收的模型名（api.json 里不带 provider 前缀）；
+			// key 是 provider/id 形式的唯一标识，避免同名模型互相覆盖。
+			id := m.ID
+			key := p.ID + "/" + id
+			entries = append(entries, modelEntry{
+				Key:          key,
+				ID:           id,
+				Name:         m.Name,
+				Provider:     p.ID,
+				ProviderName: p.Name,
+				API:          p.API,
+				Description:  m.Description,
+				Family:       m.Family,
+				Reasoning:    m.Reasoning,
+				ToolCall:     m.ToolCall,
+				Context:      m.Limit.Context,
+				Output:       m.Limit.Output,
+				Status:       m.Status,
+			})
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Key < entries[j].Key })
+
+	mc.data = entries
+	mc.fetched = time.Now()
+	return entries, nil
+}
+
+// staleOrErr 刷新失败时若有旧缓存就用旧缓存，否则报错。
+func (mc *modelCatalog) staleOrErr(err error) ([]modelEntry, error) {
+	if mc.data != nil {
+		return mc.data, nil
+	}
+	return nil, err
+}
+
+func isChatModel(m mdModel) bool {
+	if m.Type != "" && nonChatTypes[m.Type] {
+		return false
+	}
+	// 没有 id/name 的占位条目直接跳过
+	if strings.TrimSpace(m.ID) == "" && strings.TrimSpace(m.Name) == "" {
+		return false
+	}
+	return true
+}
+
+func (a *app) handleModels(w http.ResponseWriter, r *http.Request) {
+	entries, err := a.models.snapshot()
+	if err != nil {
+		log.Printf("[models] 拉取 models.dev 失败：%v", err)
+		writeErr(w, http.StatusBadGateway, "catalog_unavailable", "暂时无法获取模型列表，请稍后再试")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"models":    entries,
+		"count":     len(entries),
+		"source":    modelsURL,
+		"fetchedAt": a.models.fetched.UTC().Format(time.RFC3339),
 	})
 }
 

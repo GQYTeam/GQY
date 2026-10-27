@@ -1,7 +1,7 @@
 /* 顾清影 · 后端适配层（可选；file:// 下自动禁用）
  *
  * 只做三件事：探测服务端、流式聊天、会话镜像。
- * 探测失败时前端保持本地演示模式，不报错、不阻塞。
+ * 探测失败时前端显示「未连接服务端」，不报错、不阻塞。
  */
 (() => {
   'use strict';
@@ -93,6 +93,20 @@
     return readStream(res, onEvent || (() => {}));
   }
 
+  /* 模型目录：由服务端从 models.dev 拉取并缓存，前端只消费精简结果 */
+  async function models() {
+    const res = await fetch('/api/models', {
+      headers: { accept: 'application/json' },
+      cache: 'no-store'
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new Error(detail.message || '模型列表获取失败');
+    }
+    const data = await res.json();
+    return data.models || [];
+  }
+
   /* 会话镜像：失败只记一次日志，不影响本地使用 */
   let syncTimer = 0;
   let syncChain = Promise.resolve();
@@ -114,5 +128,5 @@
     }, delay == null ? 1200 : delay);
   }
 
-  G.api = { detect, available, info, chat, syncSession };
+  G.api = { detect, available, info, chat, models, syncSession };
 })();

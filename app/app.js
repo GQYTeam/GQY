@@ -1,20 +1,18 @@
-/* 顾清影 · 对话窗口逻辑（纯前端演示） */
+/* 顾清影 · 对话窗口逻辑（生产版） */
 
 (() => {
   'use strict';
 
-  /* 共享模块（见 js/ 目录，core/markdown/replies/samples/clawd 先于本文件加载） */
+  /* 共享模块（见 js/ 目录，core/markdown/clawd 先于本文件加载） */
   const G = window.GQY || {};
   const {
     HOUR, DAY, uid, now, esc, timeAgo, titleFrom, stamp,
     estimateTokens, fmtTok, fmtDur, formatBytes, formatCount,
-    renderMarkdown, highlightHTML, codeHTML, generateReply, artifactFrom, FILES_MOCK
+    renderMarkdown, highlightHTML, codeHTML
   } = G;
 
-  const STORE_KEY = 'claude-webchat:v6';
-  const MODELS = ['DeepSeek-V4.1-Flash', 'DeepSeek-V4.1-Pro'];
+  const STORE_KEY = 'claude-webchat:v7';
   const FONT_SIZES = { small: '14.2px', normal: '15.3px', large: '16.6px' };
-  const SPEEDS = { slow: 1.7, normal: 1, fast: 0.55 };
   const EFFORTS = ['Low', 'Medium', 'High'];
   const EFFORT_DESC = {
     Low: '更快，回答简短，适合简单问题',
@@ -37,21 +35,17 @@
     micBtn: $('#micBtn'), sendBtn: $('#sendBtn'), attachRow: $('#attachRow'),
     toast: $('#toast'),
     wsDialog: $('#wsDialog'), wsForm: $('#wsForm'), wsName: $('#wsName'),
-    mainRow: $('#mainRow'), boardView: $('#boardView'), boardNavBtn: $('#boardNavBtn'), boardBack: $('#boardBack'),
-    boardDateText: $('#boardDateText'), boardTaskList: $('#boardTaskList'), boardTaskBar: $('#boardTaskBar'),
-    boardTaskMeta: $('#boardTaskMeta'), boardResetTasks: $('#boardResetTasks'), boardRecent: $('#boardRecent'),
-    boardRing: $('#boardRing'), boardRingDone: $('#boardRingDone'), boardRingTotal: $('#boardRingTotal'),
-    boardDoneCount: $('#boardDoneCount'), boardDoingCount: $('#boardDoingCount'), boardTodoCount: $('#boardTodoCount'),
+    mainRow: $('#mainRow'),
     settingsLayer: $('#settingsLayer'), settingsWindow: $('#settingsWindow'),
     settingsContent: $('#settingsContent'), settingsTabs: $$('.settings-tab'), settingsPanels: $$('.settings-panel'),
     usageBadge: $('#usageBadge'), miniUsageText: $('#miniUsageText'), miniUsageBar: $('#miniUsageBar'),
     usageRing: $('#usageRing'), usageStorageText: $('#usageStorageText'), usageStoragePercent: $('#usageStoragePercent'),
     usageWorkspaces: $('#usageWorkspaces'), usageConvs: $('#usageConvs'), usageMessages: $('#usageMessages'),
     usageAssets: $('#usageAssets'), usageBars: $('#usageBars'), usageAxis: $('#usageAxis'),
-    usageWeekTotal: $('#usageWeekTotal'), usageTokens: $('#usageTokens'),
+    usageWeekTotal: $('#usageWeekTotal'),
     aboutModels: $$('.about-model'), aboutModelInline: $('#aboutModelInline'), aboutEffortInline: $('#aboutEffortInline'),
     motionSwitch: $('#motionSwitch'), sideSwitch: $('#sideSwitch'),
-    fontSeg: $('#fontSeg'), speedSeg: $('#speedSeg'), thinkSwitch: $('#thinkSwitch'),
+    fontSeg: $('#fontSeg'), thinkSwitch: $('#thinkSwitch'),
     exportData: $('#exportData'),
     lightbox: $('#lightbox'), lbTitle: $('#lbTitle'), lbCode: $('#lbCode'), lbCopy: $('#lbCopy'),
     lbPath: $('#lbPath'), lbLang: $('#lbLang'), lbLines: $('#lbLines'), lbAdded: $('#lbAdded'),
@@ -65,7 +59,7 @@
     imgbox: $('#imgbox'), imgboxImg: $('#imgboxImg'), imgboxTitle: $('#imgboxTitle'), imgboxMeta: $('#imgboxMeta'),
     imgboxCount: $('#imgboxCount'), imgboxPrev: $('#imgboxPrev'), imgboxNext: $('#imgboxNext'), imgboxSource: $('#imgboxSource'),
     dropzone: $('#dropzone'),
-    seedReset: $('#seedReset'), clearAll: $('#clearAll'),
+    clearAll: $('#clearAll'),
     fileInput: $('#fileInput'), importInput: $('#importInput'), importData: $('#importData'),
     scrollBtn: $('#scrollBtn'), liveStatus: $('#liveStatus'), serverStatus: $('#serverStatus')
   };
@@ -78,148 +72,26 @@
 
   /* ---------------- state ---------------- */
 
-  function defaultBoardTasks() {
-    return [
-      { id: 'bt-dataset', title: '整理 dataset 目录与标签映射', status: 'done' },
-      { id: 'bt-loader', title: '补上 DataLoader 与 collate_fn', status: 'done' },
-      { id: 'bt-baseline', title: '跑通第一个训练 baseline', status: 'done' },
-      { id: 'bt-seed', title: '固定随机种子并记录日志', status: 'done' },
-      { id: 'bt-val', title: '补验证集评估脚本', status: 'done' },
-      { id: 'bt-aug', title: '试两组数据增强实验', status: 'done' },
-      { id: 'bt-log', title: '接入 wandb 记录实验', status: 'doing' },
-      { id: 'bt-settings', title: '设置浮窗与用量可视化', status: 'doing' },
-      { id: 'bt-board', title: '看板任务与对话联动', status: 'todo' }
-    ];
-  }
-
   function seedState() {
-    const t = now();
-    const pyMessages = [
-      {
-        id: uid(), role: 'user', ts: t - 2 * DAY,
-        text: '创建一个 PyTorch 数据集实例，读取按文件夹分类的图片，并拆出验证集。'
-      },
-      {
-        id: uid(), role: 'assistant', ts: t - 2 * DAY + 12000,
-        thinkMs: 6,
-        thinking: [
-          '用户要一个按文件夹分类的图片数据集，并拆出验证集。',
-          '',
-          '- 目录结构假定为 root/<类别>/<图片>',
-          '- 用 Dataset + PIL 手写，比 ImageFolder 更容易解释标签来源',
-          '- random_split 要固定 seed，否则每次划分不一致',
-          '- 只依赖 torch 和 PIL，不引入 torchvision'
-        ].join('\n'),
-        tools: [
-          {
-            name: '读取目录', detail: 'data/train', icon: 'i-folder', status: 'done', ms: 240,
-            args: [['path', 'data/train'], ['match', '*.jpg *.jpeg *.png']],
-            output: '3 个类别 · 1,280 张图片'
-          },
-          {
-            name: '写入文件', detail: 'dataset.py', icon: 'i-pencil', status: 'done', ms: 180,
-            args: [['path', 'dataset.py'], ['lines', '62'], ['encoding', 'utf-8']],
-            output: '已写入 62 行'
-          },
-          {
-            name: '运行代码', detail: 'python -c "len(ds)"', icon: 'i-bolt', status: 'done', ms: 420,
-            args: [['cmd', 'python -c "len(ds)"'], ['cwd', '~/项目/vision']],
-            output: '1280 条样本 · 标签 3 类'
-          }
-        ],
-        text: [
-          '下面这版只处理本地文件夹，训练集与验证集按 8:2 随机拆分：',
-          '',
-          '```python',
-          'from pathlib import Path',
-          'from PIL import Image',
-          'from torch.utils.data import Dataset, random_split',
-          '',
-          'class ImageFolderDataset(Dataset):',
-          '    def __init__(self, root, transform=None):',
-          '        self.items = []',
-          '        self.transform = transform',
-          '        for label_dir in sorted(Path(root).iterdir()):',
-          '            if not label_dir.is_dir():',
-          '                continue',
-          '            for img in label_dir.glob("*"):',
-          '                if img.suffix.lower() in {".jpg", ".jpeg", ".png"}:',
-          '                    self.items.append((img, label_dir.name))',
-          '',
-          '    def __len__(self):',
-          '        return len(self.items)',
-          '',
-          '    def __getitem__(self, index):',
-          '        path, label = self.items[index]',
-          '        image = Image.open(path).convert("RGB")',
-          '        if self.transform:',
-          '            image = self.transform(image)',
-          '        return image, label',
-          '```',
-          '',
-          '拆验证集只需要一行：',
-          '',
-          '```python',
-          'dataset = ImageFolderDataset("data/train", transform=transform)',
-          'train_set, val_set = random_split(',
-          '    dataset, [0.8, 0.2],',
-          '    generator=torch.Generator().manual_seed(42),',
-          ')',
-          '```',
-          '',
-          '两个提醒：',
-          '',
-          '- 标签用 `label_dir.name` 时，记得在训练前统一映射成整数；',
-          '- 目录很大时 `glob("*")` 会慢，建议提前生成索引文件，或在 Dataset 里做惰性扫描。',
-          '',
-          '接下来可以做：',
-          '',
-          '- [x] 目录 → 标签映射',
-          '- [x] 训练 / 验证 8:2 拆分',
-          '- [ ] 缓存索引文件（大数据集）',
-          '  - 先扫一遍目录，写 `index.json`',
-          '  - 后续只读索引，启动更快',
-          '',
-          '对象文档在这里：',
-          '',
-          'https://pytorch.org/tutorials/beginner/basics/data_tutorial.html'
-        ].join('\n')
-      }
-    ];
-
-    const demo = pyMessages[1];
-    demo.artifact = artifactFrom(demo.text, 'dataset.py', '~/项目/vision');
-    demo.question = {
-      header: 'Dataset 下一步',
-      text: 'Dataset 已经能跑了，接下来先补哪一块？',
-      multiSelect: false,
-      options: [
-        { label: '补上 DataLoader', desc: '批量加载 + collate_fn，顺手把 shuffle 打开' },
-        { label: '只补类别映射', desc: '把 label 字符串映射成整数，改动最小' },
-        { label: '先这样，够用了', desc: '保留现在的实现，之后再说' }
-      ],
-      answer: null
-    };
-
+    const wsId = uid();
+    const convId = uid();
     return {
       workspaces: [
         {
-          id: 'ws-gqy', name: 'gqy', convs: [
-            { id: 'conv-demo', title: '创建 PyTorch 数据集实例代码', messages: pyMessages, updatedAt: t - 2 * DAY }
-          ]
+          id: wsId,
+          name: 'gqy',
+          convs: [{ id: convId, title: '新会话', messages: [], updatedAt: now() }]
         }
       ],
-      activeWorkspaceId: 'ws-gqy',
-      activeConvId: 'conv-demo',
-      model: MODELS[0],
+      activeWorkspaceId: wsId,
+      activeConvId: convId,
+      model: '',
       effort: 'High',
       fontSize: 'normal',
-      streamSpeed: 'normal',
       thinkOpen: false,
       sidebarCollapsed: false,
       reduceMotion: prefersReducedMotion(),
-      drafts: {},
-      boardTasks: defaultBoardTasks()
+      drafts: {}
     };
   }
 
@@ -233,24 +105,15 @@
         if (!Array.isArray(ws.convs)) ws.convs = [];
         ws.convs.forEach((c) => { if (!Array.isArray(c.messages)) c.messages = []; });
       });
-      s.model = MODELS.indexOf(s.model) >= 0 ? s.model : MODELS[0];
       s.effort = EFFORTS.indexOf(s.effort) >= 0 ? s.effort : 'High';
       s.fontSize = FONT_SIZES[s.fontSize] ? s.fontSize : 'normal';
-      s.streamSpeed = SPEEDS[s.streamSpeed] ? s.streamSpeed : 'normal';
       s.thinkOpen = !!s.thinkOpen;
       s.sidebarCollapsed = !!s.sidebarCollapsed;
       s.reduceMotion = typeof s.reduceMotion === 'boolean' ? s.reduceMotion : prefersReducedMotion();
       s.drafts = (s.drafts && typeof s.drafts === 'object' && !Array.isArray(s.drafts)) ? s.drafts : {};
       Object.keys(s.drafts).forEach((k) => { if (typeof s.drafts[k] !== 'string') delete s.drafts[k]; });
-      const validTaskStatus = ['done', 'doing', 'todo'];
-      s.boardTasks = Array.isArray(s.boardTasks) && s.boardTasks.length
-        ? s.boardTasks.filter((t) => t && t.id && t.title).map((t) => ({
-            id: String(t.id),
-            title: String(t.title),
-            status: validTaskStatus.indexOf(t.status) >= 0 ? t.status : 'todo'
-          }))
-        : defaultBoardTasks();
-      if (!s.boardTasks.length) s.boardTasks = defaultBoardTasks();
+      // model 允许为空字符串（未选择时回落到服务端默认）
+      s.model = typeof s.model === 'string' ? s.model : '';
       let ws = s.workspaces.find((w) => w.id === s.activeWorkspaceId) || s.workspaces[0];
       s.activeWorkspaceId = ws.id;
       let conv = ws.convs.find((c) => c.id === s.activeConvId);
@@ -266,8 +129,6 @@
     }
   }
 
-  let freshSeed = false;
-  try { freshSeed = !localStorage.getItem(STORE_KEY); } catch (err) {}
   let state = loadState();
   let view = 'chat';
   let stream = null;
@@ -287,8 +148,10 @@
   let imgboxIndex = 0;
   let imgboxTrigger = null;
   let lbTrigger = null;
-  let boardTimer = 0;
-  let usageTimer = 0;
+
+  /* 模型目录：由服务端从 models.dev 拉取，前端缓存并搜索 */
+  let modelCatalog = [];
+  let modelCatalogLoading = false;
 
   const dropBlobUrls = (key, value) =>
     (key === 'url' && typeof value === 'string' && value.indexOf('blob:') === 0) ? undefined : value;
@@ -728,8 +591,9 @@
   }
 
   function activeModel() {
+    if (state.model) return state.model;
     const info = G.api && G.api.info ? G.api.info() : null;
-    return info && info.provider === 'openai-compatible' && info.model ? info.model : state.model;
+    return (info && info.model) || '默认模型';
   }
 
   function updateComposer() {
@@ -778,11 +642,7 @@
   /* ---------------- sending / streaming ---------------- */
 
   function handleSend() {
-    if (stream) {
-      const wasDemo = stream.demo;
-      if (wasDemo) completeStream(); /* 演示流式：直接播完不截断 */
-      else { stopStreaming(); return; }
-    }
+    if (stream) { stopStreaming(); return; }
     const text = el.input.value.trim();
     if (!text) return;
 
@@ -841,19 +701,15 @@
     updateComposer();
     scrollToBottom(true);
 
-    if (G.api && G.api.available() && !(files && files.length)) {
-      startApiStream(conv, msg);
+    if (!G.api || !G.api.available()) {
+      msg.error = { message: '未连接服务端，请先启动后端（npm start）', code: 'no_provider' };
+      finishStream();
       return;
     }
-    if (G.api && G.api.available() && files && files.length) {
-      toast('附件暂未接入上传通道，这条回复仍用本地演示');
+    if (files && files.length) {
+      toast('附件暂未接入上传通道，这条回复不含文件内容');
     }
-
-    const reply = generateReply(prompt, files);
-    if (reply.artifact) msg.artifact = reply.artifact;
-    if (reply.question) msg.question = reply.question;
-    renderThread();
-    startStream(conv, msg, reply, false, state.effort === 'High' ? 700 : state.effort === 'Low' ? 300 : 500);
+    startApiStream(conv, msg);
   }
 
   /* ---------- 真实后端流式（SSE） ---------- */
@@ -918,25 +774,6 @@
     });
   }
 
-  function startStream(conv, msg, reply, demo, delay) {
-    const tools = reply.tools || [];
-    stream = {
-      convId: conv.id, msgId: msg.id, demo: !!demo,
-      thinking: reply.thinking || '', thinkingShown: 0,
-      tools: tools.map((t) => Object.assign({}, t, { icon: t.icon || 'i-check', status: 'idle' })),
-      toolIndex: 0,
-      full: reply.text || '', shown: 0,
-      stage: reply.thinking ? 'thinking' : (tools.length ? 'tool' : 'text'),
-      speed: SPEEDS[state.streamSpeed] || 1,
-      started: now(), timer: 0
-    };
-    updateSendState();
-    scrollToBottom(true);
-    G.clawd.set('thinking');
-    if (state.reduceMotion) { completeStream(); return; }
-    stream.timer = setTimeout(runStream, delay || 400);
-  }
-
   function liveMsg() {
     const s = stream;
     return {
@@ -968,59 +805,6 @@
     if (paintTimer) { clearTimeout(paintTimer); paintTimer = 0; }
   }
 
-  function runStream() {
-    if (!stream) return;
-    const s = stream;
-
-    if (s.stage === 'thinking') {
-      if (s.thinkingShown < s.thinking.length) {
-        s.thinkingShown = Math.min(s.thinking.length, s.thinkingShown + 3 + Math.floor(Math.random() * 6));
-        scheduleStreamPaint();
-        scrollToBottom(false);
-        s.timer = setTimeout(runStream, Math.max(6, Math.round(18 * s.speed)));
-        return;
-      }
-      s.stage = s.tools.length ? 'tool' : 'text';
-      G.clawd.set('typing');
-      scheduleStreamPaint();
-      scrollToBottom(false);
-    }
-
-    if (s.stage === 'tool') {
-      const tool = s.tools[s.toolIndex];
-      if (!tool) {
-        s.stage = 'text';
-        scheduleStreamPaint();
-        s.timer = setTimeout(runStream, Math.round(160 * s.speed));
-        return;
-      }
-      if (tool.status === 'idle') {
-        tool.status = 'running';
-        tool.t0 = now();
-        scheduleStreamPaint();
-        scrollToBottom(false);
-        s.timer = setTimeout(runStream, Math.max(160, Math.round((tool.ms ? Math.max(240, tool.ms) : (s.demo ? 620 : 520)) * s.speed)));
-        return;
-      }
-      tool.status = 'done';
-      tool.ms = Math.max(80, now() - (tool.t0 || now()));
-      s.toolIndex += 1;
-      scheduleStreamPaint();
-      scrollToBottom(false);
-      s.timer = setTimeout(runStream, Math.round(320 * s.speed));
-      return;
-    }
-
-    if (s.shown < s.full.length) {
-      s.shown = Math.min(s.full.length, s.shown + 2 + Math.floor(Math.random() * 5));
-      scheduleStreamPaint();
-      scrollToBottom(false);
-      s.timer = setTimeout(runStream, Math.max(6, Math.round(16 * s.speed)));
-      return;
-    }
-    finishStream();
-  }
-
   function paintStream() {
     if (!stream) return;
     if (!stream.firstAt) stream.firstAt = now();
@@ -1038,37 +822,11 @@
     }
   }
 
-  /* 立即把当前流式内容全部补全（减少动效 / 演示被打断时） */
-  function completeStream() {
-    if (!stream) return;
-    if (stream.mode === 'api') { finishStream(); return; }
-    stream.thinkingShown = stream.thinking.length;
-    stream.tools.forEach((t) => { t.status = 'done'; });
-    stream.toolIndex = stream.tools.length;
-    stream.shown = stream.full.length;
-    stream.stage = 'text';
-    finishStream();
-  }
-
   function stopStreaming() {
     if (!stream) return;
     clearTimeout(stream.timer);
     if (stream.controller) { try { stream.controller.abort(); } catch (err) {} }
     finishStream();
-  }
-
-  /* 首次打开时把种子回复重放一遍，演示思考、工具调用与流式输出 */
-  function replayDemo() {
-    const conv = activeConv();
-    if (!conv || conv.messages.length < 2) return;
-    const last = conv.messages[conv.messages.length - 1];
-    if (!last || last.role !== 'assistant' || !last.text) return;
-    const reply = { thinking: last.thinking || '', tools: last.tools || [], text: last.text };
-    last.text = '';
-    last.thinking = '';
-    last.tools = [];
-    renderThread();
-    startStream(conv, last, reply, true, 700);
   }
 
   function finishStream() {
@@ -1367,13 +1125,6 @@
       files.push({
         id: 'art-' + i, name: a.title, path: a.path || root + '/' + a.title,
         lang: a.lang, content: a.content, lines: a.lines, artifact: true
-      });
-    });
-    FILES_MOCK.forEach((f, i) => {
-      if (files.some((x) => x.name === f.name)) return;
-      files.push({
-        id: 'mock-' + i, name: f.name, path: root + '/' + f.name,
-        lang: f.lang, content: f.content, lines: f.content.split('\n').length, artifact: false
       });
     });
     return { root, files };
@@ -1983,24 +1734,98 @@
     window.addEventListener('resize', paintTicks);
   }
 
+  function modelLabel(m) {
+    if (!m) return activeModel();
+    return m.name || m.id || '';
+  }
+
+  function selectModel(m) {
+    // m 可能为 null（回到服务端默认），也可能为目录里的模型条目
+    state.model = m ? m.id : '';
+    save();
+    updateComposer();
+    if (el.aboutModelInline) el.aboutModelInline.textContent = activeModel();
+  }
+
+  async function ensureModelCatalog() {
+    if (modelCatalog.length || modelCatalogLoading) return modelCatalog;
+    if (!G.api || !G.api.models || !G.api.available()) return modelCatalog;
+    modelCatalogLoading = true;
+    try {
+      modelCatalog = await G.api.models();
+    } catch (err) {
+      modelCatalog = [];
+    } finally {
+      modelCatalogLoading = false;
+    }
+    return modelCatalog;
+  }
+
   function openModelMenu() {
     openMenu(el.modelBtn, (node) => {
-      const l1 = document.createElement('div');
-      l1.className = 'menu-label';
-      l1.textContent = '模型';
-      node.appendChild(l1);
+      node.classList.add('model-menu');
+
+      const search = document.createElement('div');
+      search.className = 'model-search';
+      search.innerHTML = '<svg class="ico" aria-hidden="true"><use href="#i-search"/></svg>' +
+        '<input type="search" placeholder="搜索模型…" aria-label="搜索模型" autocomplete="off">';
+      node.appendChild(search);
+
       const info = G.api && G.api.info ? G.api.info() : null;
       const online = G.api && G.api.available() && info && info.provider === 'openai-compatible';
-      if (online) {
-        node.appendChild(menuItem(info.model, { desc: '由服务端 GQY_MODEL 决定', checked: true, onSelect: () => {} }));
-      } else {
-        MODELS.forEach((m) => {
-          node.appendChild(menuItem(m, {
-            checked: state.model === m,
-            onSelect: () => { state.model = m; save(); updateComposer(); }
+
+      const list = document.createElement('div');
+      list.className = 'model-list';
+      node.appendChild(list);
+
+      const applyModels = (models) => {
+        const q = search.querySelector('input').value.trim().toLowerCase();
+        const matches = models.filter((m) => {
+          if (!q) return true;
+          const hay = (m.id + ' ' + (m.name || '') + ' ' + m.provider + ' ' + (m.providerName || '')).toLowerCase();
+          return hay.indexOf(q) >= 0;
+        });
+        list.innerHTML = '';
+        if (matches.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'model-empty';
+          empty.textContent = models.length ? '没有匹配的模型' : (online ? '正在加载模型目录…' : '未连接服务端，无法加载模型目录');
+          list.appendChild(empty);
+          return;
+        }
+        matches.slice(0, 100).forEach((m) => {
+          list.appendChild(menuItem(m.name || m.id, {
+            desc: (m.providerName || m.provider) + ' · ' + m.id,
+            hint: m.reasoning ? '推理' : (m.context ? formatCount(m.context) + ' ctx' : ''),
+            checked: state.model === m.id,
+            onSelect: () => selectModel(m)
           }));
         });
+      };
+
+      // 默认模型入口：清空选择，回到服务端 GQY_MODEL
+      const info2 = G.api && G.api.info ? G.api.info() : null;
+      if (online && info2 && info2.model) {
+        list.appendChild(menuItem('默认（' + info2.model + '）', {
+          desc: '服务端 GQY_MODEL',
+          checked: state.model === '',
+          onSelect: () => selectModel(null)
+        }));
       }
+
+      search.querySelector('input').addEventListener('input', () => {
+        if (modelCatalog.length) applyModels(modelCatalog);
+      });
+
+      if (modelCatalog.length) {
+        applyModels(modelCatalog);
+      } else if (online) {
+        ensureModelCatalog().then(applyModels);
+      } else {
+        applyModels([]);
+      }
+
+      // 推理强度
       const sep = document.createElement('div');
       sep.className = 'menu-sep';
       node.appendChild(sep);
@@ -2019,6 +1844,10 @@
         '<p class="effort-desc"></p>';
       node.appendChild(effort);
       mountEffort(effort);
+
+      // 聚焦搜索框
+      const inp = search.querySelector('input');
+      if (inp) setTimeout(() => inp.focus(), 20);
     }, { align: 'right', place: 'top' });
   }
 
@@ -2145,7 +1974,6 @@
     el.sideSwitch.setAttribute('aria-checked', String(state.sidebarCollapsed));
     el.thinkSwitch.setAttribute('aria-checked', String(state.thinkOpen));
     $$('button', el.fontSeg).forEach((b) => b.setAttribute('aria-pressed', String(b.getAttribute('data-font') === state.fontSize)));
-    $$('button', el.speedSeg).forEach((b) => b.setAttribute('aria-pressed', String(b.getAttribute('data-speed') === state.streamSpeed)));
     el.aboutModels.forEach((node) => { node.textContent = activeModel(); });
     if (el.aboutModelInline) el.aboutModelInline.textContent = activeModel();
     if (el.aboutEffortInline) el.aboutEffortInline.textContent = state.effort;
@@ -2204,10 +2032,8 @@
       el.serverStatus.textContent = '已连接 · ' + info.model;
     } else if (info && info.provider === 'mock') {
       el.serverStatus.textContent = '已连接 · 模拟流';
-    } else if (location.protocol === 'https:' || location.protocol === 'http:') {
-      el.serverStatus.textContent = '本地演示（未连接服务端）';
     } else {
-      el.serverStatus.textContent = '本地演示（file://）';
+      el.serverStatus.textContent = '未连接服务端';
     }
   }
 
@@ -2222,7 +2048,6 @@
     el.usageConvs.textContent = String(u.convs);
     el.usageMessages.textContent = String(u.messages);
     el.usageAssets.textContent = String(u.assets);
-    el.usageTokens.textContent = formatCount(u.tokens);
     el.usageBadge.textContent = formatBytes(u.bytes);
     if (el.miniUsageText) el.miniUsageText.textContent = formatBytes(u.bytes);
     if (el.miniUsageBar) el.miniUsageBar.style.width = Math.max(2, pct) + '%';
@@ -2310,92 +2135,11 @@
 
   function setView(next) {
     if (next === 'settings') { openSettings(); return; }
-    view = next === 'board' ? 'board' : 'chat';
-    el.body.hidden = view !== 'chat';
-    if (el.mainRow) el.mainRow.hidden = view !== 'chat';
-    el.boardView.hidden = view !== 'board';
-    el.boardNavBtn.classList.toggle('is-active', view === 'board');
-    if (view === 'chat') {
-      renderThread();
-    } else {
-      el.topbarTitle.hidden = true;
-      el.topbarTitle.textContent = '';
-      renderBoard();
-    }
+    view = 'chat';
+    el.body.hidden = false;
+    if (el.mainRow) el.mainRow.hidden = false;
+    renderThread();
     closeDrawer();
-  }
-
-  function updateBoardDate() {
-    if (!el.boardDateText) return;
-    const d = new Date();
-    const weekday = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()];
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mm = String(d.getMinutes()).padStart(2, '0');
-    el.boardDateText.textContent = (d.getMonth() + 1) + '月' + d.getDate() + '日 · 周' + weekday + ' ' + hh + ':' + mm + ' · 本机模拟数据';
-  }
-
-  function renderBoard() {
-    updateBoardDate();
-    const tasks = state.boardTasks || [];
-    const total = tasks.length;
-    const done = tasks.filter((t) => t.status === 'done').length;
-    const doing = tasks.filter((t) => t.status === 'doing').length;
-    const todo = total - done - doing;
-    if (el.boardTaskList) {
-      el.boardTaskList.innerHTML = tasks.map((task) =>
-        '<button class="task-item is-' + task.status + '" type="button" data-task-id="' + esc(task.id) + '" aria-pressed="' + (task.status === 'done') + '" title="点击切换完成状态">' +
-          '<span class="task-check" aria-hidden="true"></span>' +
-          '<span class="task-title">' + esc(task.title) + '</span>' +
-          '<span class="task-tag">' + (task.status === 'done' ? '完成' : task.status === 'doing' ? '进行中' : '待办') + '</span>' +
-        '</button>'
-      ).join('');
-    }
-    const pct = total ? done / total * 100 : 0;
-    if (el.boardTaskBar) el.boardTaskBar.style.width = pct + '%';
-    if (el.boardTaskMeta) el.boardTaskMeta.textContent = done + ' / ' + total + ' 完成';
-    if (el.boardRingDone) el.boardRingDone.textContent = String(done);
-    if (el.boardRingTotal) el.boardRingTotal.textContent = '/' + total;
-    if (el.boardRing) el.boardRing.setAttribute('stroke-dasharray', (total ? done / total * 301.59 : 0).toFixed(1) + ' 301.59');
-    if (el.boardDoneCount) el.boardDoneCount.textContent = '完成 ' + done;
-    if (el.boardDoingCount) el.boardDoingCount.textContent = '进行中 ' + doing;
-    if (el.boardTodoCount) el.boardTodoCount.textContent = '待办 ' + todo;
-    renderBoardRecent();
-  }
-
-  function renderBoardRecent() {
-    if (!el.boardRecent) return;
-    const list = [];
-    state.workspaces.forEach((ws) => {
-      ws.convs.forEach((conv) => list.push({ ws: ws, conv: conv }));
-    });
-    list.sort((a, b) => (b.conv.updatedAt || 0) - (a.conv.updatedAt || 0));
-    const top = list.slice(0, 3);
-    if (!top.length) {
-      el.boardRecent.innerHTML = '<div class="recent-empty">还没有对话，回到对话页开始一个。</div>';
-      return;
-    }
-    el.boardRecent.innerHTML = top.map((item) =>
-      '<button class="recent-item" type="button" data-recent="' + esc(item.conv.id) + '">' +
-        '<span class="recent-dot" aria-hidden="true"></span>' +
-        '<span class="recent-copy"><b>' + esc(item.conv.title || '新会话') + '</b><small>' + esc(item.ws.name) + '</small></span>' +
-        '<span class="recent-time">' + esc(timeAgo(item.conv.updatedAt || now())) + '</span>' +
-      '</button>'
-    ).join('');
-  }
-
-  function toggleBoardTask(id) {
-    const task = (state.boardTasks || []).find((t) => t.id === id);
-    if (!task) return;
-    task.status = task.status === 'done' ? 'todo' : 'done';
-    save();
-    renderBoard();
-  }
-
-  function resetBoardTasks() {
-    state.boardTasks = defaultBoardTasks();
-    save();
-    renderBoard();
-    toast('已重置本周任务');
   }
 
   function exportData() {
@@ -2471,48 +2215,17 @@
     el.motionSwitch.setAttribute('aria-checked', String(state.reduceMotion));
   }
 
-  function resetToSeed() {
-    if (stream) stopStreaming();
-    const settings = {
-      model: state.model, effort: state.effort,
-      fontSize: state.fontSize, streamSpeed: state.streamSpeed, thinkOpen: state.thinkOpen,
-      reduceMotion: state.reduceMotion, sidebarCollapsed: state.sidebarCollapsed
-    };
-    state = seedState();
-    state.model = settings.model;
-    state.effort = settings.effort;
-    state.fontSize = settings.fontSize;
-    state.streamSpeed = settings.streamSpeed;
-    state.thinkOpen = settings.thinkOpen;
-    state.reduceMotion = settings.reduceMotion;
-    state.sidebarCollapsed = settings.sidebarCollapsed;
-    applyFontSize();
-    el.app.setAttribute('data-sidebar', state.sidebarCollapsed ? 'collapsed' : 'open');
-    applyReduceMotion();
-    save();
-    renderAll();
-    closeSettings();
-    setView('chat');
-    toast('已恢复示例对话');
-    replayDemo();
-  }
-
   function clearEverything() {
     if (stream) stopStreaming();
-    const conv = { id: uid(), title: '新会话', messages: [], updatedAt: now() };
     const settings = {
       model: state.model, effort: state.effort,
-      fontSize: state.fontSize, streamSpeed: state.streamSpeed, thinkOpen: state.thinkOpen,
+      fontSize: state.fontSize, thinkOpen: state.thinkOpen,
       reduceMotion: state.reduceMotion, sidebarCollapsed: state.sidebarCollapsed
     };
     state = seedState();
-    state.workspaces = [{ id: uid(), name: 'gqy', convs: [conv] }];
-    state.activeWorkspaceId = state.workspaces[0].id;
-    state.activeConvId = conv.id;
     state.model = settings.model;
     state.effort = settings.effort;
     state.fontSize = settings.fontSize;
-    state.streamSpeed = settings.streamSpeed;
     state.thinkOpen = settings.thinkOpen;
     state.reduceMotion = settings.reduceMotion;
     state.sidebarCollapsed = settings.sidebarCollapsed;
@@ -2608,15 +2321,6 @@
     if (!files || !files.length) return;
     e.preventDefault();
     addFiles(files);
-  });
-
-  $$('.suggest').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      el.input.value = btn.getAttribute('data-suggest') || btn.textContent;
-      autoGrow();
-      updateSendState();
-      handleSend();
-    });
   });
 
   el.plusBtn.addEventListener('click', () => pickFile(false));
@@ -2833,23 +2537,8 @@
     setSidebarCollapsed(!state.sidebarCollapsed);
   });
 
-  el.seedReset.addEventListener('click', resetToSeed);
   el.clearAll.addEventListener('click', clearEverything);
   el.exportData.addEventListener('click', exportData);
-
-  el.boardNavBtn.addEventListener('click', () => setView('board'));
-  el.boardBack.addEventListener('click', () => setView('chat'));
-  el.boardResetTasks.addEventListener('click', resetBoardTasks);
-  el.boardTaskList.addEventListener('click', (e) => {
-    const task = e.target.closest('[data-task-id]');
-    if (task) toggleBoardTask(task.getAttribute('data-task-id'));
-  });
-  el.boardRecent.addEventListener('click', (e) => {
-    const item = e.target.closest('[data-recent]');
-    if (!item) return;
-    setView('chat');
-    selectConv(item.getAttribute('data-recent'));
-  });
 
   $$('[data-settings-close]').forEach((node) => node.addEventListener('click', closeSettings));
   el.settingsTabs.forEach((tab) => {
@@ -2868,14 +2557,6 @@
     b.addEventListener('click', () => {
       state.fontSize = b.getAttribute('data-font');
       applyFontSize();
-      save();
-      syncSettingsUI();
-    });
-  });
-
-  $$('button', el.speedSeg).forEach((b) => {
-    b.addEventListener('click', () => {
-      state.streamSpeed = b.getAttribute('data-speed');
       save();
       syncSettingsUI();
     });
@@ -2991,16 +2672,13 @@
   G.clawd.init({ el: el.clawd, reduced: () => state.reduceMotion });
   G.clawd.idle();
   renderAll();
-  renderBoard();
   refreshUsage();
-  boardTimer = setInterval(updateBoardDate, 30000);
   renderAttachments();
   setupDetectedApi();
   restoreDraft();
   autoGrow();
   updateSendState();
   updateScrollBtn();
-  if (freshSeed) replayDemo();
   if (!mqMobile.matches) el.input.focus({ preventScroll: true });
 
 })();

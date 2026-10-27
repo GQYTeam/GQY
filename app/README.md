@@ -1,7 +1,7 @@
 # 顾清影 · AI 对话工作台
 
-前端零构建、零依赖；后端是单个 Go 文件（标准库，无第三方依赖），负责流式转发与会话落盘。
-双击 `index.html` 仍然可用（自动进入本地演示模式），`npm start` 则进入真实模型模式。
+前端零构建、零依赖；后端是单个 Go 文件（标准库，无第三方依赖），负责模型目录、流式转发与会话落盘。
+前端通过 `npm start` 起的 Go 后端工作：模型列表来自 models.dev，聊天请求经 SSE 转发到 OpenAI 兼容网关。
 
 需要 Go >= 1.22（只用标准库，没有 `go.mod`、没有外部模块）。
 
@@ -11,8 +11,7 @@
 npm start        # http://127.0.0.1:5173 ，前端 + /api/*（go run server.go）
 npm run build    # 产出 bin/gqy-server（-trimpath -ldflags "-s -w"），部署用这个
 npm run check    # JS 语法检查 + go vet
-npm run smoke    # 编译 + 无头 Chrome 跑 20 项端到端检查
-npm run demo     # 只起静态服务（python3 -m http.server），没有后端
+npm run smoke    # 编译 + 无头 Chrome 跑端到端检查
 ```
 
 `dev` 与 `start` 相同：Go 没有内置热重载，改后端后手动重启（前端改动刷新浏览器即可）。
@@ -69,9 +68,9 @@ npm start                 # server.go 自动读取 .env，真实环境变量优�
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `GQY_API_KEY` | 空 | OpenAI 兼容接口的密钥；为空则前端回落本地演示 |
+| `GQY_API_KEY` | 空 | OpenAI 兼容接口的密钥 |
 | `GQY_API_BASE` | `https://api.deepseek.com/v1` | 任何兼容 `/chat/completions` 的网关 |
-| `GQY_MODEL` | `deepseek-chat` | 连上后模型按钮显示这个值 |
+| `GQY_MODEL` | `deepseek-chat` | 默认模型；前端未选择时用这个值 |
 | `GQY_API_WIRE` | `auto` | 请求协议：`auto` / `chat` / `responses`。`auto` 先试 `/chat/completions`，上游说只支持 Responses 时自动改走 `/responses` |
 | `GQY_API_UA` | 空 | 上游 `User-Agent`。部分中转站（如 agentrouter.org）按 UA 拦截非官方客户端 |
 | `GQY_MOCK` | 空 | `1` 时用本地模拟流，用于没有密钥时验证链路 |
@@ -83,6 +82,7 @@ npm start                 # server.go 自动读取 .env，真实环境变量优�
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/api/health` | `{ ok, provider: 'openai-compatible' \| 'mock' \| 'none', model }` |
+| `GET` | `/api/models` | models.dev 精简聊天模型列表（服务端缓存 6 小时） |
 | `POST` | `/api/chat` | 请求 `{ messages, model, effort }`，返回 SSE：`thinking` / `tool` / `text` / `done` / `error` / `end` |
 | `GET` | `/api/sessions` | 会话 manifest 列表 |
 | `GET` | `/api/sessions/:id` | 读回 `messages.jsonl` |
@@ -107,26 +107,24 @@ $GQY_HOME/sessions/<session_id>/
 ```
 index.html              唯一入口：应用外壳 + 各页面 <section class="view">
 app.js                  控制器：状态、视图、流式管线、事件接线
-server.go               服务端（Go 标准库）：静态托管 + SSE 转发 + 会话落盘
+server.go               服务端（Go 标准库）：静态托管 + 模型目录 + SSE 转发 + 会话落盘
 js/
   core.js               工具与常量（esc / uid / 时间 / 格式化 / token 估算）
-  api.js                后端适配层（探测 / 流式聊天 / 会话镜像）
+  api.js                后端适配层（探测 / 模型目录 / 流式聊天 / 会话镜像）
   markdown.js           Markdown、代码高亮、链接卡片、URL 协议白名单
-  replies.js            本地演示回复生成、产物提取
-  samples.js            演示数据（项目文件样例）
   clawd.js              吉祥物精灵播放 + 活动状态机
 scripts/smoke.mjs       端到端冒烟（CDP，无依赖）
-styles/                 base → shell → chat → ui → pages → panels → media → settings → board → responsive
+styles/                 base → shell → chat → ui → pages → panels → media → settings → responsive
 assets/                 头像、字标、favicon、封面、Clawd 精灵图
 docs/                   架构、页面、数据、测试、路线图
 ```
 
-加载顺序固定：`core → markdown → replies → samples → clawd → api → app`。
+加载顺序固定：`core → markdown → clawd → api → app`。
 共享能力挂在 `window.GQY`，模块之间不互相 import。
 
 ## 数据
 
-- 前端以 `localStorage['claude-webchat:v6']` 为准，刷新不丢；配额写满会明确提示，不再静默失败。
+- 前端以 `localStorage['claude-webchat:v7']` 为准，刷新不丢；配额写满会明确提示，不再静默失败。
 - 服务端可用时，每次保存会把当前会话镜像到 `$GQY_HOME/sessions/<id>/`，日志与产物落盘。
 - 附件目前只在本地：图片用 `blob:` 预览，序列化前剔除，不写入磁盘。
 
@@ -134,6 +132,7 @@ docs/                   架构、页面、数据、测试、路线图
 
 - 服务端默认只绑定 `127.0.0.1`；没有账号体系，不要直接暴露到公网。
 - 模型密钥只存在于服务端环境变量；前端只会看到模型名。
+- 模型目录由服务端向 models.dev 拉取并缓存，前端只消费精简结果，不直接访问 models.dev。
 - Markdown 只放行 `http(s)` / `mailto` / 相对路径，`javascript:` / `data:` 降级成纯文本。
 - 静态托管走扩展名白名单，`server.go`、`package.json`、`go.mod`、`scripts/`、`bin/`、点文件都不可访问。
 - 工具日志写入前对 `key` / `token` / `secret` / `authorization` 类参数脱敏。

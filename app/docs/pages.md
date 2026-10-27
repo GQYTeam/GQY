@@ -6,7 +6,6 @@
 | 顶栏 | `header.topbar` | `styles/shell.css` | `renderThread()` 设置标题 |
 | 对话 | `#body` / `#thread` | `styles/chat.css` | `renderThread()`、`messageHTML()` |
 | 输入框 | `#composerForm` | `styles/chat.css` | `handleSend()`、菜单、附件、用量 |
-| 看板 | `#boardView` | `pages.css` + `board.css` | `renderBoard()`、`setView('board')` |
 | 设置 | `#settingsLayer` | `settings.css` | `openSettings()`、`refreshUsage()` |
 | 文件面板 | `#filesPanel` | `panels.css` | `openFilesPanel()`、树/代码/拖宽 |
 | 代码灯箱 | `#lightbox` | `panels.css` | `openViewer()` |
