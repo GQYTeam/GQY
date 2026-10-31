@@ -1,9 +1,0 @@
-{
-  "id": "mcp-echo",
-  "name": "MCP Echo 示例",
-  "version": "1.0.0",
-  "description": "MCP stdio 示例：一个 add 工具，验证 initialize / tools/list / tools/call 链路。",
-  "protocol": "mcp",
-  "command": ["node", "index.js"],
-  "timeout_ms": 5000
-}
