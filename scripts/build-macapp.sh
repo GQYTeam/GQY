@@ -26,7 +26,7 @@ for item in index.html demos.html manifest.webmanifest assets js styles; do
 done
 
 echo "== build Swift shell =="
-swiftc -O "$ROOT/desktop/macos/main.swift" \
+swiftc -O "$ROOT"/desktop/macos/*.swift \
   -framework Cocoa -framework WebKit \
   -o "$CONTENTS/MacOS/GQY"
 

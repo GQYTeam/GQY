@@ -13,9 +13,9 @@ GQY 是一个跑在你自己电脑上的 AI 助手网关：把 OpenAI 兼容、A
 
 ## 当前状态
 
-施工单 `001`–`014` 已落地：配置快照、网关运行时、OpenAI / Anthropic / Gemini 三协议、会话与产物、核心工具与 agent loop、插件运行时、评测与一次性插件、零构建 Web UI。
+施工单 `001`–`034` 已落地：配置快照、网关运行时、OpenAI / Anthropic / Gemini 三协议、会话与产物、核心工具与 agent loop、插件运行时、评测与一次性插件、零构建 Web UI、记忆、人格、指标、热加载与 macOS 应用外壳。
 
-下一步是把参考 WebUI 中尚未接入的控制台页面（人格、记忆、知识库、图库、平台连接）逐项评估，以及补齐产物预览、语音与多用户。
+正在执行 [`docs/designs/21-与Miyu对齐.md`](docs/designs/21-与Miyu对齐.md)：与 [Miyu](https://github.com/miyu-agent/miyu) 的功能和 UI 逐项对齐，交付可用的 macOS app。阶段 1（外壳行为对齐，施工单 `035`）已完成，随后是对话页、管理页、知识库/语音与打包验收。
 
 ## 快速开始
 
