@@ -13,8 +13,9 @@ reference 放对外接口与协议字段的查询手册：给调用方与实现�
 | 文件 | 主题 | 适用读者 |
 | --- | --- | --- |
 | `http-api.md` | 对外 HTTP 接口：鉴权、限流、端点总表、`/v1/models`、`/api/gateway/status`、错误归一、流式约定 | 外部 OpenAI 兼容客户端、内部 agent、前端 |
-| （后续）协议字段手册 | OpenAI / Anthropic / Gemini 的请求与响应字段逐项说明 | 外部客户端、provider 适配器实现者 |
-| （后续）配置字段手册 | providers.json / routing.json / settings.json 字段说明 | 配置维护者、设置页前端 |
+| `protocol-fields.md` | OpenAI / Anthropic / Gemini 的请求与响应字段逐项说明 | 外部客户端、provider 适配器实现者 |
+| `config-fields.md` | providers.json / routing.json / settings.json 字段说明 | 配置维护者、设置页前端 |
+| `legacy-home.md` | 旧版 GQY v0.7.0 的 `GQY_HOME` 导出结构快照（非 blueprint 派生，迁移专用） | 迁移器实现者、数据迁移维护者 |
 
 ## 与 blueprint、designs 的关系
 

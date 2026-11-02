@@ -202,6 +202,9 @@ func newAgentLoop(snap *config.Snapshot, gw *gateway.Router, pm *plugin.Manager,
 		tool.ListDirTool{Policy: policy},
 		tool.WebSearchTool{Policy: policy},
 		tool.AskUserTool{},
+		// 记忆子系统（MEM1–MEM8）：核心工具，随 ToolDecls() 注入模型。
+		tool.MemoryRecallTool{Home: snap.Home},
+		tool.MemoryRememberTool{Home: snap.Home},
 	} {
 		if err := reg.Register(t); err != nil {
 			panic(err)

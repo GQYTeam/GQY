@@ -21,6 +21,7 @@ func EnsureRoot(home string) error {
 		filepath.Join(home, "gateway"),
 		filepath.Join(home, "sessions"),
 		filepath.Join(home, "plugins"),
+		filepath.Join(home, "memory"),
 	}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o700); err != nil {

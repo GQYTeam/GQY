@@ -51,3 +51,5 @@
 | MD | 模型资料与选择器 | MD1–MD6 |
 | GL | 目标与支线 | GL1–GL6 |
 | NX | 一次性插件 | NX1–NX7 |
+| MEM | 记忆 | MEM1–MEM8 |
+| MG | 迁移 | MG1–MG8 |
