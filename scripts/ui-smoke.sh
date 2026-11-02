@@ -42,6 +42,13 @@ cat > "$WORK/home/providers.json" <<'EOF'
 EOF
 printf '{"default":{"provider":"demo","model":"demo-model"}}' > "$WORK/home/routing.json"
 printf '{}' > "$WORK/home/settings.json"
+mkdir -p "$WORK/home/plugins/settings-demo"
+cat > "$WORK/home/plugins/settings-demo/manifest.json" <<'EOF'
+{"id":"settings-demo","name":"设置示例","version":"1.0.0","protocol":"gqy-jsonrpc-v1","command":["node","index.js"],
+ "settings":[{"key":"greeting","title":"问候语","type":"string","default":"hi"},
+             {"key":"loud","title":"大声","type":"boolean","default":false},
+             {"key":"mode","title":"模式","type":"select","default":"a","options":["a","b"]}]}
+EOF
 
 GQY_HOME="$WORK/home" GQY_WEB_DIR="$APP" HOST=127.0.0.1 PORT="$PORT" \
   "$APP/bin/gqy-server" >"$WORK/server.log" 2>&1 &
@@ -53,8 +60,12 @@ if ! curl -fsS --retry 30 --retry-delay 1 --retry-connrefused "http://127.0.0.1:
 fi
 
 dump() {
+  local profile
+  profile=$(mktemp -d "$WORK/chrome-XXXXXX")
   "$CHROME" --headless=new --disable-gpu --hide-scrollbars --virtual-time-budget=4000 \
-    --dump-dom "$1" 2>/dev/null
+    --no-first-run --no-default-browser-check --disable-background-networking \
+    --user-data-dir="$profile" --dump-dom "$1" 2>/dev/null
+  rm -rf "$profile"
 }
 
 BASE="http://127.0.0.1:$PORT"
@@ -68,7 +79,10 @@ echo "$DOM" | grep -q 'id="paletteOverlay"'
 echo "$DOM" | grep -q 'id="jumpBottom"'
 echo "ok"
 
-curl -fsS "$BASE/manifest.webmanifest" | grep -q '"name": "GQY"'
+curl -fsS -o "$WORK/manifest.webmanifest" "$BASE/manifest.webmanifest"
+grep -q '"name": "GQY"' "$WORK/manifest.webmanifest"
+curl -fsS -o "$WORK/metrics.txt" "$BASE/metrics"
+grep -q 'gqy_build_info' "$WORK/metrics.txt"
 echo "manifest ok"
 
 echo "== 命令面板 =="
@@ -88,6 +102,19 @@ echo "== 供应商面板 =="
 DOM=$(dump "$BASE/?onboarded=1&noanim=1&theme=paper&console=providers")
 echo "$DOM" | grep -q 'Demo Provider'
 echo "$DOM" | grep -q 'id="consoleBody"'
+echo "ok"
+
+echo "== 插件设置 =="
+DOM=$(dump "$BASE/?onboarded=1&noanim=1&theme=paper&console=plugins&pluginSettings=settings-demo")
+echo "$DOM" | grep -q '安装图片展示'
+echo "$DOM" | grep -q '问候语'
+echo "$DOM" | grep -q '保存设置'
+echo "ok"
+
+echo "== 人格面板 =="
+DOM=$(dump "$BASE/?onboarded=1&noanim=1&theme=paper&console=persona")
+echo "$DOM" | grep -q '系统提示词'
+echo "$DOM" | grep -q '保存人格'
 echo "ok"
 
 echo "== 工具面板 =="

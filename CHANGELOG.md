@@ -27,8 +27,13 @@
 - 工程化：`make js-check`、`make ui-smoke`（headless Chrome），CI 增加 Node 语法检查与 UI 冒烟任务。
 - 桌面化：⌘K 命令面板、快捷键、会话日期分组、侧边栏收起、回到底部、自定义确认对话框、PWA manifest/图标。
 - 调研：`docs/reviews/2026-11-02-桌面AgentUI调研.md` 记录桌面 Agent UI 模式与生产化清单。
+- 插件：`POST /api/plugins/install` 从项目插件仓库 `git clone` 安装；插件设置 schema/值、`GET|PUT /api/plugins/{id}/settings`、安装标记与只读来源、保存后重载。
+- 人格：`GET|PUT /api/persona`、`persona.json`、头像 data URL、系统提示词注入 `/api/chat`；控制台「人格」面板。
+- Prometheus：`GET /metrics` text exposition，覆盖 HTTP、网关调用/尝试/失败/token、账号冷却/并发、插件调用、构建与配置版本；A1 鉴权、不进入口限流。
 - 第三方声明：视觉方向参考 `yxxbc/gqy-agent`，许可证与 Notice 见 `docs/third-party/`。
 - 许可与署名：`LICENSE`（PolyForm Noncommercial License 1.0.0 + Required Notice）与 `NOTICE`，`README.md` 增加「许可与署名」小节。
+- 记忆子系统：`app/internal/memory`（JSONL 追加存储 + 内存索引 + 词法/重要度/衰减召回打分）、`/api/memory*` 九个端点、`memory_recall` / `memory_remember` 两个核心工具；迁移来的 347 facts / 2054 episodes 可直接召回。
+- 迁移器一次性插件：`GQYTeam/gqy-plugins-Migrator-default`（`mode: oneshot`，默认 dry-run、幂等、脱敏、可回滚），把旧版 GQY v0.7.0 的 `GQY_HOME` 导出迁到新数据根；旧版结构写成 `docs/reference/legacy-home.md`。
 
 - 记忆子系统：`app/internal/memory`（JSONL 追加存储 + 内存索引 + 词法/重要度/衰减召回打分）、`/api/memory*` 九个端点、`memory_recall` / `memory_remember` 两个核心工具；迁移来的 347 facts / 2054 episodes 可直接召回。
 - 迁移器一次性插件：`GQYTeam/gqy-plugins-Migrator-default`（`mode: oneshot`，默认 dry-run、幂等、脱敏、可回滚），把旧版 GQY v0.7.0 的 `GQY_HOME` 导出迁到新数据根；旧版结构写成 `docs/reference/legacy-home.md`。

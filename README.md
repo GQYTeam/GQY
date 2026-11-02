@@ -4,6 +4,9 @@
 [![CodeQL](https://github.com/GQYTeam/GQY/actions/workflows/codeql.yml/badge.svg)](https://github.com/GQYTeam/GQY/actions/workflows/codeql.yml)
 ![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go)
 
+> **千队并行，各自封疆。**
+> 密钥不出门，能力随便长。
+
 GQY 是一个跑在你自己电脑上的 AI 助手网关：把 OpenAI 兼容、Anthropic、Gemini 等多家的模型接入，统一成一套协议，既服务内部的 agent loop，也服务外部的 OpenAI 兼容客户端。工具之外的能力用插件运行时扩展：原生 JSON-RPC、MCP，以及远程 unix / tcp 插件。
 
 > 文档与代码正在按 `docs/` 里的设计文档重新整理。
@@ -31,7 +34,7 @@ make run                        # 默认 http://127.0.0.1:5173
 make demo          # http://127.0.0.1:5173/ ，默认接本机 Magpie
 ```
 
-对话页支持 ⌘K 命令面板、会话搜索与日期分组、流式思考与工具轨迹、问题卡片、草稿、图片/文本附件；侧栏可收起，也可打开控制台（用量、模型、供应商、网关、插件、工具、外观、关于）与会话信息抽屉。可安装为 PWA 独立窗口；视觉方向有六套主题，对照页在 <http://127.0.0.1:5173/demos.html>。UI 是零构建原生 ES modules，改完刷新即可。
+对话页支持 ⌘K 命令面板、会话搜索与日期分组、流式思考与工具轨迹、问题卡片、草稿、图片/文本附件；侧栏可收起，也可打开控制台（用量、人格、模型、供应商、网关、插件、工具、外观、关于）与会话信息抽屉。插件页可从项目插件仓库安装、配置插件设置。可安装为 PWA 独立窗口；视觉方向有六套主题，对照页在 <http://127.0.0.1:5173/demos.html>。UI 是零构建原生 ES modules，改完刷新即可。
 
 
 
