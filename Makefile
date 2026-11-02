@@ -17,6 +17,7 @@ help:
 	  'make build    构建 app/bin/gqy-server' \
 	  'make run      启动服务' \
 	  'make demo     一键启动 UI（默认接本机 Magpie）' \
+	  'make macapp   构建 dist/GQY.app（macOS）' \
 	  'make js-check JS 语法检查' \
 	  'make docs-check 文档编号与索引检查' \
 	  'make icon     从 assets/icons/source.jpg 生成 macOS/Web 图标全集' \
@@ -58,6 +59,9 @@ run:
 
 demo:
 	./scripts/demo.sh
+
+macapp:
+	./scripts/build-macapp.sh
 
 js-check:
 	./scripts/check-js.sh
