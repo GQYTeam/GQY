@@ -1,0 +1,14 @@
+{
+  "id": "mcp-echo",
+  "name": "MCP Echo 示例",
+  "version": "1.0.0",
+  "description": "MCP stdio 回显工具",
+  "protocol": "mcp",
+  "command": ["node", "index.js"],
+  "cwd": ".",
+  "timeout_ms": 10000,
+  "concurrency": "concurrent",
+  "actions": [],
+  "provides": [],
+  "requires": []
+}

@@ -1,0 +1,70 @@
+GQY Character and Brand Assets
+
+Copyright (c) 2026 yxxbc. All rights reserved, except as permitted below.
+
+The PolyForm Noncommercial License in LICENSE covers GQY's source code. It
+does NOT cover the character and brand assets listed here. They are
+governed by this file instead.
+
+## What this covers
+
+- The character 顾清影 / Selene: her name, look and character design.
+- These files, and any later version of them:
+    pics/gqy-logo.png
+    pics/gqywallpaper.png
+    pics/gqy-mascot-is-not-the-tui-version..png
+    web/assets/gqy-logo.png
+    web/assets/gqywallpaper.png
+    assets/mascot/portrait.png
+    assets/mascot/gqy-mascot-source.png
+
+The images were created with AI image generation and then selected and
+edited by the author. Rights are claimed to the extent the applicable law
+allows. The naming and branding rules below apply whether or not a given
+image is protected by copyright.
+
+## You may
+
+- Redistribute the assets unmodified as part of an unmodified copy of GQY.
+- Run a privately modified copy of GQY for yourself with the assets in place.
+- Show the assets in screenshots, reviews, tutorials and news coverage of GQY.
+- Make noncommercial fan works of the character (art, memes, stories),
+  as long as they are not presented as official.
+
+## You may not
+
+- Publicly distribute a modified version of GQY (a fork, a repackage, a
+  hosted service) under the name 顾清影, Selene or GQY, or with these assets.
+  A distributed fork must use its own name, logo and character.
+- Use the assets or the character commercially.
+- Imply that anything is made or endorsed by the GQY project when it is not.
+
+## Earlier releases
+
+Releases up to and including 0.6.0 shipped earlier versions of
+pics/gqy-logo.png, pics/gqywallpaper.png and their web/assets copies under the
+MIT License. Those exact copies, as shipped in those releases, remain
+available under MIT. This file applies to every later version and to every
+asset not included in those releases.
+
+For other uses, open an issue at https://github.com/yxxbc/gqy-agent.
+
+---
+
+顾清影角色与品牌素材授权（中文说明，与上文英文版含义一致；如有出入以英文版为准）
+
+LICENSE 中的 PolyForm Noncommercial 协议只覆盖源代码，不覆盖上面列出的角色与品牌
+素材：顾清影 / Selene 的名字、形象与角色设定，以及列出的图片文件及其后续版本。
+这些图片由 AI 生成后经作者挑选与修改，在法律允许的范围内主张权利；名字与品牌的
+使用规则不论某张图是否受著作权保护都适用。
+
+可以：随未修改的 GQY 原样分发；自己私下改代码运行时保留素材；在截图、评测、教程、
+报道中展示；非商用的同人创作（不冒充官方）。
+
+不可以：以「顾清影」「Selene」「GQY」的名义或带着这些素材公开发布修改版（fork、
+二次打包、在线服务），公开发布的衍生版本必须换用自己的名字、logo 和角色；商用；
+暗示未经认可的东西出自本项目。
+
+0.6.0 及更早版本随附的旧版 logo 与壁纸按 MIT 发布，那几份原样副本仍可按 MIT 使用；
+本文件适用于之后的所有版本和所有未包含在那些版本中的素材。其他用途请在
+https://github.com/yxxbc/gqy-agent 提 issue 联系。

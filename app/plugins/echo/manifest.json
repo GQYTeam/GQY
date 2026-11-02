@@ -1,0 +1,20 @@
+{
+  "id": "echo",
+  "name": "Echo 示例",
+  "version": "1.0.0",
+  "description": "回显参数，用于验证插件链路",
+  "protocol": "gqy-jsonrpc-v1",
+  "command": ["node", "index.js"],
+  "cwd": ".",
+  "timeout_ms": 10000,
+  "concurrency": "concurrent",
+  "actions": [
+    {
+      "name": "echo",
+      "description": "回显 text 参数",
+      "schema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}
+    }
+  ],
+  "provides": [],
+  "requires": []
+}

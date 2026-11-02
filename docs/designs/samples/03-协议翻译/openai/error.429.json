@@ -1,0 +1,7 @@
+{
+  "error": {
+    "message": "请求过于频繁，请稍后再试",
+    "type": "rate_limit_error",
+    "code": "rate_limited"
+  }
+}

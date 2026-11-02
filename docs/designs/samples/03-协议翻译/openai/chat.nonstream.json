@@ -1,0 +1,32 @@
+{
+  "id": "chatcmpl-000000000000000000000002",
+  "object": "chat.completion",
+  "created": 1730000000,
+  "model": "deepseek-chat",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "我先读一下文件。",
+        "reasoning_content": "用户要求读文件，先确认文件存在。",
+        "tool_calls": [
+          {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+              "name": "read",
+              "arguments": "{\"path\":\"docs/README.md\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 8,
+    "total_tokens": 18
+  }
+}

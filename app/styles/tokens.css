@@ -1,0 +1,224 @@
+/* GQY design tokens. Every theme only redefines tokens; components never
+   hard-code a color. Switch with <html data-theme="paper|midnight|editorial|moss">. */
+
+:root {
+  --font-sans: "Avenir Next", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  --font-display: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+  --font-mono: "SFMono-Regular", "Cascadia Code", Menlo, Consolas, monospace;
+
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  --sidebar-w: 290px;
+  --measure: 760px;
+  --shadow-soft: 0 12px 36px rgba(38, 30, 22, 0.10);
+  --shadow-lift: 0 24px 80px rgba(38, 30, 22, 0.18);
+  --transition: 160ms cubic-bezier(0.2, 0.7, 0.3, 1);
+
+  /* Warm paper (default) */
+  --bg: #f2ece2;
+  --bg-deep: #e9e1d3;
+  --surface: #fbf7ef;
+  --surface-2: #e9e1d3;
+  --surface-3: #ded4c3;
+  --ink: #221c17;
+  --ink-soft: #443a30;
+  --muted: #71665a;
+  --faint: #9a8e80;
+  --line: #d9cfbf;
+  --line-strong: #c3b6a3;
+  --accent: #b5522f;
+  --accent-strong: #8f3d21;
+  --accent-ink: #fff8f2;
+  --accent-soft: #f0d9cd;
+  --good: #3f7458;
+  --good-soft: #dce9df;
+  --warn: #a56b24;
+  --warn-soft: #f4e5cf;
+  --bad: #a63f35;
+  --bad-soft: #f2d9d4;
+  --focus: 0 0 0 3px rgba(181, 82, 47, 0.28);
+  --grain: radial-gradient(circle at 20% 10%, rgba(255, 255, 255, 0.55), transparent 38%),
+    radial-gradient(circle at 80% 0%, rgba(181, 82, 47, 0.08), transparent 42%);
+  color-scheme: light;
+}
+
+[data-theme="paper"] {
+  color-scheme: light;
+}
+
+[data-theme="midnight"] {
+  --font-display: "SF Pro Display", "Avenir Next", "PingFang SC", system-ui, sans-serif;
+  --bg: #080b14;
+  --bg-deep: #05070d;
+  --surface: #0f1524;
+  --surface-2: #151d30;
+  --surface-3: #1b2540;
+  --ink: #e8eefc;
+  --ink-soft: #c3cee6;
+  --muted: #8b98b5;
+  --faint: #66738f;
+  --line: #243049;
+  --line-strong: #334260;
+  --accent: #64e6d4;
+  --accent-strong: #9b8cff;
+  --accent-ink: #04110f;
+  --accent-soft: #12322f;
+  --good: #4ade80;
+  --good-soft: #123123;
+  --warn: #fbbf24;
+  --warn-soft: #332812;
+  --bad: #fb7185;
+  --bad-soft: #3a1620;
+  --focus: 0 0 0 3px rgba(100, 230, 212, 0.35);
+  --shadow-soft: 0 18px 50px rgba(0, 0, 0, 0.45);
+  --shadow-lift: 0 30px 100px rgba(0, 0, 0, 0.6);
+  --grain: radial-gradient(circle at 15% 0%, rgba(100, 230, 212, 0.12), transparent 38%),
+    radial-gradient(circle at 90% 10%, rgba(155, 140, 255, 0.14), transparent 42%);
+  color-scheme: dark;
+}
+
+[data-theme="editorial"] {
+  --font-display: Georgia, "Songti SC", "Times New Roman", serif;
+  --font-sans: "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", Arial, sans-serif;
+  --bg: #fbfaf6;
+  --bg-deep: #f2f0e8;
+  --surface: #ffffff;
+  --surface-2: #f2f0e8;
+  --surface-3: #e8e5da;
+  --ink: #151515;
+  --ink-soft: #2f2f2b;
+  --muted: #5c5a52;
+  --faint: #8b887d;
+  --line: #d8d5ca;
+  --line-strong: #b9b5a7;
+  --accent: #1d4ed8;
+  --accent-strong: #1639a0;
+  --accent-ink: #ffffff;
+  --accent-soft: #e4ebff;
+  --good: #1f6f4a;
+  --good-soft: #dfeee5;
+  --warn: #97601a;
+  --warn-soft: #f4e9d2;
+  --bad: #a32a2a;
+  --bad-soft: #f3dcdc;
+  --focus: 0 0 0 2px rgba(29, 78, 216, 0.35);
+  --radius-xs: 0px;
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 3px;
+  --radius-xl: 3px;
+  --sidebar-w: 252px;
+  --shadow-soft: none;
+  --shadow-lift: 0 1px 0 rgba(21, 21, 21, 0.12);
+  --grain: linear-gradient(90deg, rgba(21, 21, 21, 0.04) 1px, transparent 1px);
+  color-scheme: light;
+}
+
+[data-theme="moss"] {
+  --font-display: "Avenir Next", "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif;
+  --bg: #eef1e7;
+  --bg-deep: #e2e8d7;
+  --surface: #f9fbf4;
+  --surface-2: #e2e8d7;
+  --surface-3: #d4ddc6;
+  --ink: #22281e;
+  --ink-soft: #3b4334;
+  --muted: #66705c;
+  --faint: #909a83;
+  --line: #cfd8c2;
+  --line-strong: #b4c1a3;
+  --accent: #4f6f43;
+  --accent-strong: #395432;
+  --accent-ink: #f7fbf1;
+  --accent-soft: #dce7d2;
+  --good: #3d7a4e;
+  --good-soft: #d9e9dc;
+  --warn: #9a6a24;
+  --warn-soft: #f0e4ce;
+  --bad: #a14a3a;
+  --bad-soft: #f2ddd7;
+  --focus: 0 0 0 3px rgba(79, 111, 67, 0.3);
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius-md: 18px;
+  --radius-lg: 26px;
+  --radius-xl: 34px;
+  --shadow-soft: 0 16px 40px rgba(52, 68, 44, 0.12);
+  --shadow-lift: 0 28px 90px rgba(52, 68, 44, 0.2);
+  --grain: radial-gradient(circle at 12% 8%, rgba(255, 255, 255, 0.7), transparent 42%),
+    radial-gradient(circle at 88% 0%, rgba(79, 111, 67, 0.12), transparent 40%);
+  color-scheme: light;
+}
+
+[data-theme="dawn"] {
+  --font-display: "Iowan Old Style", "Songti SC", Georgia, serif;
+  --bg: #f8f3ea;
+  --bg-deep: #efe6dc;
+  --surface: #fffdf8;
+  --surface-2: #f0e8f2;
+  --surface-3: #e6dbe8;
+  --ink: #2b2633;
+  --ink-soft: #4a4355;
+  --muted: #6e6678;
+  --faint: #9b93a3;
+  --line: #ded6e6;
+  --line-strong: #c8bdd2;
+  --accent: #7568b0;
+  --accent-strong: #5b4f93;
+  --accent-ink: #ffffff;
+  --accent-soft: #e9e4f6;
+  --good: #4f7d5e;
+  --good-soft: #dfede3;
+  --warn: #a5742d;
+  --warn-soft: #f3e7cf;
+  --bad: #a8474f;
+  --bad-soft: #f3dbde;
+  --focus: 0 0 0 3px rgba(117, 104, 176, 0.3);
+  --grain: radial-gradient(circle at 20% 0%, rgba(117, 104, 176, 0.1), transparent 40%),
+    radial-gradient(circle at 85% 8%, rgba(240, 232, 242, 0.8), transparent 40%);
+  color-scheme: light;
+}
+
+[data-theme="dusk"] {
+  --font-display: "SF Pro Display", "Avenir Next", "PingFang SC", system-ui, sans-serif;
+  --bg: #141826;
+  --bg-deep: #0e111b;
+  --surface: #1b2032;
+  --surface-2: #232a40;
+  --surface-3: #2a334d;
+  --ink: #e6e9f5;
+  --ink-soft: #c4cce4;
+  --muted: #9aa5c4;
+  --faint: #737e9f;
+  --line: #303853;
+  --line-strong: #425072;
+  --accent: #aebde8;
+  --accent-strong: #d6def7;
+  --accent-ink: #101624;
+  --accent-soft: #27324e;
+  --good: #7bd6a6;
+  --good-soft: #153326;
+  --warn: #e7c37a;
+  --warn-soft: #352b18;
+  --bad: #e98a9a;
+  --bad-soft: #3a1b24;
+  --focus: 0 0 0 3px rgba(174, 189, 232, 0.35);
+  --shadow-soft: 0 18px 50px rgba(0, 0, 0, 0.4);
+  --shadow-lift: 0 30px 100px rgba(0, 0, 0, 0.55);
+  --grain: radial-gradient(circle at 15% 0%, rgba(174, 189, 232, 0.12), transparent 38%),
+    radial-gradient(circle at 90% 10%, rgba(117, 104, 176, 0.12), transparent 42%);
+  color-scheme: dark;
+}

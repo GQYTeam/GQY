@@ -1,0 +1,329 @@
+/* Theme personality: structure stays, surfaces and shapes change. */
+
+/* --- paper --- */
+
+[data-theme="paper"] .sidebar {
+  background-color: var(--surface-2);
+}
+
+[data-theme="paper"] .msg.user .bubble {
+  border-radius: 4px var(--radius-lg) var(--radius-lg) var(--radius-lg);
+  background: color-mix(in srgb, var(--surface) 82%, var(--bg));
+}
+
+[data-theme="paper"] .empty-title,
+[data-theme="paper"] .panel-title,
+[data-theme="paper"] .topbar-session {
+  font-family: var(--font-display);
+}
+
+[data-theme="paper"] .prose {
+  font-size: 15.5px;
+  line-height: 1.78;
+}
+
+/* --- midnight --- */
+
+[data-theme="midnight"] .main {
+  background:
+    radial-gradient(circle at 78% -10%, rgba(100, 230, 212, 0.08), transparent 38%),
+    radial-gradient(circle at 0% 100%, rgba(155, 140, 255, 0.08), transparent 40%),
+    var(--bg);
+}
+
+[data-theme="midnight"] .sidebar {
+  background-color: var(--bg-deep);
+}
+
+[data-theme="midnight"] .topbar {
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+}
+
+[data-theme="midnight"] .composer {
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--line));
+}
+
+[data-theme="midnight"] .msg.user .bubble {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+[data-theme="midnight"] .msg.assistant .msg-avatar {
+  box-shadow: 0 0 24px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+[data-theme="midnight"] .brand-mark {
+  box-shadow: 0 0 28px color-mix(in srgb, var(--accent) 36%, transparent);
+}
+
+[data-theme="midnight"] .new-chat:hover,
+[data-theme="midnight"] .suggestion:hover {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent),
+    0 12px 40px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="midnight"] .status-pill {
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+
+[data-theme="midnight"] .panel {
+  background: linear-gradient(180deg, var(--surface), var(--bg-deep));
+}
+
+/* --- editorial --- */
+
+[data-theme="editorial"] .sidebar {
+  background-color: var(--surface);
+  background-image: none;
+  border-right: 1px solid var(--ink);
+}
+
+[data-theme="editorial"] .brand-mark {
+  border-radius: 0;
+  background: var(--ink);
+  color: var(--bg);
+  box-shadow: none;
+  font-size: 17px;
+}
+
+[data-theme="editorial"] .new-chat {
+  border-radius: 0;
+  border-color: var(--ink);
+  background: transparent;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+[data-theme="editorial"] .session-item {
+  border-radius: 0;
+  border-color: transparent;
+  border-bottom: 1px solid var(--line);
+}
+
+[data-theme="editorial"] .session-item.active {
+  border-color: transparent;
+  border-left: 3px solid var(--accent);
+  background: transparent;
+  box-shadow: none;
+  padding-left: 8px;
+}
+
+[data-theme="editorial"] .sidebar-footer {
+  border-top-color: var(--ink);
+}
+
+[data-theme="editorial"] .section-label {
+  color: var(--ink);
+  letter-spacing: 0.16em;
+}
+
+[data-theme="editorial"] .topbar {
+  background: var(--surface);
+  border-bottom-color: var(--ink);
+}
+
+[data-theme="editorial"] .topbar-session,
+[data-theme="editorial"] .empty-title,
+[data-theme="editorial"] .panel-title {
+  font-family: var(--font-display);
+  letter-spacing: -0.035em;
+}
+
+[data-theme="editorial"] .empty-title {
+  font-size: clamp(38px, 6vw, 64px);
+  line-height: 1.02;
+}
+
+[data-theme="editorial"] .empty-kicker {
+  color: var(--ink);
+  letter-spacing: 0.22em;
+}
+
+[data-theme="editorial"] .msg.user .bubble {
+  padding: 1px 0 1px 15px;
+  border: 0;
+  border-left: 2px solid var(--ink);
+  border-radius: 0;
+  background: transparent;
+}
+
+[data-theme="editorial"] .msg.user .msg-body {
+  font-family: var(--font-display);
+  font-size: 19px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+[data-theme="editorial"] .msg-avatar {
+  border-radius: 0;
+  border-color: var(--line-strong);
+  background: transparent;
+}
+
+[data-theme="editorial"] .msg.assistant .msg-avatar {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+[data-theme="editorial"] .composer {
+  border-width: 1px 0 0;
+  border-radius: 0;
+  background: var(--surface);
+  box-shadow: none;
+}
+
+[data-theme="editorial"] .composer:focus-within {
+  box-shadow: none;
+  border-color: var(--ink);
+}
+
+[data-theme="editorial"] .send-btn {
+  border-radius: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+[data-theme="editorial"] .suggestion {
+  border-radius: 0;
+  border-color: var(--line);
+  background: transparent;
+}
+
+[data-theme="editorial"] .suggestion:hover {
+  border-color: var(--ink);
+  background: var(--surface);
+}
+
+[data-theme="editorial"] .panel,
+[data-theme="editorial"] .login-box,
+[data-theme="editorial"] .onboarding-box {
+  border-radius: 0;
+  border-color: var(--ink);
+}
+
+[data-theme="editorial"] .theme-card {
+  border-radius: 0;
+}
+
+[data-theme="editorial"] .tab,
+[data-theme="editorial"] .model-picker select,
+[data-theme="editorial"] .status-pill,
+[data-theme="editorial"] .chip {
+  border-radius: 0;
+}
+
+/* --- moss --- */
+
+[data-theme="moss"] .sidebar {
+  background-color: var(--surface-2);
+}
+
+[data-theme="moss"] .brand-mark {
+  border-radius: 14px;
+  background: linear-gradient(160deg, var(--accent), var(--accent-strong));
+}
+
+[data-theme="moss"] .new-chat {
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+[data-theme="moss"] .msg.user .bubble {
+  border-color: transparent;
+  border-radius: 22px 22px 6px 22px;
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+[data-theme="moss"] .msg.assistant .msg-avatar {
+  border-radius: 50%;
+}
+
+[data-theme="moss"] .composer {
+  border-radius: 28px;
+  padding: 12px 14px 10px;
+}
+
+[data-theme="moss"] .send-btn {
+  border-radius: 999px;
+  padding-left: 18px;
+  padding-right: 18px;
+}
+
+[data-theme="moss"] .icon-btn {
+  border-radius: 50%;
+}
+
+[data-theme="moss"] .suggestion {
+  border-radius: var(--radius-lg);
+}
+
+[data-theme="moss"] .tool-card,
+[data-theme="moss"] .model-row,
+[data-theme="moss"] .account-row {
+  border-radius: var(--radius-md);
+}
+
+[data-theme="moss"] .panel,
+[data-theme="moss"] .login-box,
+[data-theme="moss"] .onboarding-box {
+  border-radius: 34px;
+}
+
+/* --- dawn --- */
+
+[data-theme="dawn"] .sidebar {
+  background-color: var(--surface-2);
+}
+
+[data-theme="dawn"] .msg.user .bubble {
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--line));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+
+[data-theme="dawn"] .empty-title,
+[data-theme="dawn"] .panel-title,
+[data-theme="dawn"] .topbar-session {
+  font-family: var(--font-display);
+}
+
+[data-theme="dawn"] .brand-mark {
+  background: linear-gradient(150deg, var(--accent), var(--accent-strong));
+}
+
+/* --- dusk --- */
+
+[data-theme="dusk"] .main {
+  background:
+    radial-gradient(circle at 80% -10%, rgba(174, 189, 232, 0.09), transparent 40%),
+    radial-gradient(circle at 0% 100%, rgba(117, 104, 176, 0.09), transparent 42%),
+    var(--bg);
+}
+
+[data-theme="dusk"] .sidebar {
+  background-color: var(--bg-deep);
+}
+
+[data-theme="dusk"] .topbar {
+  background: color-mix(in srgb, var(--bg) 74%, transparent);
+}
+
+[data-theme="dusk"] .composer {
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+[data-theme="dusk"] .msg.user .bubble {
+  border-color: color-mix(in srgb, var(--accent) 20%, var(--line));
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+}
+
+[data-theme="dusk"] .brand-mark {
+  color: var(--accent-ink);
+}

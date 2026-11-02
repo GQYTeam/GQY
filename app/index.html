@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="paper">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#b5522f">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <title>GQY</title>
+  <link rel="stylesheet" href="styles/tokens.css">
+  <link rel="stylesheet" href="styles/base.css">
+  <link rel="stylesheet" href="styles/app.css">
+  <link rel="stylesheet" href="styles/themes.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <aside class="sidebar" id="sidebar" aria-label="会话与导航">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">G</div>
+        <div class="brand-copy">
+          <div class="brand-name">GQY</div>
+          <div class="brand-meta"><span class="brand-dot"></span><span id="brandMeta">本地网关</span></div>
+        </div>
+        <button class="icon-btn collapse-btn" id="collapseSidebar" type="button" title="收起侧边栏" aria-label="收起侧边栏">◧</button>
+      </div>
+
+      <button class="new-chat" id="newChat" type="button">
+        <span aria-hidden="true">＋</span> 新对话
+      </button>
+
+      <div class="sidebar-section">
+        <div class="section-label"><span>会话</span><span id="sessionCount"></span></div>
+        <div class="session-search">
+          <input id="sessionSearch" type="search" placeholder="搜索会话…" aria-label="搜索会话">
+        </div>
+        <div class="session-list" id="sessionList"></div>
+        <div class="empty-sessions" id="emptySessions">还没有会话。发第一条消息就会出现在这里。</div>
+      </div>
+
+      <div class="sidebar-footer">
+        <button class="footer-btn" id="openBoard" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="10" rx="1.5"/></svg>
+          看板
+        </button>
+        <button class="footer-btn" id="openUsage" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 19V5M4 19h16"/><path d="M7 15l3-4 3 2 4-6"/></svg>
+          用量
+        </button>
+        <button class="footer-btn" id="openSettings" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.3 1a7 7 0 0 0-1.7-1L14.5 3h-5l-.4 2.6a7 7 0 0 0-1.7 1l-2.3-1-2 3.4L5 10.5a7 7 0 0 0 0 2L3 14l2 3.4 2.3-1a7 7 0 0 0 1.7 1l.4 2.6h5l.4-2.6a7 7 0 0 0 1.7-1l2.3 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z"/></svg>
+          设置
+        </button>
+        <a class="footer-btn" href="demos.html" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3l2.4 5.1L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-.9L12 3Z"/></svg>
+          视觉 Demo
+        </a>
+      </div>
+    </aside>
+    <div class="sidebar-scrim" id="sidebarScrim" hidden></div>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-btn menu-btn" id="toggleSidebar" type="button" aria-label="打开会话列表">☰</button>
+        <div class="topbar-title">
+          <div class="topbar-session" id="sessionTitle">新对话</div>
+          <div class="topbar-sub" id="sessionSub">本地优先 · 供应商由配置决定</div>
+        </div>
+        <div class="topbar-actions">
+          <button class="palette-key" id="openPalette" type="button" title="命令面板（⌘K）" aria-label="打开命令面板"><span>⌘</span>K</button>
+          <button class="icon-btn context-btn" id="toggleContext" type="button" title="会话信息" aria-label="会话信息">▥</button>
+          <div class="model-picker" id="modelPickerWrap">
+            <button class="model-picker-btn" id="modelPickerBtn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="选择模型">
+              <span id="modelPickerLabel">未配置模型</span><span class="model-picker-caret" aria-hidden="true">▾</span>
+            </button>
+            <div class="model-picker-panel" id="modelPickerPanel" hidden role="listbox" aria-label="选择模型">
+              <div class="picker-search">
+                <input id="modelPickerSearch" type="search" placeholder="搜索模型或供应商…" aria-label="搜索模型">
+              </div>
+              <div class="picker-filters">
+                <div class="picker-chips" id="pickerCaps" aria-label="按能力过滤"></div>
+                <select id="pickerVendor" class="picker-vendor" aria-label="按供应商过滤"></select>
+              </div>
+              <div class="picker-list" id="pickerList"></div>
+            </div>
+          </div>
+          <span class="status-pill" id="gatewayPill" title="网关运行时状态"><span class="status-dot"></span><span id="gatewayText">连接中</span></span>
+        </div>
+      </header>
+
+      <section class="messages" id="messages" aria-live="polite" aria-label="对话内容">
+        <div class="messages-inner" id="messagesInner">
+          <div class="empty-state" id="emptyState">
+            <div class="empty-kicker">Local-first AI gateway</div>
+            <h1 class="empty-title">把模型留在本机，<br>把对话留在手边。</h1>
+            <p class="empty-copy">GQY 把不同供应商接进同一套协议。选一个模型，问点什么；思考、工具调用和用量都会留在这次对话里。</p>
+            <div class="suggestion-grid" id="suggestions">
+              <button class="suggestion" type="button" data-suggestion="用三句话解释 GQY 的路由组、失败转移和会话亲和。"><strong>解释机制</strong>路由组、失败转移、会话亲和</button>
+              <button class="suggestion" type="button" data-suggestion="帮我设计一个 providers.json，接入两个供应商、三个账号，并给一个日常路由组。"><strong>配置供应商</strong>两个 provider、三个账号</button>
+              <button class="suggestion" type="button" data-suggestion="读一下当前工作区的 README，告诉我这个项目现在能做什么、还缺什么。"><strong>读项目</strong>总结当前能力与缺口</button>
+              <button class="suggestion" type="button" data-suggestion="写一段 Go 代码，演示原子写配置文件，并解释为什么需要 rename。"><strong>写点代码</strong>原子写与崩溃安全</button>
+            </div>
+          </div>
+          <div class="thread" id="thread"></div>
+        </div>
+      </section>
+
+      <div class="composer-wrap">
+        <div class="attachments" id="attachments" hidden></div>
+        <form class="composer" id="composer" autocomplete="off">
+          <textarea id="input" rows="1" placeholder="问点什么…（Enter 发送，Shift+Enter 换行）" aria-label="消息输入"></textarea>
+          <div class="composer-actions">
+            <button class="icon-btn" id="attachBtn" type="button" title="添加附件" aria-label="添加附件">＋</button>
+            <input id="fileInput" type="file" multiple hidden>
+            <button class="icon-btn stop-btn" id="stopBtn" type="button" hidden title="停止生成" aria-label="停止生成">■</button>
+            <button class="send-btn" id="sendBtn" type="submit">发送</button>
+          </div>
+        </form>
+        <div class="composer-hint">
+          <span id="draftStatus"></span>
+          <span id="tokenHint">未发送</span>
+        </div>
+      </div>
+      <button class="jump-bottom" id="jumpBottom" type="button" hidden>↓ 回到底部</button>
+    </main>
+  </div>
+
+  <div class="overlay palette-overlay" id="paletteOverlay" hidden>
+    <section class="palette" role="dialog" aria-modal="true" aria-label="命令面板">
+      <div class="palette-search">
+        <span class="palette-key-label">⌘K</span>
+        <input id="paletteInput" type="text" placeholder="搜索会话或执行命令…" autocomplete="off" aria-label="搜索会话或命令">
+      </div>
+      <div class="palette-list" id="paletteList"></div>
+      <div class="palette-foot"><span><kbd>↑</kbd><kbd>↓</kbd> 选择</span><span><kbd>↵</kbd> 执行</span><span><kbd>esc</kbd> 关闭</span><span><button type="button" id="openShortcuts">快捷键</button></span></div>
+    </section>
+  </div>
+
+  <div class="overlay" id="shortcutsOverlay" hidden>
+    <section class="confirm-box shortcuts-box" role="dialog" aria-modal="true" aria-labelledby="shortcutsTitle">
+      <h2 id="shortcutsTitle">键盘快捷键</h2>
+      <div class="shortcut-list">
+        <div><kbd>⌘ K</kbd><span>命令面板</span></div>
+        <div><kbd>⌘ ,</kbd><span>打开控制台</span></div>
+        <div><kbd>⌘ ⇧ N</kbd><span>新对话（部分浏览器会拦截）</span></div>
+        <div><kbd>Esc</kbd><span>关闭浮层 / 停止生成</span></div>
+        <div><kbd>Enter</kbd><span>发送</span></div>
+        <div><kbd>Shift Enter</kbd><span>换行</span></div>
+      </div>
+      <div class="confirm-actions"><button class="btn primary" type="button" data-close="shortcutsOverlay">知道了</button></div>
+    </section>
+  </div>
+
+  <div class="overlay" id="confirmOverlay" hidden>
+    <section class="confirm-box" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle">
+      <h2 id="confirmTitle">确认</h2>
+      <p id="confirmMessage"></p>
+      <div class="confirm-actions">
+        <button class="btn ghost" id="confirmCancel" type="button">取消</button>
+        <button class="btn primary" id="confirmOk" type="button">确认</button>
+      </div>
+    </section>
+  </div>
+
+  <aside class="drawer" id="contextDrawer" hidden aria-label="会话信息">
+    <header class="drawer-head">
+      <div>
+        <strong>会话信息</strong>
+        <small>上下文、工具与产物</small>
+      </div>
+      <button class="close-btn" id="closeContext" type="button" aria-label="关闭会话信息">✕</button>
+    </header>
+    <div class="drawer-body" id="contextBody"></div>
+  </aside>
+  <div class="drawer-scrim" id="contextScrim" hidden></div>
+
+  <div class="overlay console-overlay" id="consoleOverlay" hidden>
+    <section class="console-panel" role="dialog" aria-modal="true" aria-labelledby="consoleTitle">
+      <aside class="console-rail">
+        <div class="console-rail-head">
+          <span class="brand-mark" aria-hidden="true">G</span>
+          <div><strong>控制台</strong><small>Console</small></div>
+        </div>
+        <nav class="console-nav" id="consoleNav" aria-label="控制台分类"></nav>
+        <div class="console-rail-foot">
+          <a href="demos.html" target="_blank" rel="noopener">视觉 Demo</a>
+          <button class="close-btn" type="button" data-close="consoleOverlay" aria-label="关闭控制台">✕</button>
+        </div>
+      </aside>
+      <div class="console-main">
+        <header class="console-head">
+          <div>
+            <h2 class="panel-title" id="consoleTitle">用量</h2>
+            <p class="panel-sub" id="consoleSub">本会话与账号配额</p>
+          </div>
+        </header>
+        <div class="console-body" id="consoleBody"></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="overlay" id="boardOverlay" hidden>
+    <section class="panel" role="dialog" aria-modal="true" aria-labelledby="boardTitle">
+      <header class="panel-head">
+        <div class="panel-title-wrap">
+          <h2 class="panel-title" id="boardTitle">看板</h2>
+          <div class="panel-sub">本机任务卡，存在这个浏览器里</div>
+        </div>
+        <button class="close-btn" type="button" data-close="boardOverlay" aria-label="关闭看板">✕</button>
+      </header>
+      <div class="panel-body" id="boardBody"></div>
+    </section>
+  </div>
+
+  <div class="overlay" id="onboardingOverlay" hidden>
+    <section class="onboarding-box" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle">
+      <div class="empty-kicker">第一次见面</div>
+      <h1 id="onboardingTitle">选一个顺眼的工作台。</h1>
+      <p>六种视觉方向，随时可以在设置里换。当前只做界面与本地网关的体验版：会话、流式回复、工具轨迹、草稿与附件都已经接上。</p>
+      <div class="onboarding-themes" id="onboardingThemes"></div>
+      <div class="onboarding-actions">
+        <button class="btn ghost" id="skipOnboarding" type="button">先直接用</button>
+        <button class="btn primary" id="finishOnboarding" type="button">开始对话</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="overlay" id="loginOverlay" hidden>
+    <section class="login-box" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+      <h1 id="loginTitle">需要访问令牌</h1>
+      <p>这个 GQY 实例设置了 <code>GQY_AUTH_TOKEN</code>。令牌只用于换取 HttpOnly cookie，不会存进浏览器的 localStorage。</p>
+      <form class="login-form" id="loginForm">
+        <input id="loginToken" type="password" placeholder="粘贴访问令牌" autocomplete="current-password" required>
+        <button class="btn primary" type="submit">进入</button>
+      </form>
+    </section>
+  </div>
+
+  <div class="overlay lightbox" id="lightbox" hidden>
+    <img id="lightboxImg" alt="预览图片">
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <noscript><p style="padding:24px">GQY 的界面需要 JavaScript。</p></noscript>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

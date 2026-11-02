@@ -1,0 +1,17 @@
+{
+  "name": "GQY",
+  "short_name": "GQY",
+  "description": "本地优先的 AI 助手网关",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f2ece2",
+  "theme_color": "#b5522f",
+  "icons": [
+    {"src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}
+  ],
+  "shortcuts": [
+    {"name": "新对话", "short_name": "新对话", "url": "/"},
+    {"name": "视觉 Demo", "short_name": "Demo", "url": "/demos.html"}
+  ]
+}

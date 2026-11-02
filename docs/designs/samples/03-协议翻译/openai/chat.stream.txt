@@ -1,0 +1,45 @@
+# OpenAI Chat Completions 兼容流式 · 规范样例（手工书写，非真实抓包）
+# 语法：data: {...} 为协议帧；空行分隔 SSE 事件；# 开头为中文注释，不参与字节回放。
+# 映射规则见 blueprint/protocol.md 3.4：delta.content → text；delta.reasoning_content → thinking；
+# delta.tool_calls → tool_call（arguments 为分片字符串，累积后反序列化为对象）；usage → usage；
+# finish_reason → done.stop_reason；data: [DONE] 为终止帧。
+
+data: {"id":"chatcmpl-000000000000000000000001","object":"chat.completion.chunk","created":1730000000,"model":"deepseek-chat","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+# 帧 1：role delta → 无内部事件（流起点，只确认 assistant 角色）
+
+data: {"id":"chatcmpl-000000000000000000000001","object":"chat.completion.chunk","created":1730000000,"model":"deepseek-chat","choices":[{"index":0,"delta":{"reasoning_content":"让我想想"},"finish_reason":null}]}
+
+# 帧 2：delta.reasoning_content → thinking.delta = "让我想想"
+
+data: {"id":"chatcmpl-000000000000000000000001","object":"chat.completion.chunk","created":1730000000,"model":"deepseek-chat","choices":[{"index":0,"delta":{"content":"你好"},"finish_reason":null}]}
+
+# 帧 3：delta.content → text.delta = "你好"
+
+data: {"id":"chatcmpl-000000000000000000000001","object":"chat.completion.chunk","created":1730000000,"model":"deepseek-chat","choices":[{"index":0,"delta":{"content":"，我先读一下文件。"},"finish_reason":null}]}
+
+# 帧 4：delta.content → text.delta = "，我先读一下文件。"
+
+data: {"id":"chatcmpl-000000000000000000000001","object":"chat.completion.chunk","created":1730000000,"model":"deepseek-chat","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read","arguments":""}}]},"finish_reason":null}]}
+
+# 帧 5：delta.tool_calls 首个分片 → tool_call（index=0, id=call_1, name=read, arguments_delta=""）
+
+data: {"id":"chatcmpl-000000000000000000000001","object":"chat.completion.chunk","created":1730000000,"model":"deepseek-chat","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":"}}]},"finish_reason":null}]}
+
+# 帧 6：tool_calls 参数分片 → tool_call.arguments_delta = "{\"path\":"
+
+data: {"id":"chatcmpl-000000000000000000000001","object":"chat.completion.chunk","created":1730000000,"model":"deepseek-chat","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"docs/README.md\"}"}}]},"finish_reason":null}]}
+
+# 帧 7：tool_calls 参数分片 → tool_call.arguments_delta = "\"docs/README.md\"}"
+
+data: {"id":"chatcmpl-000000000000000000000001","object":"chat.completion.chunk","created":1730000000,"model":"deepseek-chat","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+# 帧 8：finish_reason=tool_calls → done.stop_reason = tool_use
+
+data: {"id":"chatcmpl-000000000000000000000001","object":"chat.completion.chunk","created":1730000000,"model":"deepseek-chat","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":8,"total_tokens":18}}
+
+# 帧 9：usage → usage（prompt_tokens=10, completion_tokens=8）；include_usage 时 usage 放末 chunk，恰一次
+
+data: [DONE]
+
+# 帧 10：data: [DONE] → 终止帧，无内部事件，标志流结束

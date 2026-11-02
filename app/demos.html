@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="paper">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>GQY 视觉方向</title>
+  <link rel="stylesheet" href="styles/tokens.css">
+  <link rel="stylesheet" href="styles/demos.css">
+</head>
+<body class="demo-page">
+  <header class="demo-header">
+    <a class="demo-back" href="/">← 返回应用</a>
+    <div class="demo-eyebrow">GQY · Visual directions</div>
+    <h1>六种工作台气质。</h1>
+    <p>同一个界面，六套材质。挑一个先开始，之后在设置里随时换。每一张卡都可以直接带主题参数打开应用。</p>
+  </header>
+
+  <main class="demo-grid">
+    <article class="demo-card" data-theme="paper">
+      <div class="demo-card-head">
+        <div>
+          <h2>暖纸 <span>paper</span></h2>
+          <p>暖纸底、赤陶强调、衬线标题。适合阅读、写作和长时间停留。</p>
+        </div>
+        <a class="demo-open" href="/?theme=paper">打开 →</a>
+      </div>
+      <div class="mock-window">
+        <aside class="mock-side">
+          <div class="mock-brand">G</div>
+          <div class="mock-new">＋ 新对话</div>
+          <div class="mock-label">会话</div>
+          <div class="mock-item active"><span>失败转移的含义</span><i></i></div>
+          <div class="mock-item"><span>整理 providers.json</span><i></i></div>
+          <div class="mock-item"><span>看板</span><i></i></div>
+        </aside>
+        <div class="mock-main">
+          <div class="mock-top"><span>失败转移的含义</span><span class="mock-pill">2/3 健康</span></div>
+          <div class="mock-chat">
+            <div class="mock-user">帮我解释一下失败转移。</div>
+            <div class="mock-assistant">
+              <div class="mock-who">GQY</div>
+              <p>只在响应开始前换候选。一旦已经开始流式输出，错误直接交还给客户端，不再换账号。</p>
+              <div class="mock-tool"><span class="mock-dot"></span>read · docs/designs/02-网关与路由.md <em>12ms</em></div>
+            </div>
+          </div>
+          <div class="mock-composer">问点什么… <span>发送</span></div>
+        </div>
+      </div>
+      <div class="demo-meta">
+        <div class="swatches"><i style="background:#f2ece2"></i><i style="background:#b5522f"></i><i style="background:#221c17"></i></div>
+        <span>暖纸 / 赤陶 / 衬线</span>
+      </div>
+    </article>
+
+    <article class="demo-card" data-theme="midnight">
+      <div class="demo-card-head">
+        <div>
+          <h2>午夜 <span>midnight</span></h2>
+          <p>深色玻璃、冷色荧光。夜里盯着网关、日志和长对话时更舒服。</p>
+        </div>
+        <a class="demo-open" href="/?theme=midnight">打开 →</a>
+      </div>
+      <div class="mock-window">
+        <aside class="mock-side">
+          <div class="mock-brand">G</div>
+          <div class="mock-new">＋ 新对话</div>
+          <div class="mock-label">会话</div>
+          <div class="mock-item active"><span>最近的冷却</span><i></i></div>
+          <div class="mock-item"><span>两账号失败转移</span><i></i></div>
+          <div class="mock-item"><span>看板</span><i></i></div>
+        </aside>
+        <div class="mock-main">
+          <div class="mock-top"><span>最近的冷却</span><span class="mock-pill warn">1 冷却</span></div>
+          <div class="mock-chat">
+            <div class="mock-user">看下 requests.jsonl 里最近的冷却。</div>
+            <div class="mock-assistant">
+              <div class="mock-who">GQY</div>
+              <p>过去十分钟有一次 429：<code>deepseek/a1</code> 冷却 30s，请求转移到了 <code>a2</code>。</p>
+              <div class="mock-tool"><span class="mock-dot"></span>shell · tail -n 20 requests.jsonl <em>9ms</em></div>
+            </div>
+          </div>
+          <div class="mock-composer">问点什么… <span>发送</span></div>
+        </div>
+      </div>
+      <div class="demo-meta">
+        <div class="swatches"><i style="background:#080b14"></i><i style="background:#64e6d4"></i><i style="background:#9b8cff"></i></div>
+        <span>深蓝 / 青绿 / 紫</span>
+      </div>
+    </article>
+
+    <article class="demo-card" data-theme="editorial">
+      <div class="demo-card-head">
+        <div>
+          <h2>校样 <span>editorial</span></h2>
+          <p>白底黑字、钴蓝强调、直角与细线。像一份排好的校样，信息密度更高。</p>
+        </div>
+        <a class="demo-open" href="/?theme=editorial">打开 →</a>
+      </div>
+      <div class="mock-window">
+        <aside class="mock-side">
+          <div class="mock-brand">G</div>
+          <div class="mock-new">＋ 新对话</div>
+          <div class="mock-label">会话</div>
+          <div class="mock-item active"><span>两个账号的配置</span><i></i></div>
+          <div class="mock-item"><span>原子写为什么重要</span><i></i></div>
+          <div class="mock-item"><span>看板</span><i></i></div>
+        </aside>
+        <div class="mock-main">
+          <div class="mock-top"><span>两个账号的配置</span><span class="mock-pill">配置 v3</span></div>
+          <div class="mock-chat">
+            <div class="mock-user">把 providers.json 改成两个账号，第二个留空密钥。</div>
+            <div class="mock-assistant">
+              <div class="mock-who">GQY</div>
+              <p>第二个账号留空 <code>api_key</code>，运行时回退到 <code>GQY_PROVIDER_&lt;ID&gt;_API_KEY</code>。读接口只会返回 <code>api_key_set</code>。</p>
+              <div class="mock-tool"><span class="mock-dot"></span>edit · providers.json <em>18ms</em></div>
+            </div>
+          </div>
+          <div class="mock-composer">问点什么… <span>发送</span></div>
+        </div>
+      </div>
+      <div class="demo-meta">
+        <div class="swatches"><i style="background:#fbfaf6"></i><i style="background:#1d4ed8"></i><i style="background:#151515"></i></div>
+        <span>白 / 钴蓝 / 黑</span>
+      </div>
+    </article>
+
+    <article class="demo-card" data-theme="moss">
+      <div class="demo-card-head">
+        <div>
+          <h2>苔原 <span>moss</span></h2>
+          <p>灰绿、圆角、柔软留白。更轻、更亲近的工作台气质。</p>
+        </div>
+        <a class="demo-open" href="/?theme=moss">打开 →</a>
+      </div>
+      <div class="mock-window">
+        <aside class="mock-side">
+          <div class="mock-brand">G</div>
+          <div class="mock-new">＋ 新对话</div>
+          <div class="mock-label">会话</div>
+          <div class="mock-item active"><span>读蓝图</span><i></i></div>
+          <div class="mock-item"><span>今天的看板</span><i></i></div>
+          <div class="mock-item"><span>设置</span><i></i></div>
+        </aside>
+        <div class="mock-main">
+          <div class="mock-top"><span>读蓝图</span><span class="mock-pill">session 80%</span></div>
+          <div class="mock-chat">
+            <div class="mock-user">读一下 docs/blueprint/01，告诉我现在网关长什么样。</div>
+            <div class="mock-assistant">
+              <div class="mock-who">GQY</div>
+              <p>候选先展开到账号，再按策略排序；冷却直接过滤，配额耗尽的账号不进候选。流式开始后不切换。</p>
+              <div class="mock-tool"><span class="mock-dot"></span>read · docs/blueprint/01-配置与网关.md <em>8ms</em></div>
+            </div>
+          </div>
+          <div class="mock-composer">问点什么… <span>发送</span></div>
+        </div>
+      </div>
+      <div class="demo-meta">
+        <div class="swatches"><i style="background:#eef1e7"></i><i style="background:#4f6f43"></i><i style="background:#22281e"></i></div>
+        <span>灰绿 / 苔原 / 圆角</span>
+      </div>
+    </article>
+    <article class="demo-card" data-theme="dawn">
+      <div class="demo-card-head">
+        <div>
+          <h2>晨光 <span>dawn</span></h2>
+          <p>暖白纸面、紫藤强调。参考 GQY WebUI 的 dawn 方向，适合白天阅读。</p>
+        </div>
+        <a class="demo-open" href="/?theme=dawn">打开 →</a>
+      </div>
+      <div class="mock-window">
+        <aside class="mock-side">
+          <div class="mock-brand">G</div>
+          <div class="mock-new">＋ 新对话</div>
+          <div class="mock-label">会话</div>
+          <div class="mock-item active"><span>路由组怎么选</span><i></i></div>
+          <div class="mock-item"><span>看今天的用量</span><i></i></div>
+          <div class="mock-item"><span>控制台</span><i></i></div>
+        </aside>
+        <div class="mock-main">
+          <div class="mock-top"><span>路由组怎么选</span><span class="mock-pill">配置 v3</span></div>
+          <div class="mock-chat">
+            <div class="mock-user">order、rotate、usage 应该怎么选？</div>
+            <div class="mock-assistant">
+              <div class="mock-who">GQY</div>
+              <p>日常用 order；多账号想均匀用时用 rotate；想优先最久没用的成员，用 usage。</p>
+              <div class="mock-tool"><span class="mock-dot"></span>read · docs/designs/02-网关与路由.md <em>11ms</em></div>
+            </div>
+          </div>
+          <div class="mock-composer">问点什么… <span>发送</span></div>
+        </div>
+      </div>
+      <div class="demo-meta">
+        <div class="swatches"><i style="background:#f8f3ea"></i><i style="background:#7568b0"></i><i style="background:#2b2633"></i></div>
+        <span>暖白 / 紫藤 / 墨</span>
+      </div>
+    </article>
+
+    <article class="demo-card" data-theme="dusk">
+      <div class="demo-card-head">
+        <div>
+          <h2>夜阑 <span>dusk</span></h2>
+          <p>暮蓝底色、雾蓝强调。参考 GQY WebUI 的 dusk 方向，适合夜间。</p>
+        </div>
+        <a class="demo-open" href="/?theme=dusk">打开 →</a>
+      </div>
+      <div class="mock-window">
+        <aside class="mock-side">
+          <div class="mock-brand">G</div>
+          <div class="mock-new">＋ 新对话</div>
+          <div class="mock-label">会话</div>
+          <div class="mock-item active"><span>看今日看板</span><i></i></div>
+          <div class="mock-item"><span>插件状态</span><i></i></div>
+          <div class="mock-item"><span>控制台</span><i></i></div>
+        </aside>
+        <div class="mock-main">
+          <div class="mock-top"><span>看今日看板</span><span class="mock-pill">2/3 健康</span></div>
+          <div class="mock-chat">
+            <div class="mock-user">把今天还没做的任务列出来。</div>
+            <div class="mock-assistant">
+              <div class="mock-who">GQY</div>
+              <p>待办 2 张、进行中 1 张。最先做的是“给路由组加 usage 策略”。</p>
+              <div class="mock-tool"><span class="mock-dot"></span>read · board (local) <em>3ms</em></div>
+            </div>
+          </div>
+          <div class="mock-composer">问点什么… <span>发送</span></div>
+        </div>
+      </div>
+      <div class="demo-meta">
+        <div class="swatches"><i style="background:#141826"></i><i style="background:#aebde8"></i><i style="background:#7568b0"></i></div>
+        <span>暮蓝 / 雾蓝 / 紫</span>
+      </div>
+    </article>
+  </main>
+
+  <footer class="demo-footer">
+    <span>GQY · 本地优先的 AI 助手网关</span>
+    <a href="/">回到对话</a>
+  </footer>
+</body>
+</html>

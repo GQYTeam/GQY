@@ -1,0 +1,69 @@
+version: 2
+
+project_name: gqy
+
+builds:
+  - id: gqy-server
+    dir: app
+    main: ./cmd/gqy-server
+    binary: gqy-server
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X gqy/internal/buildinfo.Version={{.Version}}
+      - -X gqy/internal/buildinfo.Commit={{.Commit}}
+      - -X gqy/internal/buildinfo.Date={{.Date}}
+
+  - id: gqy-clean
+    dir: app
+    main: ./cmd/gqy-clean
+    binary: gqy-clean
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X gqy/internal/buildinfo.Version={{.Version}}
+      - -X gqy/internal/buildinfo.Commit={{.Commit}}
+      - -X gqy/internal/buildinfo.Date={{.Date}}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+
+release:
+  draft: false
+  prerelease: auto
+  footer: |
+    安装后运行 `gqy-server`，默认监听 `127.0.0.1:5173`。
+    设计文档与配置说明见仓库 `docs/`。

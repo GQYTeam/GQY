@@ -8,4 +8,15 @@ node_modules/
 .gqy/
 app/bin/
 app/tmp/
+app/gqy-server
+app/gqy-clean
+app/gqy-eval
+app/gqy-run
+app/coverage.out
+coverage.out
+dist/
+.goreleaser/
+.idea/
+.vscode/
+*.test
 .claude/worktrees/

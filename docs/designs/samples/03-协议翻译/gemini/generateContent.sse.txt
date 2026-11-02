@@ -1,0 +1,24 @@
+# Gemini generateContent（alt=sse）流式 · 规范样例（手工书写，非真实抓包）
+# 语法：data: {...} 为协议帧；空行分隔 SSE 事件；# 开头为中文注释。
+# 映射规则见 blueprint/protocol.md 3.4：parts[].text → text；parts[].thought → thinking；
+# parts[].functionCall → tool_call；finishReason → done.stop_reason；usageMetadata → usage。
+
+data: {"candidates":[{"content":{"parts":[{"text":"你好"}],"role":"model"},"index":0}]}
+
+# 帧 1：parts[].text → text.delta = "你好"
+
+data: {"candidates":[{"content":{"parts":[{"text":"，我先读一下文件。"}],"role":"model"},"index":0}]}
+
+# 帧 2：parts[].text → text.delta = "，我先读一下文件。"
+
+data: {"candidates":[{"content":{"parts":[{"thought":"让我想想"}],"role":"model"},"index":0}]}
+
+# 帧 3：parts[].thought → thinking.delta = "让我想想"
+
+data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"read","args":{"path":"docs/README.md"}}}],"role":"model"},"index":0}]}
+
+# 帧 4：parts[].functionCall → tool_call（name=read，args 为对象，整体一次到达）
+
+data: {"candidates":[{"content":{"parts":[],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":8,"totalTokenCount":18}}
+
+# 帧 5：finishReason=STOP → done.stop_reason = end_turn；usageMetadata → usage（prompt_tokens=10, completion_tokens=8），末帧恰一次

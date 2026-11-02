@@ -1,0 +1,75 @@
+# Anthropic Messages 流式事件族 · 规范样例（手工书写，非真实抓包）
+# 语法：每个事件由 event: 行 + data: 行组成，空行分隔；# 开头为中文注释。
+# 映射规则见 blueprint/protocol.md 3.4：thinking_delta → thinking；text_delta → text；
+# input_json_delta → tool_call.arguments_delta（累积成合法 JSON 后反序列化为 input 对象）；
+# message_delta.stop_reason → done.stop_reason；usage → usage（恰一次）。
+
+event: message_start
+data: {"type":"message_start","message":{"id":"msg_000000000000000000000001","type":"message","role":"assistant","content":[],"model":"claude-3-5-sonnet-20241022","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":1}}}
+
+# message_start → 无内部事件（流起点；携带 message.id 与 usage.input_tokens，内部 usage 在 message_delta 合并发出）
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}
+
+# content_block_start(thinking) → 无内部事件（思考块起点；signature 透传、不落日志）
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"让我想想"}}
+
+# content_block_delta(thinking_delta) → thinking.delta = "让我想想"
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+# content_block_stop → 无内部事件（思考块结束）
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+# content_block_start(text) → 无内部事件（正文块起点）
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"你好"}}
+
+# content_block_delta(text_delta) → text.delta = "你好"
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"，我先读一下文件。"}}
+
+# content_block_delta(text_delta) → text.delta = "，我先读一下文件。"
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+# content_block_stop → 无内部事件（正文块结束）
+
+event: content_block_start
+data: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_000000000000000000000001","name":"read","input":{}}}
+
+# content_block_start(tool_use) → 无内部事件（工具块起点，记录 index=2、id、name；input 随后以 JSON 分片到达）
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"path\":"}}
+
+# content_block_delta(input_json_delta) → tool_call.arguments_delta = "{\"path\":"
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"\"docs/README.md\"}"}}
+
+# content_block_delta(input_json_delta) → tool_call.arguments_delta = "\"docs/README.md\"}"
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":2}
+
+# content_block_stop → 工具参数块结束；两个分片拼接后是合法 JSON：{"path":"docs/README.md"}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":8}}
+
+# message_delta → done.stop_reason = tool_use；usage（output_tokens=8）与 message_start 的 input_tokens 合并后恰发一次
+
+event: message_stop
+data: {"type":"message_stop"}
+
+# message_stop → 终止帧，无内部事件，标志流结束
