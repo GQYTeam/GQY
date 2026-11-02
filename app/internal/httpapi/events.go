@@ -34,6 +34,17 @@ func (h *eventHub) unsubscribe(ch chan []byte) {
 	h.mu.Unlock()
 }
 
+// closeAll 在服务退出时关掉所有 SSE 长连接：订阅者收到通道关闭后返回，http.Server.Shutdown 才等得到在途请求结束。
+// 不关的话，SSE 的请求上下文不随 Shutdown 取消，优雅关闭会一直等到超时。
+func (h *eventHub) closeAll() {
+	h.mu.Lock()
+	for ch := range h.subs {
+		close(ch)
+		delete(h.subs, ch)
+	}
+	h.mu.Unlock()
+}
+
 // publish 广播一个事件；data 会被编码成 JSON。
 func (h *eventHub) publish(kind string, data any) {
 	payload, err := json.Marshal(map[string]any{"type": kind, "data": data, "ts": time.Now().UTC().Format(time.RFC3339)})
@@ -54,6 +65,13 @@ func (h *eventHub) publish(kind string, data any) {
 func (s *Server) Publish(kind string, data any) {
 	if s.events != nil {
 		s.events.publish(kind, data)
+	}
+}
+
+// CloseEvents 关掉所有 SSE 长连接，供进程退出时在 http.Server.Shutdown 之前调用。
+func (s *Server) CloseEvents() {
+	if s.events != nil {
+		s.events.closeAll()
 	}
 }
 

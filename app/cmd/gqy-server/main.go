@@ -142,6 +142,8 @@ func run() int {
 
 		case <-ctx.Done():
 			log.Info("收到退出信号，等待在途请求结束")
+			// 先关 SSE 长连接：它们的请求上下文不随 Shutdown 取消，不关会等到超时。
+			api.CloseEvents()
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			if err := srv.Shutdown(shutdownCtx); err != nil {
 				log.Error("优雅关闭失败", "error", err)
