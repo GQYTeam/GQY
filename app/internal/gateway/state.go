@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"gqy/internal/config"
+	"gqy/internal/metrics"
 	"gqy/internal/provider"
 )
 
@@ -68,6 +69,9 @@ func (r *Router) recordCall(c *candidate) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c.State.calls++
+	metrics.Inc("gqy_gateway_attempts_total", "Gateway attempts per account", map[string]string{
+		"provider": c.Provider.ID, "account": c.Account.ID,
+	})
 }
 
 func (r *Router) recordSuccess(c *candidate, usage provider.Usage, sessionID string, now time.Time) {
@@ -75,6 +79,12 @@ func (r *Router) recordSuccess(c *candidate, usage provider.Usage, sessionID str
 	defer r.mu.Unlock()
 	resetQuotaLocked(c.State, now)
 	c.State.usedTokens += int64(usage.Total())
+	metrics.Add("gqy_gateway_tokens_total", "Gateway tokens by direction", map[string]string{
+		"provider": c.Provider.ID, "account": c.Account.ID, "direction": "prompt",
+	}, float64(usage.PromptTokens))
+	metrics.Add("gqy_gateway_tokens_total", "Gateway tokens by direction", map[string]string{
+		"provider": c.Provider.ID, "account": c.Account.ID, "direction": "completion",
+	}, float64(usage.CompletionTokens))
 	c.State.lastUsed = now
 	for _, key := range c.MemberKeys {
 		r.memberLastUsed[key] = now
@@ -88,6 +98,9 @@ func (r *Router) recordFailure(c *candidate, pe *provider.Error, cooldownSeconds
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c.State.failures++
+	metrics.Inc("gqy_gateway_failures_total", "Gateway failures per account", map[string]string{
+		"provider": c.Provider.ID, "account": c.Account.ID,
+	})
 	if pe != nil && pe.Retryable {
 		if cooldownSeconds <= 0 {
 			cooldownSeconds = config.DefaultCooldownSecs
@@ -169,6 +182,11 @@ func (r *Router) logRequest(entry requestLogEntry) {
 		return
 	}
 	entry.TS = r.now().UTC().Format(time.RFC3339)
+	if r.logs != nil {
+		// MT5：异步批量写，不阻塞请求路径。
+		r.logs.append(entry)
+		return
+	}
 	if err := AppendRequestLog(r.home, entry); err != nil {
 		r.log.Warn("请求日志写入失败", "error", err)
 	}

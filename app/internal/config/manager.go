@@ -18,6 +18,19 @@ type Manager struct {
 	mu         sync.Mutex
 	lastReload time.Time
 	lastErr    string
+
+	// subs 在快照切换后按注册顺序回调（HR1/HR3）；回调在锁外执行，可安全读 Current()。
+	subs []func(*Snapshot)
+}
+
+// Subscribe 注册配置切换回调；用于让工具表、插件暴露等随配置热更新（HR3）。
+func (m *Manager) Subscribe(fn func(*Snapshot)) {
+	if fn == nil {
+		return
+	}
+	m.mu.Lock()
+	m.subs = append(m.subs, fn)
+	m.mu.Unlock()
 }
 
 // NewManager 构造管理器并加载第一份快照。配置非法时启动失败。
@@ -42,17 +55,24 @@ func (m *Manager) Current() *Snapshot {
 // Reload 重新读取并校验全部配置；成功后原子切换，失败保留旧快照（CF4、CF5）。
 func (m *Manager) Reload() (*Snapshot, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	current := m.snap.Load()
 	next, err := Build(m.startup, current.Version+1, m.getenv, m.now())
 	m.lastReload = m.now()
 	if err != nil {
 		m.lastErr = err.Error()
+		m.mu.Unlock()
 		return nil, err
 	}
 	m.snap.Store(next)
 	m.lastErr = ""
+	subs := make([]func(*Snapshot), len(m.subs))
+	copy(subs, m.subs)
+	m.mu.Unlock()
+
+	// 锁外回调：订阅方可以安全读 Current()，也允许在回调里做重活。
+	for _, fn := range subs {
+		fn(next)
+	}
 	return next, nil
 }
 

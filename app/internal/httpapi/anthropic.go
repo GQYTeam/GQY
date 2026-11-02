@@ -37,7 +37,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	meta := gateway.Meta{RequestID: requestIDFrom(r), SessionID: sessionIDFrom(r)}
+	meta := metaFor(r)
 	if req.Stream {
 		s.streamAnthropic(w, r, snap, req, meta)
 		return

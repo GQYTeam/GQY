@@ -24,6 +24,10 @@ const (
 	CodeStreamInterrupted = "stream_interrupted"
 	CodeInvalidResponse   = "invalid_response"
 	CodeCanceled          = "canceled"
+	// 多租户（MT3）：租户未登记 / 超出每分钟配额 / 租户并发排队超时。
+	CodeTenantUnknown      = "tenant_unknown"
+	CodeTenantQuota        = "tenant_quota"
+	CodeTenantQueueTimeout = "tenant_queue_timeout"
 )
 
 // Error 是适配器归一后的错误，网关只消费 Retryable 与 Code（C9）。
@@ -33,6 +37,8 @@ type Error struct {
 	HTTPStatus int
 	Message    string
 	Err        error
+	// RetryAfter 是建议的重试等待秒数（429 等场景；0 表示不提供）。
+	RetryAfter int
 }
 
 func (e *Error) Error() string {
@@ -69,8 +75,12 @@ func (e *Error) ClientStatus() int {
 			return 413
 		}
 		return 400
-	case CodeRateLimited:
+	case CodeRateLimited, CodeTenantQuota:
 		return 429
+	case CodeTenantUnknown:
+		return 400
+	case CodeTenantQueueTimeout:
+		return 503
 	case CodeConnectionError, CodeProviderError, CodeInvalidResponse, CodeStreamInterrupted:
 		return 502
 	case CodeUpstreamTimeout:

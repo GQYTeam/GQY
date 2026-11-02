@@ -21,16 +21,18 @@ type ToolInfo struct {
 	Description string         `json:"description"`
 	Schema      map[string]any `json:"schema"`
 	Source      string         `json:"source"`
+	// Exposed 表示该工具当前会随请求下发给模型（插件工具可被 settings.expose_external_tools 关闭）。
+	Exposed bool `json:"exposed"`
 }
 
 // ToolInfos 返回核心与外部工具的只读清单。
 func (l *Loop) ToolInfos() []ToolInfo {
 	out := make([]ToolInfo, 0)
 	for _, t := range l.Tools.Core() {
-		out = append(out, ToolInfo{Name: t.Name(), Description: t.Description(), Schema: t.Schema(), Source: "core"})
+		out = append(out, ToolInfo{Name: t.Name(), Description: t.Description(), Schema: t.Schema(), Source: "core", Exposed: true})
 	}
 	for _, t := range l.Tools.External() {
-		out = append(out, ToolInfo{Name: t.Name(), Description: t.Description(), Schema: t.Schema(), Source: "external"})
+		out = append(out, ToolInfo{Name: t.Name(), Description: t.Description(), Schema: t.Schema(), Source: "external", Exposed: false})
 	}
 	return out
 }

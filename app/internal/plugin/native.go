@@ -26,7 +26,7 @@ func (a *NativeAdapter) Load(ctx context.Context, m *Manifest, dir string) (adap
 
 	initCtx, cancel := context.WithTimeout(ctx, timeout(m.TimeoutMS))
 	defer cancel()
-	result, err := tr.call(initCtx, "initialize", map[string]any{"protocol": ProtocolNative})
+	result, err := tr.call(initCtx, "initialize", map[string]any{"protocol": ProtocolNative, "settings": m.Values})
 	if err != nil {
 		_ = proc.Close()
 		return nil, err

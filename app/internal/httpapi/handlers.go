@@ -111,6 +111,7 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("配置重载成功", "version", snap.Version)
+	s.RefreshTools() // 暴露开关、插件依赖等可能随配置变化（HR3）
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":           true,
 		"version":      snap.Version,
@@ -143,11 +144,25 @@ type statusResponse struct {
 	Providers   []config.ProviderView `json:"providers"`
 	Accounts    []accountStatus       `json:"accounts"`
 	Routing     statusRouting         `json:"routing"`
+	Tenants     []tenantStatus        `json:"tenants,omitempty"`
 }
 
 type statusRouting struct {
 	Default *config.ModelRef `json:"default,omitempty"`
 	Groups  []config.Group   `json:"groups"`
+	Tenants []config.Tenant  `json:"tenants,omitempty"`
+}
+
+// tenantStatus 是 /api/gateway/status 里的租户条目（MT8）。
+type tenantStatus struct {
+	Name      string `json:"name"`
+	InFlight  int    `json:"in_flight"`
+	Peak      int    `json:"peak"`
+	Queued    int    `json:"queued"`
+	Accepted  int64  `json:"accepted"`
+	Rejected  int64  `json:"rejected"`
+	ReqPerMin int    `json:"req_per_min"`
+	MaxConc   int    `json:"max_concurrency"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -204,7 +219,28 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Routing: statusRouting{
 			Default: snap.Routing.Default,
 			Groups:  append([]config.Group(nil), snap.Routing.Groups...),
+			Tenants: append([]config.Tenant(nil), snap.Routing.Tenants...),
 		},
+		Tenants: nil,
+	}
+	live := map[string]bool{}
+	if s.gw != nil {
+		for _, t := range s.gw.TenantStatuses() {
+			live[t.Name] = true
+			status.Tenants = append(status.Tenants, tenantStatus{
+				Name: t.Name, InFlight: t.InFlight, Peak: t.Peak, Queued: t.Queued,
+				Accepted: t.Accepted, Rejected: t.Rejected, ReqPerMin: t.Limit, MaxConc: t.MaxConc,
+			})
+		}
+	}
+	// 已配置但还没流量（状态是懒创建的）的租户也展示出来，便于运维核对（MT8）。
+	for _, t := range snap.Routing.Tenants {
+		if live[t.Name] {
+			continue
+		}
+		status.Tenants = append(status.Tenants, tenantStatus{
+			Name: t.Name, ReqPerMin: t.ReqPerMin, MaxConc: t.MaxConcurrency,
+		})
 	}
 	writeJSON(w, http.StatusOK, status)
 }

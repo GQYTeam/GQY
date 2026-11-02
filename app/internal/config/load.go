@@ -250,6 +250,9 @@ func loadRouting(startup Startup, providers []Provider) (Routing, error) {
 	if file.QueueTimeoutMS != nil {
 		r.QueueTimeoutMS = *file.QueueTimeoutMS
 	}
+	if file.Tenants != nil {
+		r.Tenants = file.Tenants
+	}
 
 	problems := make([]string, 0)
 	if r.MaxAttempts < 0 {
@@ -269,6 +272,28 @@ func loadRouting(startup Startup, providers []Provider) (Routing, error) {
 	}
 	if r.QueueTimeoutMS < 0 {
 		problems = append(problems, "queue_timeout_ms 不能为负数")
+	}
+	seenTenant := map[string]bool{}
+	for i := range r.Tenants {
+		t := &r.Tenants[i]
+		t.Name = strings.TrimSpace(t.Name)
+		if t.Name == "" {
+			problems = append(problems, fmt.Sprintf("tenants[%d].name 不能为空", i))
+			continue
+		}
+		if !validTenantName(t.Name) {
+			problems = append(problems, "tenants["+t.Name+"].name 只能包含字母、数字、下划线、点、短横线，长度 1–64")
+		}
+		if seenTenant[t.Name] {
+			problems = append(problems, "tenants 名称重复: "+t.Name)
+		}
+		seenTenant[t.Name] = true
+		if t.MaxConcurrency < 0 || t.MaxConcurrency > 1024 {
+			problems = append(problems, "tenants["+t.Name+"].max_concurrency 必须在 0–1024 之间（0 表示不单独限制）")
+		}
+		if t.ReqPerMin < 0 || t.ReqPerMin > 1_000_000 {
+			problems = append(problems, "tenants["+t.Name+"].req_per_min 必须在 0–1000000 之间（0 表示不限）")
+		}
 	}
 	if r.QueueTimeoutMS == 0 {
 		r.QueueTimeoutMS = DefaultQueueTimeout
@@ -387,6 +412,7 @@ type routingFile struct {
 	MaxAttempts     *int      `json:"max_attempts"`
 	CooldownSeconds *int      `json:"cooldown_seconds"`
 	QueueTimeoutMS  *int      `json:"queue_timeout_ms"`
+	Tenants         []Tenant  `json:"tenants"`
 }
 
 func loadSettings(home string) (Settings, error) {
@@ -422,6 +448,9 @@ func loadSettings(home string) (Settings, error) {
 	if file.StreamIdleTimeoutS != nil {
 		settings.StreamIdleTimeoutS = *file.StreamIdleTimeoutS
 	}
+	if file.ExposeExternalTools != nil {
+		settings.ExposeExternalTools = *file.ExposeExternalTools
+	}
 	if file.ShellAllowlist != nil {
 		settings.ShellAllowlist = normalizeStrings(file.ShellAllowlist)
 	}
@@ -449,13 +478,14 @@ func loadSettings(home string) (Settings, error) {
 }
 
 type settingsFile struct {
-	WatchEnabled       *bool    `json:"watch_enabled"`
-	RateLimit          *int     `json:"rate_limit"`
-	ToolTimeoutS       *int     `json:"tool_timeout_s"`
-	ShellTimeoutS      *int     `json:"shell_timeout_s"`
-	UpstreamTimeoutS   *int     `json:"upstream_timeout_s"`
-	StreamIdleTimeoutS *int     `json:"stream_idle_timeout_s"`
-	ShellAllowlist     []string `json:"shell_allowlist"`
+	WatchEnabled        *bool    `json:"watch_enabled"`
+	RateLimit           *int     `json:"rate_limit"`
+	ToolTimeoutS        *int     `json:"tool_timeout_s"`
+	ShellTimeoutS       *int     `json:"shell_timeout_s"`
+	UpstreamTimeoutS    *int     `json:"upstream_timeout_s"`
+	StreamIdleTimeoutS  *int     `json:"stream_idle_timeout_s"`
+	ExposeExternalTools *bool    `json:"expose_external_tools"`
+	ShellAllowlist      []string `json:"shell_allowlist"`
 }
 
 func validProtocol(p string) bool {
@@ -549,4 +579,19 @@ func findGroupCycle(groups []Group) string {
 		}
 	}
 	return ""
+}
+
+// validTenantName 校验租户名：字母、数字、下划线、点、短横线，长度 1–64（MT2）。
+func validTenantName(name string) bool {
+	if name == "" || len(name) > 64 {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '.', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }

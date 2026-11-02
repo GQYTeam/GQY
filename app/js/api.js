@@ -60,6 +60,8 @@ function json(method, body) {
 export const api = {
   health: () => request("/healthz"),
   config: () => request("/api/config"),
+  persona: () => request("/api/persona"),
+  savePersona: (persona) => request("/api/persona", json("PUT", persona)),
   models: async () => {
     const body = await request("/v1/models");
     return body?.data || [];
@@ -77,6 +79,16 @@ export const api = {
   pluginScan: () => request("/api/plugins/reload", { method: "POST" }),
   pluginLoad: (id) => request(`/api/plugins/${encodeURIComponent(id)}/load`, { method: "POST" }),
   pluginUnload: (id) => request(`/api/plugins/${encodeURIComponent(id)}/unload`, { method: "POST" }),
+  // 插件设置（PL3）：安装的插件只读，但设置值可改；删除会卸载并移除目录（PL4）。
+  pluginSettings: (id) => request(`/api/plugins/${encodeURIComponent(id)}/settings`),
+  pluginSettingsSave: (id, values) =>
+    request(`/api/plugins/${encodeURIComponent(id)}/settings`, json("PUT", { values })),
+  pluginDelete: (id) => request(`/api/plugins/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  // 全局默认模型（HR5）：未指定 model 的请求都走它。
+  activeModel: () => request("/api/model/active"),
+  setActiveModel: (model, persist = true) =>
+    request("/api/model/active", { method: "PUT", body: { model, persist } }),
+  pluginInstall: (source, id) => request("/api/plugins/install", json("POST", { source, id })),
   sessions: async () => {
     const body = await request("/api/sessions");
     return body?.sessions || [];
@@ -171,4 +183,19 @@ export async function adoptBranch(goalID, branchID, summary = "") {
     throw new ApiError(message, response.status, code);
   }
   return response.json().catch(() => ({}));
+}
+
+// events 订阅服务端 SSE（HR7）：配置/插件/全局模型变化即时推送，替代前端轮询。
+export function events(onEvent) {
+  if (typeof EventSource === "undefined") return () => {};
+  const source = new EventSource("/api/events");
+  source.onmessage = (message) => {
+    if (!message.data) return;
+    try {
+      onEvent?.(JSON.parse(message.data));
+    } catch {
+      /* 忽略坏帧 */
+    }
+  };
+  return () => source.close();
 }

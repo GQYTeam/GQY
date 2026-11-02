@@ -2,15 +2,17 @@ import { api, AuthError, ApiError } from "./api.js";
 import { state, formatTokens } from "./store.js";
 import { esc } from "./markdown.js";
 import { THEMES, applyReduceMotion, applyTheme, themeCardHTML } from "./themes.js";
-import { emit, openOverlay, toast } from "./ui.js";
+import { confirmDialog, emit, on, openOverlay, toast } from "./ui.js";
 import { $ } from "./render.js";
 import { applyModel } from "./picker.js";
 
 let bound = false;
 let activeTab = "usage";
+let personaDraft = null;
 
 const TABS = [
   ["usage", "用量", "本会话与账号配额"],
+  ["persona", "人格", "名称、头像与系统提示词"],
   ["models", "模型", "当前目录里可用的 provider 与路由组"],
   ["providers", "供应商", "配置的 provider、账号与密钥状态"],
   ["gateway", "网关", "账号健康、冷却与配置重载"],
@@ -23,6 +25,12 @@ const TABS = [
 export function initSettings() {
   if (bound) return;
   bound = true;
+  // 插件集合变化（热加载/卸载/删除）时，如果控制台开着插件页就刷新（HR2/HR7）。
+  on("plugins-changed", () => {
+    if (!$("#consoleOverlay")?.hidden && activeTab === "plugins") {
+      ensurePlugins(true).catch(() => {});
+    }
+  });
   $("#openSettings")?.addEventListener("click", () => openConsole("appearance"));
   $("#openUsage")?.addEventListener("click", () => openConsole("usage"));
 }
@@ -37,11 +45,19 @@ export function openUsage() {
 
 function openConsole(tab) {
   activeTab = tab;
+  if (tab === "persona") personaDraft = { ...(state.persona || {}) };
   renderConsole();
   openOverlay("consoleOverlay", { focus: false });
-  requestAnimationFrame(() => $("#consoleNav .active")?.focus({ preventScroll: true }));
+  requestAnimationFrame(() => $("#consoleBody")?.focus({ preventScroll: true }));
   ensureStatus().catch(() => {});
-  if (tab === "plugins") ensurePlugins().catch(() => {});
+  if (tab === "plugins") {
+    ensurePlugins()
+      .then(() => {
+        const want = new URLSearchParams(location.search).get("pluginSettings");
+        if (want) togglePluginSettings(want);
+      })
+      .catch(() => {});
+  }
   if (tab === "tools") ensureTools().catch(() => {});
 }
 
@@ -111,6 +127,7 @@ function renderConsole() {
   if (sub) sub.textContent = meta[2];
 
   if (activeTab === "usage") body.innerHTML = usageHTML();
+  else if (activeTab === "persona") body.innerHTML = personaHTML();
   else if (activeTab === "models") body.innerHTML = modelsHTML();
   else if (activeTab === "providers") body.innerHTML = providersHTML();
   else if (activeTab === "gateway") body.innerHTML = gatewayHTML();
@@ -172,6 +189,111 @@ function usageHTML() {
     ${rows.length ? `<div class="usage-bars">${bars}</div>` : `<div class="empty-mini">还没有完成的回复。发一条消息后会在这里看到每回合的 prompt 与 completion。</div>`}
     <div class="section-label" style="padding:20px 0 8px">账号配额</div>
     ${accountRows ? `<div class="account-list">${accountRows}</div>` : `<div class="empty-mini">没有账号状态。配置 provider 后刷新。</div>`}`;
+}
+
+function personaHTML() {
+  const draft = personaDraft || state.persona || {};
+  const initial = Array.from(draft.name || "GQY")[0] || "G";
+  const preview = draft.avatar
+    ? `<img src="${esc(draft.avatar)}" alt="头像预览">`
+    : esc(initial);
+  return `<form class="persona-form" id="personaForm">
+      <div class="persona-avatar-row">
+        <div class="persona-avatar-preview" id="personaAvatarPreview">${preview}</div>
+        <div class="persona-actions">
+          <button class="btn" type="button" data-persona-pick>选择图片</button>
+          ${draft.avatar ? '<button class="btn ghost" type="button" data-persona-remove-avatar>移除头像</button>' : ""}
+          <input id="personaAvatarInput" type="file" accept="image/*" hidden>
+        </div>
+      </div>
+      <div class="persona-field">
+        <label for="personaName">名称</label>
+        <input id="personaName" type="text" maxlength="40" value="${esc(draft.name || "GQY")}" placeholder="助手叫什么">
+      </div>
+      <div class="persona-field">
+        <label for="personaTagline">一句话介绍</label>
+        <input id="personaTagline" type="text" maxlength="120" value="${esc(draft.tagline || "")}" placeholder="显示在侧栏与标题下方">
+      </div>
+      <div class="persona-field">
+        <label for="personaSystemPrompt">系统提示词</label>
+        <textarea id="personaSystemPrompt" maxlength="8000" placeholder="例如：回答简短、先给结论。每次对话会作为 system 消息放在最前面。">${esc(draft.system_prompt || "")}</textarea>
+      </div>
+      <div class="persona-actions">
+        <button class="btn primary" type="submit">保存人格</button>
+        <button class="btn ghost" type="button" data-persona-reset>恢复已保存</button>
+        <span class="field-hint">头像只存本机；建议 512×512 以内，最大 768 KB。</span>
+      </div>
+    </form>`;
+}
+
+function bindPersonaForm() {
+  const form = $("#personaForm");
+  if (!form) return;
+  if (!personaDraft) personaDraft = { ...(state.persona || {}) };
+  const name = $("#personaName");
+  const tagline = $("#personaTagline");
+  const prompt = $("#personaSystemPrompt");
+  const file = $("#personaAvatarInput");
+  const preview = $("#personaAvatarPreview");
+
+  const sync = () => {
+    personaDraft.name = name.value.trim();
+    personaDraft.tagline = tagline.value.trim();
+    personaDraft.system_prompt = prompt.value;
+  };
+  name?.addEventListener("input", sync);
+  tagline?.addEventListener("input", sync);
+  prompt?.addEventListener("input", sync);
+
+  form.querySelector("[data-persona-pick]")?.addEventListener("click", () => file?.click());
+  file?.addEventListener("change", async () => {
+    const picked = file.files?.[0];
+    if (!picked) return;
+    if (picked.size > 768 * 1024) {
+      toast("头像超过 768 KB", "bad");
+      file.value = "";
+      return;
+    }
+    personaDraft.avatar = await readDataURL(picked);
+    if (preview) {
+      preview.innerHTML = "";
+      const img = document.createElement("img");
+      img.src = personaDraft.avatar;
+      img.alt = "头像预览";
+      preview.append(img);
+    }
+  });
+  form.querySelector("[data-persona-remove-avatar]")?.addEventListener("click", () => {
+    personaDraft.avatar = "";
+    if (preview) preview.textContent = Array.from(personaDraft.name || "GQY")[0] || "G";
+  });
+  form.querySelector("[data-persona-reset]")?.addEventListener("click", () => {
+    personaDraft = { ...(state.persona || {}) };
+    renderConsole();
+  });
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    sync();
+    try {
+      const result = await api.savePersona(personaDraft);
+      state.persona = result.persona;
+      personaDraft = { ...result.persona };
+      emit("persona-changed");
+      renderConsole();
+      toast("人格已保存");
+    } catch (error) {
+      toast(error instanceof ApiError ? error.message : "保存失败", "bad");
+    }
+  });
+}
+
+function readDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
 }
 
 function modelsHTML() {
@@ -263,6 +385,70 @@ function gatewayHTML() {
     </div>`;
 }
 
+function pluginModeChip(plugin) {
+  const installed = plugin.source === "installed";
+  const label = installed ? "已安装" : "本地自建";
+  const tip = installed ? "在线安装的插件本体只读，可改设置" : "本地开发模式，可随时修改插件本体";
+  return `<span class="chip ${installed ? "warn" : "ok"}" title="${esc(tip)}">${label}</span>`;
+}
+
+function settingHint(setting) {
+  return setting.description ? `<span class="plugin-setting-desc">${esc(setting.description)}</span>` : "";
+}
+
+// numberAttrs 把 schema 的上下界/步长映射到 number input；缺省 step=any，
+// 免得 0–1 置信度这类小数被整数步长拦掉。
+function numberAttrs(setting) {
+  const attrs = [];
+  const min = setting.minimum ?? setting.min;
+  const max = setting.maximum ?? setting.max;
+  const step = setting.step ?? setting.multipleOf;
+  if (min !== undefined && min !== null && Number.isFinite(Number(min))) attrs.push(`min="${esc(min)}"`);
+  if (max !== undefined && max !== null && Number.isFinite(Number(max))) attrs.push(`max="${esc(max)}"`);
+  const stepValue =
+    step !== undefined && step !== null && Number.isFinite(Number(step)) && Number(step) > 0 ? Number(step) : "any";
+  attrs.push(`step="${esc(stepValue)}"`);
+  attrs.push('inputmode="decimal"');
+  return attrs.join(" ");
+}
+
+function settingInput(setting, value) {
+  const v = value === undefined || value === null ? setting.default : value;
+  const key = esc(setting.key);
+  const title = esc(setting.title || setting.key);
+  const hint = settingHint(setting);
+  if (setting.type === "boolean") {
+    return `<label class="plugin-setting boolean"><input type="checkbox" data-setting-key="${key}" ${v ? "checked" : ""} /><span class="plugin-setting-title">${title}</span>${hint}</label>`;
+  }
+  if (setting.type === "select") {
+    const opts = (setting.options || [])
+      .map((opt) => `<option value="${esc(opt)}" ${String(v) === String(opt) ? "selected" : ""}>${esc(opt)}</option>`)
+      .join("");
+    return `<label class="plugin-setting"><span>${title}</span><select data-setting-key="${key}">${opts}</select>${hint}</label>`;
+  }
+  if (setting.type === "number") {
+    return `<label class="plugin-setting"><span>${title}</span><input type="number" data-setting-key="${key}" value="${esc(v ?? "")}" ${numberAttrs(setting)} />${hint}</label>`;
+  }
+  return `<label class="plugin-setting"><span>${title}</span><input type="text" data-setting-key="${key}" value="${esc(v ?? "")}" />${hint}</label>`;
+}
+
+function pluginSettingsForm(plugin, detail) {
+  const schema = detail?.schema || [];
+  const values = detail?.effective || {};
+  if (!schema.length) {
+    return `<div class="plugin-settings"><div class="field-hint">该插件没有可配置项。</div></div>`;
+  }
+  const fields = schema.map((setting) => settingInput(setting, values[setting.key])).join("");
+  return `<div class="plugin-settings">
+    <div class="plugin-settings-head">设置 <span class="field-hint">${plugin.read_only ? "插件本体只读，设置单独保存" : "本地插件，可随时改本体"}</span></div>
+    ${fields}
+    <div class="settings-actions">
+      <button class="btn primary" type="button" data-plugin-save="${esc(plugin.id)}">保存设置</button>
+      <button class="btn ghost" type="button" data-plugin-settings-close="${esc(plugin.id)}">收起</button>
+    </div>
+  </div>`;
+}
+
 function pluginsHTML() {
   const plugins = state.plugins || [];
   const rows = plugins
@@ -275,19 +461,32 @@ function pluginsHTML() {
         plugin.failures ? `${plugin.failures} 次失败` : "",
         plugin.last_error || "",
       ].filter(Boolean);
-      return `<div class="model-row">
+      const editing = state.pluginEditing === plugin.id;
+      const detail = state.pluginDetail?.id === plugin.id ? state.pluginDetail : null;
+      const form = editing && detail ? pluginSettingsForm(plugin, detail) : "";
+      return `<div class="model-row plugin-row">
         <div class="model-row-main">
-          <div class="model-id">${esc(plugin.name || plugin.id)} <span class="chip ${ready ? "ok" : "warn"}">${esc(plugin.state || "discovered")}</span></div>
+          <div class="model-id">${esc(plugin.name || plugin.id)} <span class="chip ${ready ? "ok" : "warn"}">${esc(plugin.state || "discovered")}</span> ${pluginModeChip(plugin)}</div>
           <div class="model-meta">${esc(meta.join(" · "))}</div>
+          ${form}
         </div>
-        <button class="btn" type="button" data-plugin-${ready ? "unload" : "load"}="${esc(plugin.id)}">${ready ? "卸载" : "加载"}</button>
+        <div class="plugin-actions">
+          ${plugin.has_settings || (detail && detail.schema?.length) ? `<button class="btn ghost" type="button" data-plugin-settings="${esc(plugin.id)}">${editing ? "收起" : "设置"}</button>` : ""}
+          <button class="btn" type="button" data-plugin-${ready ? "unload" : "load"}="${esc(plugin.id)}">${ready ? "卸载" : "加载"}</button>
+          <button class="btn danger" type="button" data-plugin-delete="${esc(plugin.id)}">删除</button>
+        </div>
       </div>`;
     })
     .join("");
-  return `<div class="settings-actions" style="margin-top:0;margin-bottom:14px">
+  const installed = new Set(plugins.map((plugin) => plugin.id));
+  const repoButton = (id, source, label) =>
+    `<button class="btn" type="button" data-plugin-install="${esc(id)}" data-plugin-source="${esc(source)}"${installed.has(id) ? " disabled" : ""}>${label}</button>`;
+  return `<div class="settings-actions" style="margin-top:0;margin-bottom:10px">
+      ${repoButton("show-images-default", "https://github.com/GQYTeam/gqy-plugins-ShowImages-default", "安装图片展示")}
+      ${repoButton("emote-pack-default", "https://github.com/GQYTeam/gqy-plugins-EmotePack-default", "安装表情包")}
       <button class="btn" type="button" data-plugin-scan>重新扫描</button>
-      <span class="field-hint">插件目录：<code>$GQY_HOME/plugins</code></span>
     </div>
+    <p class="field-hint" style="margin:0 0 14px">从项目插件仓库安装会用 <code>git clone</code> 下载到 <code>$GQY_HOME/plugins</code>；安装 = 信任插件代码。</p>
     ${rows ? `<div class="model-list">${rows}</div>` : `<div class="empty-mini">还没有插件。把插件目录放到 <code>$GQY_HOME/plugins</code> 下，或点“重新扫描”。</div>`}`;
 }
 
@@ -365,6 +564,7 @@ function aboutHTML() {
 function bindConsoleBody() {
   const body = $("#consoleBody");
   if (!body) return;
+  if (activeTab === "persona") bindPersonaForm();
   for (const card of body.querySelectorAll("[data-theme-choice]")) {
     card.addEventListener("click", () => {
       applyTheme(card.dataset.themeChoice);
@@ -401,6 +601,9 @@ function bindConsoleBody() {
       toast(error instanceof ApiError ? error.message : "重载失败", "bad");
     }
   });
+  for (const button of body.querySelectorAll("[data-plugin-install]")) {
+    button.addEventListener("click", () => installPlugin(button));
+  }
   body.querySelector("[data-plugin-scan]")?.addEventListener("click", async () => {
     try {
       await api.pluginScan();
@@ -415,6 +618,21 @@ function bindConsoleBody() {
   }
   for (const button of body.querySelectorAll("[data-plugin-unload]")) {
     button.addEventListener("click", () => pluginAction("unload", button.dataset.pluginUnload));
+  }
+  for (const button of body.querySelectorAll("[data-plugin-settings]")) {
+    button.addEventListener("click", () => togglePluginSettings(button.dataset.pluginSettings));
+  }
+  for (const button of body.querySelectorAll("[data-plugin-settings-close]")) {
+    button.addEventListener("click", () => {
+      state.pluginEditing = "";
+      renderConsole();
+    });
+  }
+  for (const button of body.querySelectorAll("[data-plugin-save]")) {
+    button.addEventListener("click", () => savePluginSettings(button));
+  }
+  for (const button of body.querySelectorAll("[data-plugin-delete]")) {
+    button.addEventListener("click", () => deletePlugin(button.dataset.pluginDelete));
   }
 }
 
@@ -433,4 +651,111 @@ async function pluginAction(action, id) {
 function useModel(id) {
   applyModel(id);
   toast("已切换当前模型");
+}
+
+// togglePluginSettings 展开/收起某个插件的设置表单（PL3）。
+async function togglePluginSettings(id) {
+  if (!id) return;
+  if (state.pluginEditing === id) {
+    state.pluginEditing = "";
+    state.pluginDetail = null;
+    renderConsole();
+    return;
+  }
+  try {
+    state.pluginDetail = await api.pluginSettings(id);
+    state.pluginDetail.id = state.pluginDetail.id || id;
+    state.pluginEditing = id;
+    renderConsole();
+  } catch (error) {
+    toast(error instanceof ApiError ? error.message : "读取设置失败", "bad");
+  }
+}
+
+// savePluginSettings 读取表单值并按 schema 类型提交（PL3）。
+async function savePluginSettings(button) {
+  const id = button.dataset.pluginSave;
+  const form = button.closest(".plugin-settings");
+  if (!id || !form) return;
+  const values = {};
+  for (const el of form.querySelectorAll("[data-setting-key]")) {
+    const key = el.dataset.settingKey;
+    if (!key) continue;
+    if (el.type === "checkbox") values[key] = el.checked;
+    else if (el.type === "number") {
+      const n = Number(el.value);
+      values[key] = Number.isFinite(n) && el.value !== "" ? n : null;
+    } else values[key] = el.value;
+  }
+  try {
+    await api.pluginSettingsSave(id, values);
+    const plugin = (state.plugins || []).find((item) => item.id === id);
+    let reloaded = false;
+    if (plugin?.state === "ready") {
+      try {
+        await api.pluginUnload(id);
+        await api.pluginLoad(id);
+        reloaded = true;
+      } catch {
+        /* 设置已保存；加载失败保留在插件状态里 */
+      }
+    }
+    state.pluginDetail = await api.pluginSettings(id);
+    await ensurePlugins(true);
+    renderConsole();
+    toast(reloaded ? "设置已保存并重新加载" : "设置已保存");
+  } catch (error) {
+    toast(error instanceof ApiError ? error.message : "保存设置失败", "bad");
+  }
+}
+
+// installPlugin 从项目插件仓库安装（PL1）：git clone + manifest 校验 + 安装标记。
+async function installPlugin(button) {
+  const id = button.dataset.pluginInstall;
+  const source = button.dataset.pluginSource;
+  if (!id || !source) return;
+  const ok = await confirmDialog({
+    title: "安装插件",
+    message: `从 ${source} 安装「${id}」？\n\n安装 = 信任插件代码；它会以你的用户权限运行。`,
+    confirmText: "安装",
+  });
+  if (!ok) return;
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "安装中…";
+  try {
+    await api.pluginInstall(source, id);
+    await ensurePlugins(true);
+    renderConsole();
+    toast("插件已安装");
+  } catch (error) {
+    toast(error instanceof ApiError ? error.message : "安装失败", "bad");
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+// deletePlugin 删除插件：卸载、移除目录与设置（PL4，二次确认）。
+async function deletePlugin(id) {
+  if (!id) return;
+  const plugin = (state.plugins || []).find((p) => p.id === id);
+  const name = plugin?.name || id;
+  const ok = await confirmDialog({
+    title: `删除插件「${name}」？`,
+    message: `会卸载并删除 $GQY_HOME/plugins/${id} 与它的设置，无法撤销。`,
+    confirmText: "删除",
+  });
+  if (!ok) return;
+  try {
+    await api.pluginDelete(id);
+    if (state.pluginEditing === id) {
+      state.pluginEditing = "";
+      state.pluginDetail = null;
+    }
+    await ensurePlugins(true);
+    toast("插件已删除");
+  } catch (error) {
+    toast(error instanceof ApiError ? error.message : "删除失败", "bad");
+  }
 }

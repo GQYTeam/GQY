@@ -92,6 +92,128 @@ function imagesHTML(message) {
     .join("")}</div>`;
 }
 
+// ---- 回复表情（emote-pack-default） ----
+// 服务端只给表情元数据（name/label/file/score），图片按需向插件要 data URI。
+// 成功取到的图按 name 缓存后整个页面生命周期只取一次；失败冷却 60 秒再试，避免每帧重试打爆插件。
+const EMOTE_PLUGIN_ID = "emote-pack-default";
+const EMOTE_RETRY_MS = 60 * 1000;
+const EMOTE_TIMEOUT_MS = 8000;
+const EMOTE_DATA_URI = /^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+$/i;
+const emoteCache = new Map();
+const emoteInflight = new Map();
+
+function emoteKey(emote) {
+  return String(emote?.name || emote?.file || "").trim();
+}
+
+function emoteCaption(emote, fallback) {
+  return String(emote?.label || emote?.name || fallback || "表情").trim();
+}
+
+async function fetchEmoteDataUri(name) {
+  const plugins = state.plugins || [];
+  // 插件列表已加载且插件不在 / 未就绪时直接放弃，省掉必然失败的请求。
+  if (plugins.length && plugins.find((item) => item.id === EMOTE_PLUGIN_ID)?.state !== "ready") return "";
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), EMOTE_TIMEOUT_MS) : 0;
+  try {
+    const response = await fetch(`/api/plugins/${EMOTE_PLUGIN_ID}/call`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "show", arguments: { name, inline: true } }),
+      signal: controller?.signal,
+    });
+    if (!response.ok) return "";
+    const body = await response.json().catch(() => null);
+    if (!body?.ok) return "";
+    let content = body.content;
+    if (typeof content === "string") {
+      try {
+        content = JSON.parse(content);
+      } catch {
+        return "";
+      }
+    }
+    const dataUri = content?.data_uri;
+    // 只接受干净的 data:image/...;base64,...，避免把任意字符串塞进 img src。
+    return typeof dataUri === "string" && EMOTE_DATA_URI.test(dataUri) ? dataUri : "";
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function loadEmote(name) {
+  const cached = emoteCache.get(name);
+  if (cached) {
+    if (cached.dataUri) return Promise.resolve(cached.dataUri);
+    if (Date.now() - cached.at < EMOTE_RETRY_MS) return Promise.resolve("");
+  }
+  const inflight = emoteInflight.get(name);
+  if (inflight) return inflight;
+  const task = fetchEmoteDataUri(name)
+    .catch(() => "")
+    .then((dataUri) => {
+      emoteCache.set(name, { dataUri: dataUri || "", at: Date.now() });
+      return dataUri || "";
+    })
+    .finally(() => emoteInflight.delete(name));
+  emoteInflight.set(name, task);
+  return task;
+}
+
+function emoteHTML(message) {
+  if (message.role !== "assistant") return "";
+  const key = emoteKey(message.emote);
+  if (!key) return "";
+  const label = emoteCaption(message.emote, key);
+  const dataUri = emoteCache.get(key)?.dataUri || "";
+  // data URI 在 fetchEmoteDataUri 里按白名单校验过（图片 + base64 字符集），这里不再 esc 三百多 KB 的串。
+  const img = dataUri
+    ? `<img src="${dataUri}" data-lightbox="${dataUri}" alt="表情：${esc(label)}" loading="lazy" decoding="async">`
+    : `<img alt="表情：${esc(label)}" loading="lazy" decoding="async">`;
+  const caption = `<figcaption>${esc(label)}</figcaption>`;
+  // 取到图之前整块隐藏（不留空框）；插件不可用时保持隐藏，消息其余部分照常渲染。
+  return `<figure class="msg-emote" data-emote-name="${esc(key)}" data-emote-state="${dataUri ? "ready" : "pending"}"${dataUri ? "" : " hidden"}>${img}${caption}</figure>`;
+}
+
+// hydrateEmotes 给当前 DOM 里还没图的表情块异步补图；重复渲染时靠缓存/在途表去重。
+function hydrateEmotes(root) {
+  if (!root?.querySelectorAll) return;
+  const scroller = $("#messages");
+  for (const figure of root.querySelectorAll('.msg-emote[data-emote-state="pending"]')) {
+    const key = figure.dataset.emoteName || "";
+    if (!key) continue;
+    figure.dataset.emoteState = "loading";
+    loadEmote(key)
+      .then((dataUri) => {
+        if (!dataUri || !figure.isConnected) return;
+        const nearBottom = scroller
+          ? scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 160
+          : false;
+        const img = figure.querySelector("img");
+        if (img) {
+          img.addEventListener(
+            "error",
+            () => {
+              figure.dataset.emoteState = "failed";
+              figure.hidden = true;
+            },
+            { once: true },
+          );
+          img.src = dataUri;
+          img.dataset.lightbox = dataUri;
+        }
+        figure.dataset.emoteState = "ready";
+        figure.hidden = false;
+        if (nearBottom && scroller) scroller.scrollTop = scroller.scrollHeight;
+      })
+      .catch(() => {
+        /* 取图失败：保持隐藏，不打断消息渲染 */
+      });
+  }
+}
+
 function actionsHTML(message, index) {
   if (message.role !== "assistant") return "";
   const retry = message.status !== "streaming" && !message.question
@@ -106,7 +228,13 @@ function actionsHTML(message, index) {
 
 function messageHTML(message, index) {
   const isUser = message.role === "user";
-  const avatar = isUser ? "你" : "GQ";
+  const persona = state.persona || {};
+  const assistantName = persona.name || "GQY";
+  const avatar = isUser
+    ? "你"
+    : persona.avatar
+      ? `<img src="${esc(persona.avatar)}" alt="">`
+      : esc(Array.from(assistantName)[0] || "G");
   const model = message.model ? `<span class="msg-badge">${esc(message.model)}</span>` : "";
   let body = "";
 
@@ -130,6 +258,9 @@ function messageHTML(message, index) {
     body += `<span class="typing" aria-label="正在生成"><i></i><i></i><i></i></span>`;
   }
 
+  // 回复末尾一张表情：正文之后、msg-foot（含操作按钮）之前。
+  if (!isUser && message.emote) body += emoteHTML(message);
+
   if (isUser) body += imagesHTML(message);
 
   const footParts = [];
@@ -144,7 +275,7 @@ function messageHTML(message, index) {
 
   const head = isUser
     ? `<div class="msg-head"><span class="who">你</span></div>`
-    : `<div class="msg-head"><span class="who">GQY</span>${model}</div>`;
+    : `<div class="msg-head"><span class="who">${esc(assistantName)}</span>${model}</div>`;
 
   const footer = !isUser || footParts.length
     ? `<div class="msg-foot">${footParts.join("")}${actionsHTML(message, index)}</div>`
@@ -181,6 +312,7 @@ export function renderMessages({ forceBottom = false } = {}) {
   empty.hidden = !isEmpty;
   thread.innerHTML = state.messages.map((message, index) => messageHTML(message, index)).join("");
   bindDetails();
+  hydrateEmotes(thread);
 
   if (forceBottom || (nearBottom && !isEmpty)) {
     scroller.scrollTop = scroller.scrollHeight;

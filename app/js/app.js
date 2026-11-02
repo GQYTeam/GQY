@@ -1,4 +1,4 @@
-import { api, AuthError, ApiError } from "./api.js";
+import { api, AuthError, ApiError, events } from "./api.js";
 import { PREF, loadPref, savePref, state } from "./store.js";
 import { applyReduceMotion, applyTheme, THEMES, findTheme } from "./themes.js";
 import { initChat, updateSendState } from "./chat.js";
@@ -16,7 +16,7 @@ import {
   openOverlay,
   toast,
 } from "./ui.js";
-import { setHeader, $ } from "./render.js";
+import { renderMessages, setHeader, $ } from "./render.js";
 
 let bindingDone = false;
 
@@ -105,6 +105,10 @@ function bindGlobal() {
   });
 
   on("auth-required", openLogin);
+  on("persona-changed", () => {
+    applyPersonaChrome();
+    renderMessages();
+  });
   on("lightbox", (event) => {
     const img = $("#lightboxImg");
     if (img) img.src = event.detail;
@@ -113,6 +117,26 @@ function bindGlobal() {
   on("onboarding-open", (event) => {
     openOnboarding({ force: Boolean(event.detail?.force) });
   });
+}
+
+function applyPersonaChrome() {
+  const persona = state.persona || {};
+  const name = persona.name || "GQY";
+  const mark = document.querySelector(".brand-mark");
+  if (mark) {
+    mark.innerHTML = "";
+    if (persona.avatar) {
+      const img = document.createElement("img");
+      img.src = persona.avatar;
+      img.alt = "";
+      mark.append(img);
+    } else {
+      mark.textContent = Array.from(name)[0] || "G";
+    }
+  }
+  const meta = document.querySelector("#brandMeta");
+  if (meta) meta.textContent = persona.tagline || "本地网关";
+  document.title = name && name !== "GQY" ? `${name} · GQY` : "GQY";
 }
 
 function closeSidebar() {
@@ -134,11 +158,41 @@ function showBootError(message) {
   setHeader("新对话", "网关未就绪");
 }
 
+// initLiveUpdates 建立一条持久连接（SSE），服务端配置/插件/全局模型变化即时生效（HR7）。
+function initLiveUpdates() {
+  if (state.liveStream) return;
+  state.liveStream = events(async (event) => {
+    try {
+      if (event.type === "config") {
+        state.config = await api.config();
+        state.models = await api.models();
+    state.activeModel = await api.activeModel().catch(() => null);
+        ensureModelSelection();
+        renderPicker();
+        state.status = await api.status();
+        renderGatewayPill();
+      } else if (event.type === "model") {
+        state.models = await api.models();
+    state.activeModel = await api.activeModel().catch(() => null);
+        ensureModelSelection();
+        renderPicker();
+      } else if (event.type === "plugins") {
+        emit("plugins-changed");
+      }
+    } catch {
+      /* 断线由 EventSource 自动重连；单次刷新失败忽略 */
+    }
+  });
+}
+
 async function bootstrap() {
   try {
     state.health = await api.health();
     state.config = await api.config();
+    state.persona = await api.persona();
+    applyPersonaChrome();
     state.models = await api.models();
+    state.activeModel = await api.activeModel().catch(() => null);
     ensureModelSelection();
     renderPicker();
     await loadSessions();
@@ -149,6 +203,7 @@ async function bootstrap() {
     setHeader(state.sessionTitle, state.model || "");
     updateSendState();
     state.booted = true;
+    initLiveUpdates();
     if (loadPref(PREF.onboarded, "") !== "1") {
       openOnboarding();
     }

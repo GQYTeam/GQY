@@ -48,7 +48,7 @@ func (s *Server) handleGeminiGenerate(w http.ResponseWriter, r *http.Request) {
 	req.Model = model
 	req.Stream = stream
 
-	meta := gateway.Meta{RequestID: requestIDFrom(r), SessionID: sessionIDFrom(r)}
+	meta := metaFor(r)
 	if stream {
 		s.streamGemini(w, r, snap, req, meta)
 		return

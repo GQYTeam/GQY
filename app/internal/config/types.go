@@ -66,28 +66,40 @@ type Routing struct {
 	MaxAttempts     int       `json:"max_attempts"`
 	CooldownSeconds int       `json:"cooldown_seconds"`
 	QueueTimeoutMS  int       `json:"queue_timeout_ms"`
+	// Tenants 是租户（任务/工作区/agent）的并发与配额边界（MT1/MT3/MT7）。
+	Tenants []Tenant `json:"tenants"`
+}
+
+// Tenant 是一个任务或 agent 的隔离边界：独立并发池 + 每分钟请求配额 + 独立错误域。
+type Tenant struct {
+	Name           string `json:"name"`
+	MaxConcurrency int    `json:"max_concurrency"`
+	ReqPerMin      int    `json:"req_per_min"`
 }
 
 // Settings 对应 settings.json。
 type Settings struct {
-	WatchEnabled       bool     `json:"watch_enabled"`
-	RateLimit          int      `json:"rate_limit"`
-	ToolTimeoutS       int      `json:"tool_timeout_s"`
-	ShellTimeoutS      int      `json:"shell_timeout_s"`
-	UpstreamTimeoutS   int      `json:"upstream_timeout_s"`
-	StreamIdleTimeoutS int      `json:"stream_idle_timeout_s"`
-	ShellAllowlist     []string `json:"shell_allowlist"`
+	WatchEnabled       bool `json:"watch_enabled"`
+	RateLimit          int  `json:"rate_limit"`
+	ToolTimeoutS       int  `json:"tool_timeout_s"`
+	ShellTimeoutS      int  `json:"shell_timeout_s"`
+	UpstreamTimeoutS   int  `json:"upstream_timeout_s"`
+	StreamIdleTimeoutS int  `json:"stream_idle_timeout_s"`
+	// ExposeExternalTools 控制插件动作是否作为工具暴露给模型（HR2，热更新生效）。
+	ExposeExternalTools bool     `json:"expose_external_tools"`
+	ShellAllowlist      []string `json:"shell_allowlist"`
 }
 
 // DefaultSettings 返回 settings.json 的全默认值（CF9）。
 func DefaultSettings() Settings {
 	return Settings{
-		WatchEnabled:       true,
-		UpstreamTimeoutS:   120,
-		StreamIdleTimeoutS: 60,
-		RateLimit:          0,
-		ToolTimeoutS:       120,
-		ShellTimeoutS:      60,
+		WatchEnabled:        true,
+		UpstreamTimeoutS:    120,
+		StreamIdleTimeoutS:  60,
+		ExposeExternalTools: true,
+		RateLimit:           0,
+		ToolTimeoutS:        120,
+		ShellTimeoutS:       60,
 	}
 }
 

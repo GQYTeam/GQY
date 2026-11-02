@@ -80,6 +80,8 @@ func needsAuth(path string) bool {
 	switch {
 	case path == "/api/auth":
 		return false
+	case path == "/metrics":
+		return true
 	case path == "/api" || strings.HasPrefix(path, "/api/"):
 		return true
 	case path == "/v1" || strings.HasPrefix(path, "/v1/"):

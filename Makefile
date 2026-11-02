@@ -1,8 +1,9 @@
 SHELL := /bin/sh
 APP := app
 GO ?= go
+PYTHON ?= python3
 
-.PHONY: help check fmt vet lint test race cover build run demo js-check ui-smoke smoke-live tidy clean
+.PHONY: help check fmt vet lint test race cover build run demo js-check docs-check icon ui-smoke smoke-live tidy clean
 
 help:
 	@printf '%s\n' \
@@ -17,12 +18,14 @@ help:
 	  'make run      启动服务' \
 	  'make demo     一键启动 UI（默认接本机 Magpie）' \
 	  'make js-check JS 语法检查' \
+	  'make docs-check 文档编号与索引检查' \
+	  'make icon     从 assets/icons/source.jpg 生成 macOS/Web 图标全集' \
 	  'make ui-smoke 启动临时服务并用 headless Chrome 冒烟 UI' \
 	  'make smoke-live 对上游做端到端冒烟（默认本机 Magpie）' \
 	  'make tidy     go mod tidy' \
 	  'make clean    清理构建产物'
 
-check: fmt vet test build
+check: fmt vet test build docs-check
 
 fmt:
 	cd $(APP) && gofmt -w ./cmd ./internal
@@ -58,6 +61,12 @@ demo:
 
 js-check:
 	./scripts/check-js.sh
+
+docs-check:
+	./scripts/check-docs.sh
+
+icon:
+	$(PYTHON) scripts/make-icon.py --source assets/icons/source.jpg --out assets/icons
 
 ui-smoke:
 	./scripts/ui-smoke.sh

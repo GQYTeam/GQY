@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gqy/internal/config"
+	"gqy/internal/metrics"
 	"gqy/internal/provider"
 )
 
@@ -19,6 +20,8 @@ import (
 type Meta struct {
 	RequestID string
 	SessionID string
+	// Tenant 是请求所属的任务/工作区/agent 名（MT2）；空表示 default。
+	Tenant string
 	// OnSelect 在每次尝试调用上游前触发，供 HTTP 层设置响应头（R4）。
 	// 流式请求在首帧前可能多次触发；首帧写出后不再切换候选。
 	OnSelect func(providerID, accountID, model string)
@@ -42,6 +45,11 @@ type Result struct {
 // Router 是网关运行时：选候选、限并发、失败转移、冷却、配额与亲和。
 // 配置通过每次请求传入的快照读取，因此热更新不影响在途请求（CF5）。
 type Router struct {
+	tenants   map[string]*tenantState
+	tenantsMu sync.Mutex
+	logs      *logWriter
+	// active 是运行时的「全局默认模型」覆盖（HR5）：请求未指定 model 时使用。
+	active   atomic.Pointer[string]
 	registry *provider.Registry
 	log      *slog.Logger
 	home     string
@@ -62,7 +70,7 @@ func New(registry *provider.Registry, logger *slog.Logger, home string) *Router 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Router{
+	r := &Router{
 		registry:       registry,
 		log:            logger,
 		home:           home,
@@ -71,6 +79,16 @@ func New(registry *provider.Registry, logger *slog.Logger, home string) *Router 
 		affinity:       make(map[string]string),
 		groupCursor:    make(map[string]uint64),
 		memberLastUsed: make(map[string]time.Time),
+		tenants:        make(map[string]*tenantState),
+	}
+	r.logs = newLogWriter(home)
+	return r
+}
+
+// Close 停止并冲刷异步请求日志；幂等。
+func (r *Router) Close() {
+	if r.logs != nil {
+		r.logs.Close()
 	}
 }
 
@@ -93,6 +111,13 @@ func (r *Router) Complete(ctx context.Context, snap *config.Snapshot, req *provi
 	ctx, cancel := withUpstreamTimeout(ctx, snap)
 	defer cancel()
 	start := r.now()
+	releaseTenant, terr := r.acquireTenant(ctx, snap, meta, snap.Routing.QueueTimeoutMS)
+	if terr != nil {
+		pe := provider.AsError(terr)
+		r.finishLog(start, meta, req.Model, "", "", "error", pe.ClientStatus(), 0, pe.Code)
+		return nil, terr
+	}
+	defer releaseTenant()
 	refs, err := r.resolveOrdered(snap, req.Model)
 	if err != nil {
 		code := provider.CodeInvalidRequest
@@ -165,6 +190,14 @@ func (r *Router) Complete(ctx context.Context, snap *config.Snapshot, req *provi
 func (r *Router) Stream(ctx context.Context, snap *config.Snapshot, req *provider.Request, meta Meta, emit func(provider.Event) error) (*Result, error) {
 	ctx, cancel := withUpstreamTimeout(ctx, snap)
 	defer cancel()
+	start := r.now()
+	releaseTenant, terr := r.acquireTenant(ctx, snap, meta, snap.Routing.QueueTimeoutMS)
+	if terr != nil {
+		pe := provider.AsError(terr)
+		r.finishLog(start, meta, req.Model, "", "", "error", pe.ClientStatus(), 0, pe.Code)
+		return nil, terr
+	}
+	defer releaseTenant()
 	// 流式空闲超时：连续 idle 时间没有新事件就中止，避免上游卡住不动（019/022）。
 	idle := time.Duration(streamIdleTimeout(snap)) * time.Second
 	var idleFired atomic.Bool
@@ -173,7 +206,6 @@ func (r *Router) Stream(ctx context.Context, snap *config.Snapshot, req *provide
 		cancel()
 	})
 	defer idleTimer.Stop()
-	start := r.now()
 	refs, err := r.resolveOrdered(snap, req.Model)
 	if err != nil {
 		code := provider.CodeInvalidRequest
@@ -289,6 +321,9 @@ func endpoint(c candidate) provider.Endpoint {
 func (r *Router) resolveOrdered(snap *config.Snapshot, model string) ([]modelRef, error) {
 	model = strings.TrimSpace(model)
 	if model == "" {
+		if ov := r.active.Load(); ov != nil && strings.TrimSpace(*ov) != "" {
+			return r.resolveOrdered(snap, *ov)
+		}
 		if snap.Routing.Default == nil {
 			return nil, fmt.Errorf("%w：未指定 model 且没有默认模型", ErrModelNotFound)
 		}
@@ -515,9 +550,15 @@ func findProvider(snap *config.Snapshot, id string) *config.Provider {
 }
 
 func (r *Router) finishLog(start time.Time, meta Meta, model, providerID, accountID, status string, httpStatus, attempts int, errCode string) {
+	if providerID != "" {
+		metrics.Inc("gqy_gateway_calls_total", "Gateway calls by final status", map[string]string{
+			"provider": providerID, "model": model, "account": accountID, "status": status,
+		})
+	}
 	r.logRequest(requestLogEntry{
 		RequestID:  meta.RequestID,
 		Session:    meta.SessionID,
+		Tenant:     meta.Tenant,
 		Provider:   providerID,
 		Model:      model,
 		Account:    accountID,
@@ -561,4 +602,28 @@ func withUpstreamTimeout(ctx context.Context, snap *config.Snapshot) (context.Co
 		limit = 120
 	}
 	return context.WithTimeout(ctx, time.Duration(limit)*time.Second)
+}
+
+// SetActiveModel 设置运行时全局默认模型（空字符串表示清除覆盖）。
+func (r *Router) SetActiveModel(model string) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		r.active.Store(nil)
+		return
+	}
+	r.active.Store(&model)
+}
+
+// ActiveModel 返回运行时覆盖（空表示未设置）。
+func (r *Router) ActiveModel() string {
+	if ov := r.active.Load(); ov != nil {
+		return *ov
+	}
+	return ""
+}
+
+// ResolveModel 校验一个模型引用是否可解析（HTTP 层用来拒绝非法全局模型）。
+func (r *Router) ResolveModel(snap *config.Snapshot, model string) error {
+	_, err := r.resolveOrdered(snap, model)
+	return err
 }

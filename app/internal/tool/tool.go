@@ -52,3 +52,9 @@ type Record struct {
 	// Artifacts 是这次调用产生/修改的文件路径（022）。
 	Artifacts []string `json:"artifacts,omitempty"`
 }
+
+// Owned 表示工具由外部运行时提供（插件），热更新时可整体重建（HR2）。
+type Owned interface {
+	// Owner 返回所属来源标识，例如 "plugin:emote-pack-default"。
+	Owner() string
+}

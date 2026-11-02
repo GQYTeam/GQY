@@ -88,6 +88,7 @@ curl -X POST http://127.0.0.1:5173/api/config/reload
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/healthz` | 健康检查，不需要鉴权 |
+| GET | `/metrics` | Prometheus 文本指标；设令牌后需鉴权 |
 | GET | `/v1/models` | OpenAI 兼容模型列表（C11） |
 | POST | `/v1/chat/completions` | OpenAI 兼容对话；`stream:true` 返回 SSE |
 | POST | `/v1/messages` | Anthropic Messages 兼容；流式事件族 |
@@ -104,6 +105,10 @@ curl -X POST http://127.0.0.1:5173/api/config/reload
 | POST | `/api/config/reload` | 同步重载配置 |
 | GET | `/api/gateway/status` | 配置、鉴权、限流与账号运行时状态 |
 | GET | `/api/plugins` | 本机插件与运行时状态 |
+| POST | `/api/plugins/install` | 从 https Git 插件仓库安装（`git clone`） |
+| GET/PUT | `/api/plugins/{id}/settings` | 插件设置 schema / 保存 |
+| DELETE | `/api/plugins/{id}` | 卸载并删除插件与设置 |
+| GET/PUT | `/api/persona` | 人格、头像与系统提示词 |
 | GET | `/api/tools` | 核心/外部工具契约清单 |
 
 请求头：

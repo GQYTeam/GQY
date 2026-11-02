@@ -52,6 +52,10 @@ func (e *ExternalTool) Schema() map[string]any {
 	}
 	return e.Action.Schema
 }
+
+// Owner 标记该工具属于插件来源，供工具表热更新整体重建（HR2）。
+func (e *ExternalTool) Owner() string { return "plugin:" + e.PluginID }
+
 func (e *ExternalTool) Source() tool.Source {
 	if e.asCore {
 		return tool.SourceCore

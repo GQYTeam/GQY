@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"gqy/internal/config"
+	"gqy/internal/gateway"
+	"gqy/internal/metrics"
 )
 
 type contextKey int
@@ -36,6 +38,57 @@ func (s *Server) withSnapshot(next http.Handler) http.Handler {
 func snapshotFrom(r *http.Request) *config.Snapshot {
 	snap, _ := r.Context().Value(ctxSnapshot).(*config.Snapshot)
 	return snap
+}
+
+// ctxTenant 保存请求所属租户（MT2）。
+type ctxTenantKey struct{}
+
+// tenantFrom 取请求租户；空表示 default（MT2）。
+func tenantFrom(r *http.Request) string {
+	v, _ := r.Context().Value(ctxTenantKey{}).(string)
+	return v
+}
+
+// tenant 解析 X-GQY-Tenant / X-GQY-Task，非法字符直接 400（MT2/MT3）。
+func (s *Server) tenant(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimSpace(r.Header.Get("X-GQY-Tenant"))
+		if name == "" {
+			name = strings.TrimSpace(r.Header.Get("X-GQY-Task"))
+		}
+		if name != "" && !validTenantName(name) {
+			writeError(w, http.StatusBadRequest, "invalid_tenant", "租户名非法：只能包含字母、数字、下划线、点、短横线，长度 1–64")
+			return
+		}
+		if name != "" {
+			r = r.WithContext(context.WithValue(r.Context(), ctxTenantKey{}, name))
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// validTenantName 与 config 侧规则一致（MT2）。
+func validTenantName(name string) bool {
+	if name == "" || len(name) > 64 {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '.', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// metaFor 组装网关调用元数据（含租户）。
+func metaFor(r *http.Request) gateway.Meta {
+	return gateway.Meta{
+		RequestID: requestIDFrom(r),
+		SessionID: sessionIDFrom(r),
+		Tenant:    tenantFrom(r),
+	}
 }
 
 func requestIDFrom(r *http.Request) string {
@@ -103,6 +156,13 @@ func (s *Server) accessLog(next http.Handler) http.Handler {
 		if status == 0 {
 			status = http.StatusOK
 		}
+		path := metricPath(r.URL.Path)
+		metrics.Inc("gqy_http_requests_total", "HTTP requests total", map[string]string{
+			"method": r.Method, "path": path, "status": strconv.Itoa(status),
+		})
+		metrics.Observe("gqy_http_request_duration_seconds", "HTTP request duration in seconds", map[string]string{
+			"method": r.Method, "path": path,
+		}, time.Since(start).Seconds())
 		s.log.Info("http",
 			"request_id", requestIDFrom(r),
 			"method", r.Method,

@@ -139,6 +139,7 @@ func TestCompleteFailoverAndCooldown(t *testing.T) {
 	}
 
 	// 请求日志包含一行完整字段。
+	r.Close() // 冲刷异步请求日志（MT5）
 	data, err := os.ReadFile(filepath.Join(home, "gateway", "requests.jsonl"))
 	if err != nil {
 		t.Fatalf("读请求日志: %v", err)
@@ -459,6 +460,7 @@ func TestRequestLogDoesNotLeakAPIKey(t *testing.T) {
 	if _, err := r.Complete(context.Background(), snap, &provider.Request{Model: "p1/m1"}, Meta{RequestID: "req-log"}); err != nil {
 		t.Fatal(err)
 	}
+	r.Close() // 冲刷异步请求日志（MT5）
 	data, err := os.ReadFile(filepath.Join(home, "gateway", "requests.jsonl"))
 	if err != nil {
 		t.Fatalf("请求日志应存在: %v", err)
@@ -494,5 +496,49 @@ func TestStreamIdleTimeout(t *testing.T) {
 	}
 	if elapsed < 4*time.Second || elapsed > 8*time.Second {
 		t.Fatalf("空闲超时应约 5s 生效，实际 %v", elapsed)
+	}
+}
+
+// TestActiveModelOverride 验证运行时全局模型覆盖：请求未指定 model 时用它（HR5）。
+func TestActiveModelOverride(t *testing.T) {
+	var seen string
+	fake := &fakeAdapter{chatFn: func(_ context.Context, ep provider.Endpoint, req *provider.Request) (*provider.Response, error) {
+		seen = ep.ProviderID + "/" + req.Model
+		return &provider.Response{Text: "ok", StopReason: provider.StopEndTurn}, nil
+	}}
+	snap := testRouterSnapshot([]config.Provider{
+		testProvider("p1", "m1", testAccount("a1")),
+		testProvider("p2", "m2", testAccount("a2")),
+	}, nil)
+	r := newTestRouter(t, t.TempDir(), fake)
+	defer r.Close()
+
+	r.SetActiveModel("p2/m2")
+	if _, err := r.Complete(context.Background(), snap, &provider.Request{}, Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	if seen != "p2/m2" {
+		t.Fatalf("空 model 应走全局覆盖 p2/m2，实际 %s", seen)
+	}
+
+	// 显式 model 优先于覆盖。
+	r.SetActiveModel("p2/m2")
+	if _, err := r.Complete(context.Background(), snap, &provider.Request{Model: "p1/m1"}, Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	if seen != "p1/m1" {
+		t.Fatalf("显式 model 应优先，实际 %s", seen)
+	}
+
+	// 清除覆盖后回落到配置默认。
+	r.SetActiveModel("")
+	if r.ActiveModel() != "" {
+		t.Fatal("清除后 ActiveModel 应为空")
+	}
+	if _, err := r.Complete(context.Background(), snap, &provider.Request{}, Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	if seen != "p1/m1" {
+		t.Fatalf("清除覆盖后应回落配置默认 p1/m1，实际 %s", seen)
 	}
 }

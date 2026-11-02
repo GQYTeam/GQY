@@ -418,3 +418,23 @@ func TestAuthRequiredOnAllProtectedPaths(t *testing.T) {
 		}
 	}
 }
+
+// TestTenantHeaderValidation 验证 X-GQY-Tenant 头解析与校验（MT2）。
+func TestTenantHeaderValidation(t *testing.T) {
+	env := newTestServer(t, "", nil)
+	// 合法租户名：放行（状态页 200）。
+	rec := env.request(http.MethodGet, "/api/gateway/status", nil, map[string]string{"X-GQY-Tenant": "task-001.draw"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("合法租户头应放行，实际 %d", rec.Code)
+	}
+	// 非法字符：400 invalid_tenant。
+	rec = env.request(http.MethodGet, "/api/gateway/status", nil, map[string]string{"X-GQY-Tenant": "bad tenant!"})
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_tenant") {
+		t.Fatalf("非法租户头应 400 invalid_tenant，实际 %d %s", rec.Code, rec.Body.String())
+	}
+	// X-GQY-Task 作为别名。
+	rec = env.request(http.MethodGet, "/api/gateway/status", nil, map[string]string{"X-GQY-Task": "team_a"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("X-GQY-Task 别名应放行，实际 %d", rec.Code)
+	}
+}

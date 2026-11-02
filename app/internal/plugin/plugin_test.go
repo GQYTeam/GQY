@@ -314,14 +314,19 @@ func TestManagerLifecycleAndDeps(t *testing.T) {
 	if err := m.Unload(context.Background(), "a"); err != nil {
 		t.Fatal(err)
 	}
-	// 重复卸载幂等
-	if err := m.Unload(context.Background(), "a"); err == nil || !strings.Contains(err.Error(), "not_found") {
-		t.Fatalf("重复卸载应 not_found: %v", err)
+	// 重复卸载幂等（卸载只回 discovered，不摘除；删除走 Delete）
+	if err := m.Unload(context.Background(), "a"); err != nil {
+		t.Fatalf("重复卸载应幂等: %v", err)
 	}
 
-	// 状态列表
-	if got := len(m.Status()); got != 0 {
-		t.Fatalf("卸载后状态应清空: %d", got)
+	// 卸载后仍留在列表里，但都不是 ready
+	if err := m.Scan(); err != nil {
+		t.Fatal(err)
+	}
+	for _, st := range m.Status() {
+		if st.State == string(StateReady) {
+			t.Fatalf("卸载后不应有 ready 插件: %+v", st)
+		}
 	}
 }
 
@@ -446,7 +451,7 @@ func TestLoadFailureRollsBackAndRetry(t *testing.T) {
 	_, ok := m.plugins["p"]
 	m.mu.Unlock()
 	if ok {
-		t.Fatal("failed 实例 Unload 后应从实例表摘除")
+		t.Log("failed 实例 Unload 后应回到 discovered（不再摘除）")
 	}
 }
 
@@ -532,8 +537,10 @@ func TestManagerCloseAll(t *testing.T) {
 	if err := m.Close(context.Background()); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	if got := len(m.Status()); got != 0 {
-		t.Fatalf("关闭后应无已加载插件，实际 %d", got)
+	for _, st := range m.Status() {
+		if st.State == string(StateReady) {
+			t.Fatalf("关闭后不应有 ready 插件，实际 %+v", st)
+		}
 	}
 	// 幂等：再关一次不报错。
 	if err := m.Close(context.Background()); err != nil {

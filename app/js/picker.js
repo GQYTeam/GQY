@@ -1,7 +1,9 @@
+import { api } from "./api.js";
 import { PREF, loadPref, savePref, state } from "./store.js";
 import { setHeader, $ } from "./render.js";
 import { updateSendState } from "./chat.js";
 import { esc } from "./markdown.js";
+import { toast } from "./ui.js";
 
 const RECENT_LIMIT = 5;
 const CAPS = [
@@ -15,6 +17,21 @@ let activeIndex = 0;
 let activeFilters = new Set();
 
 export function initPicker() {
+  document.getElementById("setGlobalModel")?.addEventListener("click", async () => {
+    if (!state.model) {
+      toast("先选一个模型");
+      return;
+    }
+    try {
+      const result = await api.setActiveModel(state.model, true);
+      state.activeModel = { model: state.model, source: "runtime", default: state.model };
+      toast(result.persisted ? "已设为全局默认并持久化" : "已设为全局默认（未持久化）");
+      renderGlobalHint();
+    } catch (error) {
+      toast(error?.message || "设置失败", "bad");
+    }
+  });
+
   const btn = $("#modelPickerBtn");
   const panel = $("#modelPickerPanel");
   const search = $("#modelPickerSearch");
@@ -70,10 +87,21 @@ export function initPicker() {
   });
 }
 
+// 更新全局默认模型提示（HR5）。
+function renderGlobalHint() {
+  const hint = document.getElementById("globalModelHint");
+  if (!hint) return;
+  const active = state.activeModel || {};
+  if (active.source === "runtime" && active.model) hint.textContent = `全局默认：${active.model}（运行时）`;
+  else if (active.default) hint.textContent = `全局默认：${active.default}（配置）`;
+  else hint.textContent = "未设置全局默认";
+}
+
 export function renderPicker() {
   const btn = $("#modelPickerLabel");
   if (btn) btn.textContent = labelFor(state.model) || "未配置模型";
 
+  renderGlobalHint();
   const list = $("#pickerList");
   const vendor = $("#pickerVendor");
   const capsBox = $("#pickerCaps");

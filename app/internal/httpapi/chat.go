@@ -1,17 +1,22 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"gqy/internal/agent"
 	"gqy/internal/config"
+	"gqy/internal/emote"
 	"gqy/internal/gateway"
 	"gqy/internal/goal"
+	"gqy/internal/persona"
+	"gqy/internal/plugin"
 	"gqy/internal/provider"
 	"gqy/internal/provider/openai"
 	"gqy/internal/session"
@@ -43,7 +48,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	meta := gateway.Meta{RequestID: requestIDFrom(r), SessionID: sessionIDFrom(r)}
+	meta := metaFor(r)
 	if req.Stream {
 		s.streamChat(w, r, snap, req, meta)
 		return
@@ -284,6 +289,39 @@ func titleFromContent(content string) string {
 	return content
 }
 
+// lastUserContent 取请求里最后一条 user 消息正文，用作自动表情的语境（task-13）。
+func lastUserContent(req *provider.Request) string {
+	if req == nil {
+		return ""
+	}
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		if req.Messages[i].Role == provider.RoleUser {
+			return req.Messages[i].Content
+		}
+	}
+	return ""
+}
+
+// pickEmoteEvent 向表情包插件要一张表情并投影成 emote 事件；ok=false 表示本次不发。
+func pickEmoteEvent(ctx context.Context, plugins *plugin.Manager, logger *slog.Logger, contextText string) (session.Event, bool) {
+	if plugins == nil {
+		return session.Event{}, false
+	}
+	picked, ok := (&emote.Picker{Plugins: plugins, Logger: logger}).Pick(ctx, contextText)
+	if !ok {
+		return session.Event{}, false
+	}
+	score, noneScore := picked.Score, picked.NoneScore
+	return session.Event{
+		Type:           session.EventEmote,
+		EmoteName:      picked.Name,
+		EmoteLabel:     picked.Label,
+		EmoteFile:      picked.File,
+		EmoteScore:     &score,
+		EmoteNoneScore: &noneScore,
+	}, true
+}
+
 // handleAgentChat 处理 POST /api/chat：不旁路网关；loop 存在时走工具执行闭环（S2）。
 func (s *Server) handleAgentChat(w http.ResponseWriter, r *http.Request) {
 	snap := snapshotFrom(r)
@@ -351,6 +389,9 @@ func (s *Server) handleAgentChat(w http.ResponseWriter, r *http.Request) {
 			haveUserEvent = true
 			userEvent = session.Event{Type: session.EventUser, Content: m.Content}
 		}
+	}
+	if msg := persona.Load(snap.Home).SystemMessage(); msg != "" && (len(preq.Messages) == 0 || preq.Messages[0].Role != provider.RoleSystem) {
+		preq.Messages = append([]provider.Message{{Role: provider.RoleSystem, Content: msg}}, preq.Messages...)
 	}
 	if haveUserEvent && !raw.Retry {
 		if err := session.AppendEvent(sess.EventsPath(), userEvent); err != nil {
@@ -422,7 +463,21 @@ func (s *Server) streamAgentLoop(w http.ResponseWriter, r *http.Request, snap *c
 		s.setSessionRunning(sess.ID(), true)
 		defer s.setSessionRunning(sess.ID(), false)
 	}
-	sink := &agentSink{w: w, flusher: flusher, sess: sess, started: &started, writeHeaders: writeHeaders, answer: answer, goals: s.goals, goalID: goalID}
+	sink := &agentSink{
+		w:            w,
+		flusher:      flusher,
+		sess:         sess,
+		started:      &started,
+		writeHeaders: writeHeaders,
+		answer:       answer,
+		goals:        s.goals,
+		goalID:       goalID,
+		// 自动表情（task-13）：请求 ctx、插件运行时与用户文本。
+		ctx:          r.Context(),
+		plugins:      s.plugins,
+		log:          s.log,
+		lastUserText: lastUserContent(req),
+	}
 	if _, err := s.agentLoop.Run(r.Context(), snap, req, meta, sink); err != nil {
 		if !started {
 			writeProviderError(w, err)
@@ -445,6 +500,15 @@ type agentSink struct {
 	answer       string
 	goals        *goal.Manager
 	goalID       string
+
+	// 自动表情（task-13）：Done 在写 done 之前据此挑一张表情。
+	ctx           context.Context
+	plugins       *plugin.Manager
+	log           *slog.Logger
+	lastUserText  string
+	wroteText     bool
+	questionAsked bool
+	emoteSent     bool
 }
 
 // TakeQueued 取走排队的支线消息（013/014）。
@@ -499,6 +563,9 @@ func (a *agentSink) Thinking(delta string) error {
 }
 
 func (a *agentSink) Text(delta string) error {
+	if strings.TrimSpace(delta) != "" {
+		a.wroteText = true
+	}
 	return a.appendAndWrite(session.Event{Type: session.EventText, Delta: delta})
 }
 
@@ -536,6 +603,8 @@ func (a *agentSink) Tool(rec tool.Record) error {
 }
 
 func (a *agentSink) Question(q tool.Question) (string, error) {
+	// 问过问题的回复不自动发表情（task-13）。
+	a.questionAsked = true
 	if err := a.appendAndWrite(session.Event{
 		Type:        session.EventQuestion,
 		Question:    q.Text,
@@ -551,11 +620,34 @@ func (a *agentSink) Question(q tool.Question) (string, error) {
 }
 
 func (a *agentSink) Done(usage *provider.Usage, stop provider.StopReason) error {
+	// 自动表情（task-13）：写了正文、没问过问题、且插件可选出一张时，
+	// 在最终文本之后、done 之前追加一条 emote 事件；任何失败都不影响回复流。
+	if a.canEmote() {
+		if ev, ok := pickEmoteEvent(a.ctx, a.plugins, a.log, a.lastUserText); ok {
+			a.emoteSent = true
+			if err := a.appendAndWrite(ev); err != nil {
+				a.logger().Warn("自动表情事件写入失败", "error", err)
+			}
+		}
+	}
 	se := session.Event{Type: session.EventDone, StopReason: string(stop)}
 	if usage != nil {
 		se.Usage = &session.Usage{PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens}
 	}
 	return a.appendAndWrite(se)
+}
+
+// canEmote 报告本次回复是否还该尝试自动表情：写了正文、没问过问题、同一次回复只发一条。
+func (a *agentSink) canEmote() bool {
+	return !a.emoteSent && a.wroteText && !a.questionAsked && a.sess != nil
+}
+
+// logger 返回可用日志器（未注入时用默认）。
+func (a *agentSink) logger() *slog.Logger {
+	if a.log != nil {
+		return a.log
+	}
+	return slog.Default()
 }
 
 // streamAgentChat 是未装配 agent loop 时的直通投影（保留 005 行为）。
@@ -569,6 +661,7 @@ func (s *Server) streamAgentChat(w http.ResponseWriter, r *http.Request, snap *c
 	started := false
 	var usage *session.Usage
 	stopReason := ""
+	wroteText := false
 
 	writeHeaders := func() {
 		started = true
@@ -587,6 +680,9 @@ func (s *Server) streamAgentChat(w http.ResponseWriter, r *http.Request, snap *c
 		case provider.EventThinking:
 			se = session.Event{Type: session.EventThinking, Delta: ev.Delta}
 		case provider.EventText:
+			if strings.TrimSpace(ev.Delta) != "" {
+				wroteText = true
+			}
 			se = session.Event{Type: session.EventText, Delta: ev.Delta}
 		case provider.EventToolCall:
 			se = session.Event{Type: session.EventTool, Phase: "start", ToolName: ev.Name, Arguments: ev.ArgumentsDelta}
@@ -615,6 +711,14 @@ func (s *Server) streamAgentChat(w http.ResponseWriter, r *http.Request, snap *c
 
 	if !started {
 		writeHeaders()
+	}
+	// 自动表情（task-13）：与 loop 路径一致，最终文本之后、done 之前追加 emote 事件。
+	if wroteText {
+		if ev, ok := pickEmoteEvent(r.Context(), s.plugins, s.log, lastUserContent(req)); ok {
+			_ = session.AppendEvent(sess.EventsPath(), ev)
+			_ = writeSessionEvent(w, ev)
+			flusher.Flush()
+		}
 	}
 	done := session.Event{Type: session.EventDone, Usage: usage, StopReason: stopReason}
 	if res != nil && res.Response != nil {

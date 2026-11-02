@@ -34,6 +34,9 @@ type Server struct {
 	// runMu/running 记录正在跑 loop 的会话，用于主线抢占判断（013）。
 	runMu   sync.Mutex
 	running map[string]bool
+
+	// events 是 SSE 广播中心（HR7）：配置/插件/全局模型变化实时推送。
+	events *eventHub
 }
 
 // New 构造 HTTP 服务。gw 为 nil 时只提供配置与目录端点，聊天端点返回 503。
@@ -49,10 +52,12 @@ func New(mgr *config.Manager, gw *gateway.Router, logger *slog.Logger) *Server {
 		started: time.Now(),
 		now:     time.Now,
 		running: make(map[string]bool),
+		events:  newEventHub(),
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
+	mux.HandleFunc("GET /metrics", s.handleMetrics)
 	mux.HandleFunc("GET /v1/models", s.handleModels)
 	mux.HandleFunc("POST /v1/chat/completions", s.handleChat)
 	mux.HandleFunc("POST /v1/messages", s.handleAnthropicMessages)
@@ -60,9 +65,14 @@ func New(mgr *config.Manager, gw *gateway.Router, logger *slog.Logger) *Server {
 	mux.HandleFunc("POST /api/chat", s.handleAgentChat)
 	mux.HandleFunc("GET /api/plugins", s.handlePlugins)
 	mux.HandleFunc("POST /api/plugins/reload", s.handlePluginsReload)
+	mux.HandleFunc("POST /api/plugins/install", s.handlePluginInstall)
 	mux.HandleFunc("POST /api/plugins/{id}/load", s.handlePluginLoad)
 	mux.HandleFunc("POST /api/plugins/{id}/unload", s.handlePluginUnload)
 	mux.HandleFunc("POST /api/plugins/{id}/call", s.handlePluginCall)
+	mux.HandleFunc("GET /api/plugins/{id}/settings", s.handlePluginSettingsGet)
+	mux.HandleFunc("PUT /api/plugins/{id}/settings", s.handlePluginSettingsPut)
+	mux.HandleFunc("DELETE /api/plugins/{id}", s.handlePluginDelete)
+
 	// 记忆子系统（MEM1–MEM8、blueprint/memory.md §3）：九个端点。
 	mux.HandleFunc("GET /api/memory", s.handleMemoryList)
 	mux.HandleFunc("GET /api/memory/{persona}/stats", s.handleMemoryStats)
@@ -92,9 +102,28 @@ func New(mgr *config.Manager, gw *gateway.Router, logger *slog.Logger) *Server {
 	mux.HandleFunc("POST /api/config/reload", s.handleReload)
 	mux.HandleFunc("GET /api/gateway/status", s.handleStatus)
 	mux.HandleFunc("GET /api/tools", s.handleTools)
+	mux.HandleFunc("GET /api/events", s.handleEvents)
+	mux.HandleFunc("GET /api/model/active", s.handleActiveModelGet)
+	mux.HandleFunc("PUT /api/model/active", s.handleActiveModelPut)
+	mux.HandleFunc("GET /api/persona", s.handlePersonaGet)
+	mux.HandleFunc("PUT /api/persona", s.handlePersonaPut)
 	mux.HandleFunc("GET /", s.handleStatic)
 	s.mux = mux
 	return s
+}
+
+// RefreshTools 按当前快照重建外部（插件）工具表（HR2/HR3）：
+// 插件加载/卸载/删除、配置热更新后调用，模型立即感知，无需重启。
+func (s *Server) RefreshTools() {
+	if s.agentLoop == nil || s.plugins == nil {
+		return
+	}
+	expose := true
+	if snap := s.mgr.Current(); snap != nil {
+		expose = snap.Settings.ExposeExternalTools
+	}
+	s.agentLoop.Tools.ResetExternal()
+	s.plugins.RegisterTools(s.agentLoop.Tools, expose)
 }
 
 // SetAgent 装配 agent loop；/api/chat 在 loop 存在时走工具执行闭环。
@@ -116,6 +145,7 @@ func (s *Server) Handler() http.Handler {
 	h = s.recoverer(h)
 	h = s.requestID(h)
 	h = s.withSnapshot(h)
+	h = s.tenant(h)
 	return h
 }
 

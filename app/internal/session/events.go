@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// 五事件类型（S2）；`user` 是内部日志类型，不属于 SSE 五事件。
+// 六事件类型（S2，task-13 把 emote 纳入对外事件）；`user` 是内部日志类型，不属于对外事件。
 const (
 	EventUser     = "user"
 	EventThinking = "thinking"
@@ -18,9 +18,23 @@ const (
 	EventText     = "text"
 	EventQuestion = "question"
 	EventDone     = "done"
-	// EventBranch 是主线运行中排队的支线消息（013），不属于对外五事件。
+	// EventBranch 是主线运行中排队的支线消息（013），不属于对外事件。
 	EventBranch = "branch"
+	// EventEmote 是回复完成后自动挑中的表情（task-13），排在 text 之后、done 之前，
+	// 是对外六事件之一。
+	EventEmote = "emote"
 )
+
+// Emote 是一次自动发表情的结果（task-13）。
+// Message 里只回放 name/label/file/score；NoneScore 只进 emote 事件，不随消息回放。
+type Emote struct {
+	Name  string  `json:"name"`
+	Label string  `json:"label,omitempty"`
+	File  string  `json:"file,omitempty"`
+	Score float64 `json:"score"`
+	// NoneScore 是模型判断「该语境不该发表情」的概率（emote_none_score）。
+	NoneScore float64 `json:"-"`
+}
 
 // Usage 是 done 事件携带的用量（沿用 03 C2 的形状）。
 type Usage struct {
@@ -55,6 +69,14 @@ type Event struct {
 	// 工具调用的产物路径（022）
 	ArtifactPaths []string `json:"artifact_paths,omitempty"`
 
+	// emote（task-13）：回复完成后自动挑中的表情。
+	// score/none_score 用指针，既保证零值也能按契约输出，又不会污染其他事件。
+	EmoteName      string   `json:"emote_name,omitempty"`
+	EmoteLabel     string   `json:"emote_label,omitempty"`
+	EmoteFile      string   `json:"emote_file,omitempty"`
+	EmoteScore     *float64 `json:"emote_score,omitempty"`
+	EmoteNoneScore *float64 `json:"emote_none_score,omitempty"`
+
 	// done
 	Usage      *Usage `json:"usage,omitempty"`
 	StopReason string `json:"stop_reason,omitempty"`
@@ -82,6 +104,9 @@ type Message struct {
 	Question        string   `json:"question,omitempty"`
 	QuestionOptions []string `json:"question_options,omitempty"`
 	QuestionCustom  bool     `json:"question_allow_custom,omitempty"`
+
+	// Emote 是本条助手回复的自动表情（task-13）；旧会话没有该事件，保持缺省。
+	Emote *Emote `json:"emote,omitempty"`
 }
 
 // AppendEvent 向事件流追加一行（完整行写，ST4）。
@@ -198,6 +223,19 @@ func Rebuild(events []Event) []Message {
 			cur.Question = ev.Question
 			cur.QuestionOptions = append([]string(nil), ev.Options...)
 			cur.QuestionCustom = ev.AllowCustom
+		case EventEmote:
+			if cur == nil {
+				cur = &Message{Role: "assistant"}
+			}
+			if ev.EmoteName != "" {
+				cur.Emote = &Emote{Name: ev.EmoteName, Label: ev.EmoteLabel, File: ev.EmoteFile}
+				if ev.EmoteScore != nil {
+					cur.Emote.Score = *ev.EmoteScore
+				}
+				if ev.EmoteNoneScore != nil {
+					cur.Emote.NoneScore = *ev.EmoteNoneScore
+				}
+			}
 		case EventDone:
 			if cur == nil {
 				cur = &Message{Role: "assistant"}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -72,6 +73,15 @@ func run() int {
 	api.SetPlugins(pm)
 	api.SetGoals(goal.NewManager())
 	api.SetAgent(newAgentLoop(snap, gw, pm, startup.EnableExternal))
+	// HR2/HR3/HR7：插件增删与配置切换后重建工具表，并通过 SSE 推给在线客户端。
+	pm.SetOnChange(func() {
+		api.RefreshTools()
+		api.Publish("plugins", nil)
+	})
+	mgr.Subscribe(func(snap *config.Snapshot) {
+		api.RefreshTools()
+		api.Publish("config", map[string]any{"version": snap.Version})
+	})
 	srv := &http.Server{
 		Addr:              net.JoinHostPort(startup.Host, startup.Port),
 		Handler:           api.Handler(),
@@ -81,6 +91,16 @@ func run() int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// HR1：轮询三份配置文件，改动即整份热加载（无需 SIGHUP）。
+	// 间隔默认 1s，可用 GQY_CONFIG_POLL_MS 调整（最小 100ms）。
+	poll := time.Second
+	if v := os.Getenv("GQY_CONFIG_POLL_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 100 {
+			poll = time.Duration(n) * time.Millisecond
+		}
+	}
+	go mgr.Watch(ctx, poll)
 
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)
@@ -106,6 +126,7 @@ func run() int {
 			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_ = pm.Close(closeCtx)
 			cancel()
+			gw.Close()
 			if err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Error("HTTP 服务退出", "error", err)
 				return 1
@@ -128,6 +149,7 @@ func run() int {
 			if err := pm.Close(shutdownCtx); err != nil {
 				log.Warn("插件关闭有失败", "error", err)
 			}
+			gw.Close()
 			cancel()
 			return 0
 		}
@@ -210,6 +232,7 @@ func newAgentLoop(snap *config.Snapshot, gw *gateway.Router, pm *plugin.Manager,
 			panic(err)
 		}
 	}
-	pm.RegisterTools(reg, externals)
+	// 插件动作是否暴露给模型：settings.expose_external_tools（热更新），env 只作启动兜底。
+	pm.RegisterTools(reg, snap.Settings.ExposeExternalTools || externals)
 	return agent.NewLoop(gw, reg)
 }

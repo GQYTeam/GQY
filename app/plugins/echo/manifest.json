@@ -1,10 +1,13 @@
 {
   "id": "echo",
   "name": "Echo 示例",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "回显参数，用于验证插件链路",
   "protocol": "gqy-jsonrpc-v1",
-  "command": ["node", "index.js"],
+  "command": [
+    "node",
+    "index.js"
+  ],
   "cwd": ".",
   "timeout_ms": 10000,
   "concurrency": "concurrent",
@@ -12,9 +15,34 @@
     {
       "name": "echo",
       "description": "回显 text 参数",
-      "schema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}
+      "schema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
     }
   ],
   "provides": [],
-  "requires": []
+  "requires": [],
+  "settings": [
+    {
+      "key": "prefix",
+      "title": "回显前缀",
+      "type": "string",
+      "default": "echo:",
+      "description": "回显结果的前缀"
+    },
+    {
+      "key": "uppercase",
+      "title": "转大写",
+      "type": "boolean",
+      "default": false
+    }
+  ]
 }

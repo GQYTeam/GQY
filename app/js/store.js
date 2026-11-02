@@ -9,10 +9,16 @@ export const PREF = {
 
 export const state = {
   config: null,
+  persona: { name: "GQY", tagline: "本地优先的 AI 助手网关", avatar: "", system_prompt: "" },
   health: null,
   status: null,
   models: [],
   plugins: [],
+  pluginSettings: null,
+  pluginEditing: "",
+  liveStream: null,
+  activeModel: null,
+  pluginDetail: null,
   tools: [],
   sessions: [],
   sessionQuery: "",

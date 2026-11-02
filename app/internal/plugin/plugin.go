@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gqy/internal/metrics"
 	"gqy/internal/tool"
 )
 
@@ -67,6 +68,16 @@ type Action struct {
 }
 
 // Manifest 是插件清单（P3）。
+// Setting 是插件可配置项（PL3）：WebUI 据此渲染设置表单，值存 plugin-settings。
+type Setting struct {
+	Key         string   `json:"key"`
+	Title       string   `json:"title"`
+	Type        string   `json:"type"` // string | number | boolean | select
+	Default     any      `json:"default,omitempty"`
+	Options     []string `json:"options,omitempty"`
+	Description string   `json:"description,omitempty"`
+}
+
 type Manifest struct {
 	ID          string            `json:"id"`
 	Name        string            `json:"name"`
@@ -83,8 +94,18 @@ type Manifest struct {
 	Address     string            `json:"address"`
 	Provides    []string          `json:"provides"`
 	Requires    []string          `json:"requires"`
+	// Settings 是插件声明的可配置项（PL3），可空。
+	Settings []Setting `json:"settings,omitempty"`
+	// Source 声明来源：installed（安装，只读）| local（本地自建，可改）。缺省 local。
+	Source string `json:"source,omitempty"`
+	// Expose 控制该插件动作是否暴露给模型（默认 true；HR2）。
+	Expose *bool `json:"expose,omitempty"`
 
 	Dir string `json:"-"`
+	// ReadOnly 由来源派生（PL2）：installed 为 true，禁止改动插件本体。
+	ReadOnly bool `json:"-"`
+	// Values 是加载时计算好的生效设置（默认值 + 已保存值），随 initialize 传给插件（PL3）。
+	Values map[string]any `json:"-"`
 }
 
 // ValidID 判断插件 id 合法。
@@ -242,6 +263,25 @@ type Manager struct {
 	plugins  map[string]*Instance
 	adapters map[string]Adapter
 	orphans  atomic.Int64
+	// onChange 在插件集合/状态变化后回调（HR2）：用于重建工具表，不需要重启服务。
+	onChange func()
+}
+
+// SetOnChange 注册插件变化回调；回调在锁外执行，允许重活。
+func (m *Manager) SetOnChange(fn func()) {
+	m.mu.Lock()
+	m.onChange = fn
+	m.mu.Unlock()
+}
+
+// fireChange 触发变更回调（须在锁外调用）。
+func (m *Manager) fireChange() {
+	m.mu.Lock()
+	fn := m.onChange
+	m.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
 }
 
 // NewManager 构造管理器并注册三种适配器。
@@ -284,6 +324,7 @@ func (m *Manager) Scan() error {
 			continue
 		}
 		manifest.Dir = filepath.Join(m.pluginsDir(), id)
+		deriveSource(manifest)
 
 		m.mu.Lock()
 		existing, ok := m.plugins[id]
@@ -300,6 +341,7 @@ func (m *Manager) Scan() error {
 		m.plugins[id] = newInstance(manifest, m.selectAdapter(manifest))
 		m.mu.Unlock()
 	}
+	m.fireChange()
 	return nil
 }
 
@@ -350,7 +392,29 @@ func (m *Manager) Load(ctx context.Context, id string) error {
 		return err
 	}
 
-	impl, err := inst.adapter.Load(ctx, inst.Manifest, inst.Manifest.Dir)
+	inst.Manifest.Values = m.effectiveSettings(inst.Manifest)
+	settings, err := m.EffectiveSettings(id)
+	if err != nil {
+		inst.mu.Lock()
+		inst.state = StateDiscovered
+		inst.lastError = err.Error()
+		inst.mu.Unlock()
+		return err
+	}
+	manifest := *inst.Manifest
+	manifest.Env = cloneEnv(inst.Manifest.Env)
+	if len(settings) > 0 {
+		data, err := json.Marshal(settings)
+		if err != nil {
+			inst.mu.Lock()
+			inst.state = StateDiscovered
+			inst.lastError = err.Error()
+			inst.mu.Unlock()
+			return err
+		}
+		manifest.Env["GQY_PLUGIN_SETTINGS"] = string(data)
+	}
+	impl, err := inst.adapter.Load(ctx, &manifest, manifest.Dir)
 	if err != nil {
 		// P5：加载失败回滚到 discovered，不留半成品；下次 Load 从零开始。
 		inst.mu.Lock()
@@ -368,6 +432,7 @@ func (m *Manager) Load(ctx context.Context, id string) error {
 	inst.startedAt = time.Now()
 	inst.state = StateReady
 	inst.mu.Unlock()
+	m.fireChange()
 	return nil
 }
 
@@ -406,21 +471,18 @@ func (m *Manager) Unload(ctx context.Context, id string) error {
 	inst.mu.Lock()
 	if inst.state == StateDiscovered {
 		inst.mu.Unlock()
-		m.mu.Lock()
-		delete(m.plugins, id)
-		m.mu.Unlock()
-		return nil
+		return nil // 幂等：保持 discovered，不再从实例表摘除（删除走 Delete）
 	}
 	if inst.state == StateClosing {
 		inst.mu.Unlock()
 		return nil // 幂等
 	}
 	if inst.state == StateFailed {
+		inst.state = StateDiscovered
+		inst.impl = nil
+		inst.pid = 0
 		inst.mu.Unlock()
-		m.mu.Lock()
-		delete(m.plugins, id)
-		m.mu.Unlock()
-		return nil
+		return nil // 失败实例卸载后回到 discovered，可再次 Load
 	}
 	inst.state = StateClosing
 	inst.mu.Unlock()
@@ -438,10 +500,14 @@ func (m *Manager) Unload(ctx context.Context, id string) error {
 		defer cancel()
 		_ = inst.impl.Close(closeCtx)
 	}
-	m.mu.Lock()
-	delete(m.plugins, id)
-	m.mu.Unlock()
-	return nil
+	inst.mu.Lock()
+	inst.state = StateDiscovered
+	inst.impl = nil
+	inst.pid = 0
+	inst.startedAt = time.Time{}
+	inst.mu.Unlock()
+	m.fireChange()
+	return nil // P9：卸载 = 停止实例；删除才移除目录与实例表项
 }
 
 func (m *Manager) checkDependentsLocked(id string) error {
@@ -506,6 +572,7 @@ func (m *Manager) Call(ctx context.Context, id, action string, args map[string]a
 
 	start := time.Now()
 	content, err := inst.impl.Call(callCtx, action, args)
+	elapsed := time.Since(start).Seconds()
 	inst.mu.Lock()
 	inst.calls++
 	if err != nil {
@@ -513,6 +580,26 @@ func (m *Manager) Call(ctx context.Context, id, action string, args map[string]a
 		inst.lastError = err.Error()
 	}
 	inst.mu.Unlock()
+
+	status := "ok"
+	if err != nil {
+		status = "error"
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
+			status = "timeout"
+		case errors.Is(err, context.Canceled):
+			status = "canceled"
+		}
+		metrics.Inc("gqy_plugin_failures_total", "Plugin call failures", map[string]string{
+			"plugin": id, "action": action,
+		})
+	}
+	metrics.Inc("gqy_plugin_calls_total", "Plugin calls", map[string]string{
+		"plugin": id, "action": action, "status": status,
+	})
+	metrics.Observe("gqy_plugin_call_duration_seconds", "Plugin call duration in seconds", map[string]string{
+		"plugin": id, "action": action,
+	}, elapsed)
 
 	if err != nil {
 		switch {
@@ -524,7 +611,6 @@ func (m *Manager) Call(ctx context.Context, id, action string, args map[string]a
 			return "", err
 		}
 	}
-	_ = start
 	return content, nil
 }
 
@@ -563,6 +649,10 @@ func (m *Manager) Status() []PluginStatus {
 			Actions:     actions,
 			Provides:    inst.Manifest.Provides,
 			Requires:    inst.Manifest.Requires,
+			Source:      inst.Manifest.Source,
+			ReadOnly:    inst.Manifest.ReadOnly,
+			Settings:    inst.Manifest.Settings,
+			HasSettings: len(inst.Manifest.Settings) > 0,
 		}
 		inst.mu.Unlock()
 		out = append(out, status)
@@ -578,6 +668,10 @@ func (m *Manager) RegisterTools(reg *tool.Registry, asCore bool) {
 		ready := inst.state == StateReady
 		inst.mu.Unlock()
 		if !ready {
+			continue
+		}
+		// 插件可显式声明 expose:false 隐藏自己的动作（HR2）。
+		if inst.Manifest.Expose != nil && !*inst.Manifest.Expose {
 			continue
 		}
 		for _, a := range inst.impl.Actions() {
@@ -607,6 +701,10 @@ type PluginStatus struct {
 	Actions     []string  `json:"actions"`
 	Provides    []string  `json:"provides"`
 	Requires    []string  `json:"requires"`
+	Source      string    `json:"source"`
+	ReadOnly    bool      `json:"read_only"`
+	Settings    []Setting `json:"settings,omitempty"`
+	HasSettings bool      `json:"has_settings"`
 }
 
 func contains(list []string, s string) bool {
@@ -639,4 +737,35 @@ func (m *Manager) Close(ctx context.Context) error {
 		return fmt.Errorf("plugin: 关闭失败: %s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+// 插件来源（PL2）：installed 为「在线安装」，只读；local 为「GQY 自主创建」，可改。
+const (
+	SourceInstalled = "installed"
+	SourceLocal     = "local"
+)
+
+// InstalledMarker 是安装标记文件：存在即视为在线安装，插件本体只读。
+const InstalledMarker = ".gqy-installed"
+
+// deriveSource 由标记文件与 manifest.source 派生只读语义（PL2）。
+func deriveSource(mf *Manifest) {
+	if mf.Source == "" {
+		mf.Source = SourceLocal
+	}
+	if _, err := os.Stat(filepath.Join(mf.Dir, InstalledMarker)); err == nil || mf.Source == SourceInstalled {
+		mf.Source = SourceInstalled
+		mf.ReadOnly = true
+		return
+	}
+	mf.Source = SourceLocal
+	mf.ReadOnly = false
+}
+
+func cloneEnv(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in)+1)
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }

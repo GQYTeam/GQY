@@ -279,6 +279,7 @@ async function runTurn({ answer = "", retry = false } = {}) {
     thinking: "",
     tools: [],
     branches: [],
+    emote: null,
     question: null,
     usage: null,
     stop_reason: "",
@@ -354,6 +355,18 @@ async function runTurn({ answer = "", retry = false } = {}) {
               };
               placeholder.status = "waiting";
               scheduleRender();
+              break;
+            case "emote":
+              // 正文结束后、done 之前到达：只记在当前 assistant 占位上，不新增气泡。
+              if (event.emote_name) {
+                placeholder.emote = {
+                  name: event.emote_name,
+                  label: event.emote_label || "",
+                  file: event.emote_file || "",
+                  score: Number(event.emote_score) || 0,
+                };
+                scheduleRender();
+              }
               break;
             case "done":
               placeholder.usage = event.usage || null;
@@ -517,6 +530,16 @@ export function loadSessionMessages(session) {
         duration_ms: tool.duration_ms,
         status: tool.status || "ok",
       })),
+      // 历史消息带 emote 字段时同样在回复末尾渲染（走 render.js 的同一条路径）。
+      emote:
+        message.emote && (message.emote.name || message.emote.file)
+          ? {
+              name: message.emote.name || "",
+              label: message.emote.label || "",
+              file: message.emote.file || "",
+              score: Number(message.emote.score) || 0,
+            }
+          : null,
       usage: message.usage || null,
       stop_reason: message.stop_reason || "",
       status: message.status === "incomplete" ? "incomplete" : "complete",

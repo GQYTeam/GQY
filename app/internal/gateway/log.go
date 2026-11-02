@@ -11,6 +11,7 @@ type RequestLogEntry struct {
 	TS         string `json:"ts"`
 	RequestID  string `json:"request_id"`
 	Session    string `json:"session"`
+	Tenant     string `json:"tenant,omitempty"`
 	Provider   string `json:"provider"`
 	Model      string `json:"model"`
 	Account    string `json:"account"`

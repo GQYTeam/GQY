@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -109,4 +110,98 @@ func pluginErrCode(err error) string {
 		return "canceled"
 	}
 	return "call_failed"
+}
+
+// handlePluginSettingsGet 处理 GET /api/plugins/{id}/settings（PL3）。
+func (s *Server) handlePluginSettingsGet(w http.ResponseWriter, r *http.Request) {
+	pm := s.requirePlugins(w)
+	if pm == nil {
+		return
+	}
+	id := r.PathValue("id")
+	schema, readOnly, source, err := pm.SettingSchema(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "plugin_not_found", err.Error())
+		return
+	}
+	values, err := pm.Settings(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "plugin_settings_failed", err.Error())
+		return
+	}
+	effective, err := pm.EffectiveSettings(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "plugin_settings_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id": id, "schema": schema, "values": values, "effective": effective,
+		"source": source, "read_only": readOnly,
+	})
+}
+
+// handlePluginSettingsPut 处理 PUT /api/plugins/{id}/settings（PL3）。
+func (s *Server) handlePluginSettingsPut(w http.ResponseWriter, r *http.Request) {
+	pm := s.requirePlugins(w)
+	if pm == nil {
+		return
+	}
+	var body struct {
+		Values map[string]any `json:"values"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "请求体不是合法 JSON")
+		return
+	}
+	id := r.PathValue("id")
+	if err := pm.SaveSettings(id, body.Values); err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, plugin.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, "plugin_settings_failed", err.Error())
+		return
+	}
+	effective, _ := pm.EffectiveSettings(id)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "effective": effective})
+}
+
+// handlePluginDelete 处理 DELETE /api/plugins/{id}（PL4）：卸载并删除目录与设置。
+func (s *Server) handlePluginDelete(w http.ResponseWriter, r *http.Request) {
+	pm := s.requirePlugins(w)
+	if pm == nil {
+		return
+	}
+	if err := pm.Delete(r.Context(), r.PathValue("id")); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, plugin.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, "plugin_delete_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "plugins": pm.Status()})
+}
+
+// handlePluginInstall 处理 POST /api/plugins/install（PL1）：从 https Git 仓库安装插件。
+func (s *Server) handlePluginInstall(w http.ResponseWriter, r *http.Request) {
+	pm := s.requirePlugins(w)
+	if pm == nil {
+		return
+	}
+	var body struct {
+		Source string `json:"source"`
+		ID     string `json:"id"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "请求体不是合法 JSON")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 180*time.Second)
+	defer cancel()
+	if err := pm.Install(ctx, body.Source, body.ID); err != nil {
+		writeError(w, http.StatusBadRequest, "plugin_install_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "plugins": pm.Status()})
 }

@@ -82,6 +82,10 @@
                 <select id="pickerVendor" class="picker-vendor" aria-label="按供应商过滤"></select>
               </div>
               <div class="picker-list" id="pickerList"></div>
+              <div class="picker-footer">
+                <button class="btn ghost sm" type="button" id="setGlobalModel">设为全局默认</button>
+                <span class="field-hint" id="globalModelHint"></span>
+              </div>
             </div>
           </div>
           <span class="status-pill" id="gatewayPill" title="网关运行时状态"><span class="status-dot"></span><span id="gatewayText">连接中</span></span>
@@ -194,7 +198,7 @@
             <p class="panel-sub" id="consoleSub">本会话与账号配额</p>
           </div>
         </header>
-        <div class="console-body" id="consoleBody"></div>
+        <div class="console-body" id="consoleBody" tabindex="-1"></div>
       </div>
     </section>
   </div>

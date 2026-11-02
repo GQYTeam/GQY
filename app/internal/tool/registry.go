@@ -67,6 +67,23 @@ func (r *Registry) Get(name string) (Tool, bool) {
 	return nil, false
 }
 
+// ResetExternal 清空所有「插件来源」工具（无论在 core 还是 external），
+// 用于插件/配置热更新后重建工具表，不需要重启（HR2/HR3）。
+func (r *Registry) ResetExternal() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for name, t := range r.core {
+		if _, owned := t.(Owned); owned {
+			delete(r.core, name)
+		}
+	}
+	for name, t := range r.external {
+		if _, owned := t.(Owned); owned {
+			delete(r.external, name)
+		}
+	}
+}
+
 // Core 返回核心工具，按名称排序。
 func (r *Registry) Core() []Tool { return r.list(r.core) }
 
