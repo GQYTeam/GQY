@@ -28,16 +28,23 @@ func TestWatchReloadsOnFileChange(t *testing.T) {
 	go m.Watch(ctx, 20*time.Millisecond)
 
 	// 加一个 provider，模拟用户改配置后「选择一次模型」就能用。
-	writeTestFile(t, home, "providers.json", `{"providers":[
+	// 注意：监听协程的初始快照可能晚于第一次写入（-race / 慢机器调度更慢），
+	// 那次写入不算「变化」。所以重试写入，保证至少一次变化发生在初始化之后。
+	providers2 := `{"providers":[
 		{"id":"p1","base_url":"https://p1.test/v1","default_model":"m1","models":["m1"],"accounts":[{"id":"a1","api_key":"k1"}]},
-		{"id":"p2","base_url":"https://p2.test/v1","default_model":"m2","models":["m2"],"accounts":[{"id":"a2","api_key":"k2"}]}]}`)
-
+		{"id":"p2","base_url":"https://p2.test/v1","default_model":"m2","models":["m2"],"accounts":[{"id":"a2","api_key":"k2"}]}]}`
 	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	for attempts := 0; time.Now().Before(deadline); attempts++ {
+		writeTestFile(t, home, "providers.json", providers2)
+		for i := 0; i < 10; i++ {
+			if m.Current().Version > 1 && len(m.Current().Providers) == 2 {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 		if m.Current().Version > 1 && len(m.Current().Providers) == 2 {
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 	if len(m.Current().Providers) != 2 {
 		t.Fatalf("配置未热加载：version=%d providers=%d", m.Current().Version, len(m.Current().Providers))

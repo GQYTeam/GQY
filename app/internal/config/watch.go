@@ -45,6 +45,11 @@ func (m *Manager) Watch(ctx context.Context, interval time.Duration) {
 		interval = 2 * time.Second
 	}
 	paths := m.WatchFiles()
+	// 启动时先对齐一次：如果配置文件在上次 Load 之后、Watch 之前被改过，
+	// 直接 Reload 保证「已加载状态 == 监听基线」，否则这次改动会被当成基线而永久漏掉。
+	if _, err := m.Reload(); err != nil {
+		m.setLastError(err.Error())
+	}
 	last := statFiles(paths)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
