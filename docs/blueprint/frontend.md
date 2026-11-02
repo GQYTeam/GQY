@@ -164,16 +164,18 @@ localStorage 只放 UI 偏好与轻量状态：
 - 对话：`/api/chat` SSE 五事件（thinking / tool / text / question / done）投影；Markdown-lite、代码块、工具轨迹、思考折叠、用量、停止、重试、ask_user 选项卡片。
 - 会话：创建/切换/删除/搜索、服务端草稿、URL `?session=` 可回打开、产物索引读取。
 - 附件：图片 data URL、文本文件注入、拖拽/粘贴、数量与大小预校验。
-- 控制台：用量（每回合 bar + 账号配额）、模型、供应商（只读安全视图）、网关（健康/冷却/重载）、插件（扫描/加载/卸载）、工具（契约与 schema）、外观、关于。
+- 控制台：用量（每回合 bar + 账号配额）、人格（名称/头像/系统提示词）、模型、供应商（只读安全视图）、网关（健康/冷却/重载）、插件（安装项目仓库/扫描/加载/卸载/设置/删除）、工具（契约与 schema）、外观、关于。
 - 模型选择器：搜索、能力筛选、供应商筛选、最近使用、路由组/模型分组；读取 `/v1/models` 的 `capabilities`。
 - 上下文抽屉：会话 ID、模型、消息数、上下文估算、工具轨迹、产物索引。
 - 桌面化：⌘K 命令面板、快捷键、会话日期分组、侧边栏收起、回到底部、自定义确认对话框、PWA manifest/图标。
+- 人格：控制台编辑名称/头像/系统提示词；头像 data URL 存 `$GQY_HOME/persona.json`，系统提示词由 `/api/chat` 作为 system 消息注入。
+- 插件：项目插件仓库安装按钮、设置 schema 表单、加载/卸载/删除。
 - 主题：paper / midnight / editorial / moss / dawn / dusk；减少动效；引导与视觉 Demo 对照页。
-- 来源：`/api/chat`、`/api/sessions`、`/api/config`、`/api/gateway/status`、`/api/plugins`、`/api/tools`、`/v1/models`、`/healthz`。
+- 来源：`/api/chat`、`/api/sessions`、`/api/config`、`/api/persona`、`/api/gateway/status`、`/api/plugins`、`/api/tools`、`/v1/models`、`/healthz`。
 
 ### 未实现 / 偏差
 
-- 参考 `yxxbc/gqy-agent` 的人格、记忆、知识库、图库、记账、QQ/iMessage 等控制台页面未接入；本 UI 只做网关与会话。
+- 参考 `yxxbc/gqy-agent` 的记忆、知识库、图库、记账、QQ/iMessage 等控制台页面未接入；人格只做了名称/头像/系统提示词，完整人格库未做。
 - 产物只读索引，没有预览器/代码高亮/灯箱多标签；当前只有图片灯箱。
 - 二进制附件只提示不支持，未做服务端上传与文本提取（图片/文本已可用）。
 - 语音、唤醒词、多用户登录/注册、邀请码未实现；鉴权仍是单令牌 `GQY_AUTH_TOKEN`。

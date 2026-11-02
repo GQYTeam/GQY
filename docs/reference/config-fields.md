@@ -105,6 +105,7 @@
 | `stream_idle_timeout_s` | int | 否 | 60 | 5–600；流式连续无新事件即中止 |
 | `upstream_timeout_s` | int | 否 | 120 | 1–3600；每次上游调用的整体超时 |
 | `shell_timeout_s` | int | 否 | `60` | >0 |
+| `tenants` | array | 否 | `[]` | 租户列表：`{"name","max_concurrency","req_per_min"}`，见 `agent-onboarding.md` |
 | `shell_allowlist` | string[] | 否 | `[]` | 去空白、去重、丢空项 |
 
 ### 完整样例
@@ -147,3 +148,9 @@
 - `api_key` 为空时回退 `GQY_PROVIDER_<ID>_API_KEY`（12 CF9 边角）；两者都空 → 该账号 `api_key_set=false`，不进候选。
 - 任何读接口（`GET /api/gateway/status`、`GET /api/config`、重载返回、状态接口）只返回 `api_key_set`（bool），永不含明文（12 CF8、08 A8）。
 - 日志与重载错误不打印 `api_key` 值。
+
+## 运行时环境变量（补充）
+
+| 变量 | 说明 |
+| --- | --- |
+| `GQY_CONFIG_POLL_MS` | 配置文件轮询间隔（毫秒，最小 100，默认 1000）；改动需重启进程 |

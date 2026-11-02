@@ -36,6 +36,7 @@ AuthToken == "" ?
 | `/api/auth` | 不校验（登录换 cookie 的唯一入口） |
 | 静态文件与其他路径 | 不校验（不在三组保护前缀内） |
 | `/api/*`、`/v1/*`、`/v1beta/*`（除 `/api/auth`） | 校验 |
+| `/metrics` | 校验（M1：设置令牌后要求 Bearer/cookie；未设置时只允许本机；不计入口限流） |
 
 ### Bearer 与 cookie 形状
 

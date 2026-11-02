@@ -161,9 +161,9 @@
 
 ## 7. 流式约定
 
-内部对话与前端使用 05 S2 的五种 SSE 事件；OpenAI 兼容流式使用标准 SSE 帧。
+内部对话与前端使用 05 S2 的六种 SSE 事件；OpenAI 兼容流式使用标准 SSE 帧。
 
-五种事件（`/api/chat` 与前端消息流）：
+六种事件（`/api/chat` 与前端消息流）：
 
 | 事件 | 字段 | 说明 |
 | --- | --- | --- |
@@ -171,7 +171,14 @@
 | `tool` | `name`、`arguments`、`result`、`duration_ms`、`status` | 一次工具调用的开始 / 参数 / 输出 / 耗时 / 状态（06 T9） |
 | `text` | `delta` | 正文增量 |
 | `question` | `question`、`options` | ask_user 提问：选项 / 数字键 / 自定义答案（06 T7） |
+| `emote` | `emote_name`、`emote_label`、`emote_file`、`emote_score`、`emote_none_score` | 回复末尾的自动表情（05 S8）：名称 / 标签 / 清单内相对路径 / top1 分数 / none 分数；在 `done` 之前，可缺省 |
 | `done` | `usage`、`stop_reason` | 回复结束，带用量与停止原因 |
+
+`emote` 说明：
+
+- 只在插件 `emote-pack-default` 就绪、设置 `auto_emote` 为真、`suggest` 判 `decision=emote` 且 top1 分数 ≥ `min_score` 时出现；任一条件不满足或调用失败 / 超时（3s）都静默跳过，不影响回复。
+- 事件里只有元数据，不带图片本体；前端需要图片时按需调插件动作 `show`（`inline:true`）取 data URI：`POST /api/plugins/emote-pack-default/call`，body `{"action":"show","arguments":{"name":"23-比心","inline":true}}`。
+- 历史消息重建后，该表情挂在 assistant 消息的可选 `emote` 字段：`{"name","label","file","score"}`；没有表情时省略该字段。
 
 样例：
 
@@ -180,6 +187,7 @@
 {"type":"tool","name":"edit","arguments":{"path":"a.txt","content":"hi"},"result":"已写入 a.txt","duration_ms":8,"status":"ok"}
 {"type":"text","delta":"已写入"}
 {"type":"question","question":"要继续吗？","options":["继续","取消"]}
+{"type":"emote","emote_name":"23-比心","emote_label":"比心","emote_file":"emotes/23-比心.png","emote_score":0.204695,"emote_none_score":0.021208}
 {"type":"done","usage":{"prompt_tokens":10,"completion_tokens":8},"stop_reason":"end_turn"}
 ```
 
@@ -224,3 +232,21 @@ OpenAI 兼容流式（`/v1/chat/completions`，`stream:true`）：
 - `GET /api/gateway/status`
 - `GET /`
 - `GET /api/tools`
+- `GET /api/events`（SSE：配置/插件/全局模型事件）
+- `GET /api/model/active`
+- `PUT /api/model/active`
+- `POST /api/plugins/install` —— 安装插件（本地路径或下载源，写 `.gqy-installed` 标记）
+- `GET /api/plugins/{id}/settings` —— 读插件设置 schema、已保存值与生效值
+- `PUT /api/plugins/{id}/settings` —— 按 schema 校验并保存插件设置
+- `DELETE /api/plugins/{id}` —— 卸载并删除插件目录、运行日志与设置
+- `GET /api/memory` —— 记忆子系统总览
+- `GET /api/memory/{persona}/stats` —— 某 persona 的记忆统计
+- `GET /api/memory/{persona}/facts` —— 列出事实记忆
+- `POST /api/memory/{persona}/facts` —— 新增事实记忆
+- `PATCH /api/memory/{persona}/facts/{id}` —— 修改事实记忆
+- `GET /api/memory/{persona}/episodes` —— 列出情节记忆
+- `GET /api/memory/{persona}/evicted` —— 列出被淘汰的记忆
+- `GET /api/memory/{persona}/revisions` —— 列出记忆修订历史
+- `POST /api/memory/{persona}/recall` —— 按查询召回记忆
+- `GET /api/persona` —— 读 persona 配置
+- `PUT /api/persona` —— 更新 persona 配置

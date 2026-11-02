@@ -2,7 +2,7 @@
 
 ## 1. 状态
 
-待施工（2026-11-02）。
+已实现（2026-11-02）：四层运行时、三种适配器、生命周期、并发、超时、回收、设置 schema、安装/删除。
 
 ## 2. 对应设计决定
 
@@ -257,3 +257,14 @@ failed --Unload--> closed（清理残留句柄）
 
 - `app/internal/plugin/`：`plugin.go` / `native.go` / `mcp.go` / `remote.go` / `transport.go` / `proc_unix.go` / `proc_windows.go` / `tool.go`。
 - 示例：`app/plugins/echo`（`index.js`、`manifest.json`）、`app/plugins/mcp-echo`（`index.js`、`manifest.json`）。
+
+
+## 7. 当前实现（2026-11-02）
+
+- manifest：`id` / `name` / `version` / `protocol` / `command` / `cwd` / `env` / `timeout_ms` / `concurrency` / `actions` / `provides` / `requires` / `settings` / `source`。
+- 设置：`settings[]` 只支持 `string` / `number` / `boolean` / `select`；值存 `$GQY_HOME/plugin-settings/<id>.json`（0600），插件目录不动；`GET|PUT /api/plugins/{id}/settings`；加载时把「默认值 + 已保存值」以 `GQY_PLUGIN_SETTINGS` 环境变量注入进程。
+- 来源：`source: local|installed`；`plugins/<id>/.gqy-installed` 存在即 installed，插件本体只读。
+- 安装：`POST /api/plugins/install` 接受 `{source: https Git URL, id}`，`git clone --depth 1` → manifest 校验 → 复制到 `$GQY_HOME/plugins/<id>` → 打安装标记 → 扫描；拒绝符号链接、重复 id、超过 128 MB。
+- 删除：`DELETE /api/plugins/{id}` 先卸载，再删除插件目录与设置，路径必须在 `plugins/` 内。
+- WebUI：插件页展示来源/状态/动作/设置，安装项目插件仓库（ShowImages / EmotePack），设置表单按 schema 渲染；保存后若插件运行中则自动卸载/重载。
+- 测试：`internal/plugin/plugin_test.go`、`settings_test.go`、`install_test.go`、`repos_test.go`。
